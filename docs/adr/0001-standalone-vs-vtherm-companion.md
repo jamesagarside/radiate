@@ -1,6 +1,6 @@
 # ADR-0001: Standalone house controller, not a Versatile Thermostat companion
 
-- **Status:** Proposed, awaiting owner decision
+- **Status:** Accepted (2026-11-16, owner)
 - **Date:** 2026-11-16
 - **Deciders:** project owner
 - **Evidence:** [coverage matrix](../research/coverage-matrix.md), [VTherm analysis](../research/vtherm.md), [Better Thermostat analysis](../research/better-thermostat.md), [commercial survey](../research/commercial.md)
@@ -44,17 +44,15 @@ Same as B, but v1 also ships VTherm and Better Thermostat adapters.
 - **Pros:** widest audience at launch.
 - **Cons:** triples the test matrix before the core algorithm is proven; the VTherm adapter is still blocked on a runtime cap.
 
-## Decision (proposed)
+## Decision
 
-**Option B, built so that C can follow.** Radiate is a standalone house controller. Internally, room actuation sits behind a `RoomActuator` interface with one v1 implementation (direct TRVZB via HA number entities, so it works under both Zigbee2MQTT and ZHA). After v1:
+**Option B: standalone.** Radiate owns the house model, room control, valve driving, boiler and hot water as one system.
 
-1. Add a **Better Thermostat adapter** writing its runtime `valve_max_opening` number, for people who prefer BT's room control and only want Radiate's balancing and boiler.
-2. Offer VTherm an upstream PR adding a runtime-writable max opening (number entity or service). If accepted, add a **VTherm adapter**, ideally via its plugin API rather than config rewrites.
-3. In either adapter mode, Radiate freezes cap changes while the room controller's own learner is unsettled, and changes caps slowly (hours, not minutes) to keep the loops separated in time.
+No VTherm or Better Thermostat adapters are planned. People without Home Assistant use the standalone service or the cloud version instead (see [ADR-0002](0002-deployment-topology.md)), so a "bring your own room controller" mode adds test burden without widening the audience much. Room actuation still sits behind a `RoomActuator` interface, so this can be revisited cheaply.
 
 ## Consequences
 
-- CLAUDE.md's "prefer building on VTherm" is superseded for the core; VTherm becomes a future integration target, not a dependency.
+- CLAUDE.md's "prefer building on VTherm" is superseded. VTherm is prior art, not a dependency.
 - The spec must cover a room controller (model-based with PI fallback), not just balancing.
 - MIT-licensed VTherm code may be consulted and, if ported, keeps its notice. Better Thermostat is AGPL: behaviour only.
 - The owner's reference house uses Radiate alone. Do not run VTherm or BT on the same TRVs at the same time: two writers to one valve fight.
@@ -62,5 +60,5 @@ Same as B, but v1 also ships VTherm and Better Thermostat adapters.
 
 ## Revisit if
 
-- VTherm adds a runtime cap and a learning-freeze hook, making option A cheap.
+- VTherm adds a runtime cap and a learning-freeze hook, and users ask for it.
 - Radiate's room control proves materially worse than VTherm in the simulator or in the reference house after one heating season.

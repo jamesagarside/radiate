@@ -1,6 +1,6 @@
 # Radiate
 
-**Source-available, local-first hydronic balancing and boiler orchestration for Home Assistant.**
+**Source-available, local-first hydronic balancing and boiler orchestration. Runs standalone, as a Home Assistant App, or with the Radiate cloud.**
 
 Plumbers balance a heating system by hand, turning the lockshield valve on each radiator to throttle the ones nearest the boiler so the far ones get their share of hot water. Radiate does that job in software, continuously, using smart radiator valves you already own.
 
@@ -15,16 +15,25 @@ Radiate aims to close that gap without a subscription and without the internet.
 ## Goals
 
 - **Whole-house balancing.** Learn how quickly each radiator heats up after the boiler fires and cap the maximum opening of over-supplied radiators so under-supplied ones get flow.
-- **Local only.** Runs entirely inside Home Assistant. No cloud, no account.
-- **Works alongside existing integrations.** Designed to complement per-room controllers such as Versatile Thermostat and Better Thermostat rather than replace them.
+- **Local first.** The control loop always runs in your home: on a Raspberry Pi, as a Home Assistant App, or on the cloud edition's local edge. No subscription needed to heat your house; the cloud adds remote access and history, never control features.
+- **Whole-house, not per room.** One model of every room, radiator, the boiler and the hot-water store, optimised together, so rooms warm up together and the burner runs fewer, longer burns.
 - **Other heat sources.** Pause learning for rooms heated by an open fire, range cooker, wood burner or sun, so they aren't mistaken for over-supplied radiators.
 - **Boiler-aware.** Aggregate room demand into a single boiler call with minimum burn and minimum off times to prevent short-cycling (important for oil and older non-modulating boilers), and schedule a hot-water store separately.
 - **Observable.** Expose learned parameters and decisions as Home Assistant entities, with optional export to external stores for analysis.
 - **Safe failure.** If Home Assistant or Radiate stops, valves and boiler fall back to sensible local behaviour.
 
+## Editions
+
+| Edition | For | UI |
+|---|---|---|
+| Standalone (Docker, Raspberry Pi) | No Home Assistant | Built-in web UI |
+| Home Assistant App | Home Assistant OS | Same UI in the sidebar, plus entities via the HACS integration |
+| Cloud | Remote access, history, several homes | Hosted UI; a small local edge still runs the control loop |
+
+See [ADR-0002](docs/adr/0002-deployment-topology.md).
+
 ## Non-goals
 
-- Replacing a per-room PID/TPI controller.
 - Modulating boiler flow temperature (OpenTherm etc.), at least initially.
 - Certification under DIN 94679-4 or similar. Radiate is a community tool, not a certified balancing procedure.
 
@@ -43,7 +52,8 @@ Other TRVs that expose a writable valve position should follow.
 
 - [Prior art and gap analysis](docs/research/prior-art.md)
 - [Feature coverage matrix](docs/research/coverage-matrix.md)
-- [ADR-0001: standalone vs VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md) (proposed)
+- [ADR-0001: standalone, not a VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md)
+- [ADR-0002: one engine, three editions](docs/adr/0002-deployment-topology.md)
 - Source analyses: [Versatile Thermostat](docs/research/vtherm.md), [Better Thermostat](docs/research/better-thermostat.md), [commercial products](docs/research/commercial.md), [provenance](docs/research/provenance.md)
 - [Reverse-engineering and clean-room policy](docs/research/reverse-engineering-policy.md)
 
