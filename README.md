@@ -42,6 +42,9 @@ Other TRVs that expose a writable valve position should follow.
 ## Documentation
 
 - [Prior art and gap analysis](docs/research/prior-art.md)
+- [Feature coverage matrix](docs/research/coverage-matrix.md)
+- [ADR-0001: standalone vs VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md) (proposed)
+- Source analyses: [Versatile Thermostat](docs/research/vtherm.md), [Better Thermostat](docs/research/better-thermostat.md), [commercial products](docs/research/commercial.md), [provenance](docs/research/provenance.md)
 - [Reverse-engineering and clean-room policy](docs/research/reverse-engineering-policy.md)
 
 ## Licence
