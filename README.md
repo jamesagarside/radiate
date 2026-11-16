@@ -1,6 +1,6 @@
 # Radiate
 
-**Open-source, local-first hydronic balancing and boiler orchestration for Home Assistant.**
+**Source-available, local-first hydronic balancing and boiler orchestration for Home Assistant.**
 
 Plumbers balance a heating system by hand, turning the lockshield valve on each radiator to throttle the ones nearest the boiler so the far ones get their share of hot water. Radiate does that job in software, continuously, using smart radiator valves you already own.
 
@@ -46,4 +46,4 @@ Other TRVs that expose a writable valve position should follow.
 
 ## Licence
 
-[Apache License 2.0](LICENSE)
+[Elastic License 2.0](LICENSE) (ELv2). Free to use, modify and self-host. You may not offer Radiate as a hosted or managed service, or remove licensing notices. ELv2 is source-available rather than OSI-approved open source.
