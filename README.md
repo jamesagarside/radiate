@@ -8,6 +8,8 @@ Plumbers balance a heating system by hand, turning the lockshield valve on each 
 
 ## Try it
 
+![Radiate web UI running the simulated house: lounge fire detected and its radiator closed, boiler on one long burn](docs/images/ui-demo.png)
+
 ```bash
 uv venv && uv pip install -e ".[dev]"
 .venv/bin/radiate serve --demo --speed 60

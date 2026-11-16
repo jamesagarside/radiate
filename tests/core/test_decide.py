@@ -119,3 +119,17 @@ def test_decide_is_deterministic():
     a = drive(EngineState.new(CFG), 30, dict(temps))
     b = drive(EngineState.new(CFG), 30, dict(temps))
     assert a == b
+
+
+def test_warm_up_before_learned_lag_is_not_a_fire():
+    # Boiler flowing, lounge TRV calling and rising fast within the first minutes:
+    # that is the radiator, not a fire.
+    st = EngineState.new(CFG)
+    relay = False
+    for m in range(40):
+        t = 16.0 + max(0, m - 3) * 0.03  # 1.8 K/h once heat arrives
+        temps = {"bed": 20.5, "lounge": t, "loo": 19.0, "stairs": 20.0}
+        s = snap(m * 60.0, temps, relay=relay)
+        acts = decide(CFG, s, st)
+        relay = acts.heating_relay
+    assert not st.rooms["lounge"].dist.fire

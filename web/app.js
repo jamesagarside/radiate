@@ -36,6 +36,7 @@ const LEARNING = {
   window: "learning paused: window",
   shower: "learning paused: shower",
   cooker_spike: "learning paused: cooking",
+  unexplained_heat: "learning paused: extra heat (sun or guests?)",
   store_recovery: "learning paused: hot water",
   setpoint_change: "settling",
   no_data: "gathering data",

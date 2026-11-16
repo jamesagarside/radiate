@@ -35,6 +35,7 @@ class DisturbanceState:
     fire_quiet_since: float | None = None
     fire_holdoff_until: float = 0.0
     spike_until: float = 0.0
+    spike_kind: str = "cooker_spike"
     residual_high_since: float | None = None
     humidity: list[tuple[float, float]] = field(default_factory=list)
     temps: list[tuple[float, float]] = field(default_factory=list)
@@ -49,7 +50,7 @@ class DisturbanceState:
         if now < self.shower_until:
             return "shower"
         if now < self.spike_until:
-            return "cooker_spike"
+            return self.spike_kind
         return None
 
 
@@ -140,11 +141,13 @@ def update(
         if sustained:
             if now >= st.spike_until:
                 raised.append("cooker_spike")
+            st.spike_kind = "cooker_spike"
             st.spike_until = now + SPIKE_HOLD_S
     elif sustained:
         # Sun, guests, cooking in an ordinary room: just do not learn from it.
         if now >= st.spike_until:
             raised.append("unexplained_heat")
+        st.spike_kind = "unexplained_heat"
         st.spike_until = now + SPIKE_HOLD_S
 
     return raised

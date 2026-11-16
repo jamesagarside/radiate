@@ -206,7 +206,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             heating = temp is not None and temp < target
         avail = flowing and st.flow_since is not None and now - st.flow_since >= rs.arrival_lag_s
         u = flow_fraction(opening) if heating and avail else 0.0
-        if u > 0.0:
+        # "Could this radiator be getting heat?" ignores the learned arrival lag: a
+        # radiator can warm the room before Radiate's lag estimate says it should.
+        if flowing and heating and opening > 0:
             rs.closed_since = None
         elif rs.closed_since is None:
             rs.closed_since = now
