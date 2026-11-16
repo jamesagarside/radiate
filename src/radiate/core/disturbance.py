@@ -15,7 +15,9 @@ WINDOW_HOLD_S = 30 * 60
 SHOWER_RISE = 8.0
 SHOWER_HOLD_S = 45 * 60
 FIRE_RISE_KPH = 0.8
-FIRE_RESIDUAL_KPH = 1.5
+FIRE_RESIDUAL_KPH = 2.0
+FIRE_VALVE_CLOSED_S = 30 * 60  # radiator must have been off this long
+FIRE_MIN_CONFIDENCE = 0.6
 FIRE_HOLDOFF_S = 4 * 3600
 FIRE_CLEAR_S = 30 * 60
 SPIKE_RESIDUAL_KPH = 1.0
@@ -63,6 +65,8 @@ def update(
     slope_kph: float | None,
     residual_kph: float | None,
     drive: float,
+    closed_for_s: float = 0.0,
+    confidence: float = 0.0,
 ) -> list[str]:
     """Advance detectors. Returns the names of flags that were newly raised."""
     raised: list[str] = []
@@ -103,9 +107,21 @@ def update(
 
     if cfg.heat_source is HeatSource.EPISODIC:
         evidence = bool(fire_switch)
-        if slope_kph is not None and slope_kph > FIRE_RISE_KPH and drive < IDLE_DRIVE:
+        # Rising although the radiator has been off long enough to be cold.
+        if (
+            slope_kph is not None
+            and slope_kph > FIRE_RISE_KPH
+            and drive < IDLE_DRIVE
+            and closed_for_s >= FIRE_VALVE_CLOSED_S
+        ):
             evidence = True
-        if sustained and residual_kph is not None and residual_kph > FIRE_RESIDUAL_KPH:
+        # Rising much faster than a well-learned model explains.
+        if (
+            sustained
+            and confidence >= FIRE_MIN_CONFIDENCE
+            and residual_kph is not None
+            and residual_kph > FIRE_RESIDUAL_KPH
+        ):
             evidence = True
         if evidence:
             if not st.fire:

@@ -72,6 +72,7 @@ class RoomState:
     target: float = 18.0  # effective target this tick (schedule, mode, optimum start)
     preheating: bool = False
     deadline_s: float | None = None
+    closed_since: float | None = None  # radiator receiving no heat since
     slope: float | None = None
     residual: float | None = None
 
@@ -205,6 +206,10 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             heating = temp is not None and temp < target
         avail = flowing and st.flow_since is not None and now - st.flow_since >= rs.arrival_lag_s
         u = flow_fraction(opening) if heating and avail else 0.0
+        if u > 0.0:
+            rs.closed_since = None
+        elif rs.closed_since is None:
+            rs.closed_since = now
         drive_target = st.supply * u
         rs.drive += (drive_target - rs.drive) * (1.0 - math.exp(-dt / RADIATOR_TAU_S))
 
@@ -225,6 +230,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             slope_kph=rs.slope,
             residual_kph=rs.residual,
             drive=rs.drive,
+            closed_for_s=now - rs.closed_since if rs.closed_since is not None else 0.0,
+            confidence=rs.est.confidence,
         )
         for flag in raised:
             reasons.append(
