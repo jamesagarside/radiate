@@ -378,7 +378,7 @@ A thermal simulator of the reference house (`src/radiate/sim`) drives the same `
 
 ## 12. Open questions
 
-1. Can the Shelly 2PM channel 1 power reading show burner firing with the planned wiring? Ask the OFTEC engineer to wire so it can, or add a separate meter on the boiler supply.
+1. Can the Shelly 2PM channel 1 power reading show burner firing with the planned wiring? Ask the OFTEC engineer to wire so it can, or add a separate meter on the boiler supply. Simulation shows this matters: Radiate cuts relay starts by 80 %, but physical burner starts are set by the boiler's own thermostat cycling inside long calls (see `docs/simulation.md`). Reducing those needs the firing signal.
 2. Will the owner fit a flow pipe clamp sensor? It replaces the inferred heat availability with a measured one.
 3. Heatslave 12/14 nozzle rating and the boiler thermostat setting, for oil accounting and the simulator.
 4. Freedom-to-operate check on EP1936290 and EP2420748 before marketing balancing in Germany or the EU.

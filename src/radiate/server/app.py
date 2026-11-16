@@ -18,7 +18,9 @@ RUNTIME = web.AppKey("runtime", Runtime)
 TOKEN = web.AppKey("token", str)
 INGRESS_IP = web.AppKey("ingress_ip", str)
 SUPERVISOR_INGRESS_IP = "172.30.32.2"
-WEB_DIR = Path(os.environ.get("RADIATE_WEB_DIR", Path(__file__).resolve().parents[3] / "web"))
+_PKG_WEB = Path(__file__).resolve().parents[1] / "web"  # installed wheel
+_REPO_WEB = Path(__file__).resolve().parents[3] / "web"  # source checkout
+WEB_DIR = Path(os.environ.get("RADIATE_WEB_DIR") or (_PKG_WEB if _PKG_WEB.exists() else _REPO_WEB))
 
 
 @web.middleware

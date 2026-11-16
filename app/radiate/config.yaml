@@ -1,0 +1,30 @@
+name: Radiate
+version: "0.1.0-dev"
+slug: radiate
+description: Whole-house hydronic balancing and boiler control, local first
+url: https://github.com/jamesagarside/radiate
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+boot: auto
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:radiator
+panel_title: Radiate
+hassio_api: true
+discovery:
+  - radiate
+services:
+  - mqtt:want
+options:
+  demo: true
+  token: ""
+  elastic_url: ""
+  elastic_api_key: ""
+schema:
+  demo: bool
+  token: password?
+  elastic_url: url?
+  elastic_api_key: password?

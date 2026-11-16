@@ -24,6 +24,19 @@ def _serve(args: argparse.Namespace) -> None:
 
     async def main() -> None:
         runtime = Runtime(house_config(), DemoDriver())
+        session = None
+        if os.environ.get("RADIATE_ELASTIC_URL"):
+            import aiohttp
+
+            from radiate.export.elastic import ElasticExporter
+
+            session = aiohttp.ClientSession()
+            runtime.exporter = ElasticExporter(
+                os.environ["RADIATE_ELASTIC_URL"],
+                os.environ.get("RADIATE_ELASTIC_API_KEY", ""),
+                runtime.house_id,
+            )
+            runtime.exporter.start(session)
         # One simulated minute per real `1/speed` minutes.
         runtime.start(interval_s=60.0 / args.speed)
         app = create_app(

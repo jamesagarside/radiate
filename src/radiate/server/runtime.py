@@ -63,6 +63,7 @@ class Runtime:
         default_factory=lambda: deque(maxlen=2880)
     )
     listeners: list[asyncio.Queue] = field(default_factory=list)
+    exporter: object | None = None  # radiate.export.elastic.ElasticExporter
     _task: asyncio.Task | None = None
 
     def __post_init__(self) -> None:
@@ -77,10 +78,14 @@ class Runtime:
         await self.driver.apply(actions)
         self.last_actions, self.last_snapshot = actions, snap
         self.relay_history.append((now, actions.heating_relay, actions.store_relay))
+        logged = []
         for r in [*actions.reasons, *actions.alerts]:
             if r.code.startswith(("boiler.", "disturbance.", "safe_mode.")):
                 self._log(now, r)
+                logged.append((r.code, r.message, r.room_id))
         payload = self.describe()
+        if self.exporter is not None:
+            self.exporter.record(payload, logged)
         for q in list(self.listeners):
             if q.full():
                 with contextlib.suppress(asyncio.QueueEmpty):

@@ -4,7 +4,22 @@
 
 Plumbers balance a heating system by hand, turning the lockshield valve on each radiator to throttle the ones nearest the boiler so the far ones get their share of hot water. Radiate does that job in software, continuously, using smart radiator valves you already own.
 
-> **Status:** pre-alpha. Design and research stage. Nothing to install yet.
+> **Status:** pre-alpha. The control core, simulator, web UI, Home Assistant integration and App are in place and tested against a simulated house. Real device drivers (Zigbee2MQTT, Shelly) are next. Do not connect it to a real boiler yet.
+
+## Try it
+
+```bash
+uv venv && uv pip install -e ".[dev]"
+.venv/bin/radiate serve --demo --speed 60
+```
+
+Open http://localhost:8099 to watch a simulated 9-radiator house, 60 times faster than real time. Compare Radiate with plain smart TRVs:
+
+```bash
+.venv/bin/radiate sim --days 5
+```
+
+Tests: `.venv/bin/pytest` (core, simulator, server). Home Assistant integration tests need the HA harness: `uv pip install pytest-homeassistant-custom-component` in a separate venv, then `pytest tests/ha`.
 
 ## Why
 
@@ -51,6 +66,8 @@ Other TRVs that expose a writable valve position should follow.
 ## Documentation
 
 - [Prior art and gap analysis](docs/research/prior-art.md)
+- [Specification](docs/spec.md)
+- [Simulation findings](docs/simulation.md)
 - [Feature coverage matrix](docs/research/coverage-matrix.md)
 - [ADR-0001: standalone, not a VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md)
 - [ADR-0002: one engine, three editions](docs/adr/0002-deployment-topology.md)
