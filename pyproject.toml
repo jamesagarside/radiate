@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "radiate"
+version = "0.1.0.dev0"
+description = "Local-first whole-house hydronic balancing and boiler orchestration"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+server = ["aiohttp>=3.10"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "aiohttp>=3.10", "ruff>=0.6"]
+
+[project.scripts]
+radiate = "radiate.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/radiate"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/core", "tests/sim", "tests/server"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501", "SIM102"]
