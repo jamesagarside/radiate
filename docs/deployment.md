@@ -7,7 +7,7 @@ This page covers every way to run Radiate today. Radiate is pre-alpha: the devic
 | [From source](#from-source-with-uv) | Development, trying the demo | Used day to day by contributors |
 | [Standalone Docker](#standalone-docker) | Any Linux host without Home Assistant | Image builds locally; not published to a registry |
 | [Raspberry Pi](#raspberry-pi) | A small dedicated box | Not tested on a Pi yet |
-| [Home Assistant App](#home-assistant-app) | Home Assistant OS and Supervised installs | Demo mode works; see the known issue for real devices |
+| [Home Assistant App](#home-assistant-app) | Home Assistant OS and Supervised installs | Demo mode tested; real devices untested |
 | [HACS integration](#hacs-integration) | Entities and services in Home Assistant, for any of the above | Tested with the Home Assistant test harness |
 | [Online demo](#online-demo) | A first look | |
 
@@ -187,8 +187,6 @@ The App runs the Radiate server in a container managed by the Home Assistant Sup
 4. Read the App's **Log** tab. It shows configuration notes and, in dry run, each write Radiate would have made.
 
 The App keeps state in its `/data` folder, which Home Assistant includes in its backups.
-
-> **Known issue:** with demo mode off, the App currently fails to start. `run.py` passes `--data-dir /data` to `radiate serve`, but the command does not accept that option yet. Demo mode is not affected.
 
 ### Ingress
 
