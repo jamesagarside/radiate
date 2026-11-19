@@ -8,16 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from radiate import __version__
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
+from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.persist import dump_state, load_state
 from radiate.core.types import BoilerState, RoomRole
+
+LOG = logging.getLogger(__name__)
 
 
 class Driver(Protocol):
@@ -39,6 +44,8 @@ class Driver(Protocol):
 
     # Optional: `next_change_s(room_id) -> float | None`, seconds until the room's
     # schedule next changes its setpoint. Without it, overrides last until cleared.
+    # Optional: `history_days`, days of ticks to record in the state database. Only the
+    # live driver sets it, so the demo never records.
 
 
 OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
@@ -84,6 +91,8 @@ class Runtime:
     exporter: object | None = None  # radiate.export.elastic.ElasticExporter
     store: object | None = None  # radiate.server.store.Store; None keeps state in memory
     save_every_s: float = 300.0
+    wall: Callable[[], float] = field(default=lambda: time.time())  # Unix time
+    recorder: object | None = None  # radiate.server.history.Recorder; set by restore()
     _saved_at: float | None = None
     _alert_keys: set[tuple[str, str | None, str]] = field(default_factory=set)
     _task: asyncio.Task | None = None
@@ -94,7 +103,12 @@ class Runtime:
     # --- persistence ---------------------------------------------------------------------
 
     def restore(self) -> list[str]:
-        """Load the house id, mode and engine state from the store, if any."""
+        """Load the house id, mode and engine state from the store, if any.
+
+        With a history (the driver's `history_days`), this also starts recording, and
+        when there is no usable saved engine state it warms the learner by replaying
+        the recorded history (spec 4.3).
+        """
         if self.store is None:
             return []
         saved_id = self.store.get("house_id")
@@ -103,18 +117,53 @@ class Runtime:
         else:
             self.store.put("house_id", self.house_id)
         saved_rt = self.store.get("runtime")
+        wall = self.wall()
         if saved_rt is not None and isinstance(saved_rt[0], dict):
             with contextlib.suppress(ValueError):
                 self.mode = Mode(saved_rt[0].get("mode", "auto"))
-            self._restore_overrides(saved_rt[0].get("overrides"), time.time() - saved_rt[1])
+            self._restore_overrides(saved_rt[0].get("overrides"), wall - saved_rt[1])
+        now = self.driver.clock()
+        data, elapsed = None, 0.0
         saved = self.store.get("engine")
-        if saved is None:
-            return []
-        data, saved_wall = saved
-        elapsed = max(0.0, time.time() - saved_wall)
-        self.state, problems = load_state(self.cfg, data, self.driver.clock(), elapsed)
-        self._saved_at = self.driver.clock()
+        if saved is not None:
+            data, saved_wall = saved
+            elapsed = max(0.0, wall - saved_wall)
+        history = self._open_history()
+        if history is not None and needs_bootstrap(data):
+            data = self._bootstrap(history, data, wall)
+        problems: list[str] = []
+        if data is not None:
+            self.state, problems = load_state(self.cfg, data, now, elapsed)
+            self._saved_at = now
+        if history is not None:
+            from radiate.server.history import Recorder
+
+            # The start entry records exactly how this state was built, for replay.
+            self.recorder = Recorder(history, int(wall * 1000), now, wall, data, elapsed)
         return problems
+
+    def _open_history(self):
+        days = getattr(self.driver, "history_days", None)
+        if self.store is None or not isinstance(days, (int, float)) or days <= 0:
+            return None
+        from radiate.server.history import History
+
+        try:
+            return History(self.store, float(days))
+        except Exception as err:  # history is a convenience: never stop the server
+            LOG.warning("history: cannot open: %s", err)
+            return None
+
+    def _bootstrap(self, history, data: object, wall: float) -> object:
+        try:
+            merged, ticks = bootstrap(self.cfg, history.recent(wall), data)
+        except Exception as err:
+            LOG.warning("bootstrap: skipped: %s", err)
+            return data
+        if merged is None:
+            return data
+        LOG.info("bootstrap: learned room models from %d recorded ticks", ticks)
+        return merged
 
     def save(self) -> None:
         if self.store is None:
@@ -227,10 +276,14 @@ class Runtime:
             self.mode, self.overrides, now < self.store_boost_until, self.fire
         )
         actions = decide(self.cfg, snap, self.state)
+        recorder = self.recorder
+        compact = recorder.compact(actions) if recorder is not None else None
         await self.driver.apply(actions)
         driver_alerts = getattr(self.driver, "alerts", None)
-        if callable(driver_alerts):
-            actions.alerts.extend(driver_alerts())
+        extra = driver_alerts() if callable(driver_alerts) else []
+        actions.alerts.extend(extra)
+        if recorder is not None:
+            recorder.record(self.wall(), snap, compact, extra, self.state, snap.now)
         if self.store is not None and (
             self._saved_at is None or now - self._saved_at >= self.save_every_s
         ):

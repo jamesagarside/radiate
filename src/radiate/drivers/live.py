@@ -76,6 +76,8 @@ class LiveDriver:
         self._last_store = False
         self._handover = False  # safe mode: boiler left to the Shelly watchdog
         self._pending: set[asyncio.Task] = set()
+        # Days of ticks the runtime records for replay and bootstrap (spec 4.3, 6).
+        self.history_days = site.history_days
 
     # --- clock -----------------------------------------------------------------------
 
