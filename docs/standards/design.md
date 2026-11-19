@@ -25,13 +25,13 @@ All colours are CSS custom properties on `:root`, with a dark set under `@media 
 | `--muted` | `#67615b` | `#a39b92` | Secondary text, labels |
 | `--line` | `#e6e1da` | `#34302b` | Borders |
 | `--heat` | `#d95f24` | `#f08a4b` | Burns, valve bars, the brand mark |
-| `--heat-soft` | `#fbe3d6` | `#3d2618` | Background for heating and fire states |
+| `--heat-soft` | `#fbe3d6` | `#3d2618` | Background for heating, topping up and fire states |
 | `--ember` | `#b53c0b` | `#f5a06a` | Text on `--heat-soft` |
-| `--cool` | `#386787` | `#7fb2d6` | Rest, store, demo banner, focus ring, the sign-in button |
-| `--cool-soft` | `#dde9f2` | `#1d2c37` | Background for rest, heat sink and demo |
+| `--cool` | `#386787` | `#7fb2d6` | Rest, store, demo banner, focus ring, the sign-in button, a held setpoint |
+| `--cool-soft` | `#dde9f2` | `#1d2c37` | Background for rest, heat sink, demo and a held setpoint |
 | `--ok` | `#2a7253` | `#6cc59c` | Comfortable |
 | `--ok-soft` | `#dcefe5` | `#17302a` | Background for comfortable |
-| `--warn` | `#975300` | `#f0b45a` | Lead, preheating, alerts, dry run, stale data |
+| `--warn` | `#975300` | `#f0b45a` | Lead, preheating, alerts, dry run, stale data, a stuck valve, short-cycling |
 | `--warn-soft` | `#fbecd2` | `#36290f` | Background for those states |
 
 Colour carries meaning, so keep it consistent: heat colours for anything burning or calling, cool for resting and hot water, green for comfortable, amber for waiting or needing attention. Every coloured state also has a text label, so colour is never the only signal.
@@ -90,7 +90,7 @@ Bars meet 3:1 against their track: `--heat` on `--surface-2` is 3.2:1 in light m
 | Animate movement with `transform` and `opacity` only | Valve bars and the burn guard scale with `transform: scaleX()` from the left. Never animate `width`, `height`, margins or padding. |
 | Strong ease-out for anything the user caused or that moves | `--ease-out: cubic-bezier(0.23, 1, 0.32, 1)`. Never `ease-in`. |
 | Stay under 300 ms | Press feedback 160 ms, bars 240 ms, colour changes 150 ms with plain `ease`. |
-| Press feedback on everything pressable | `transform: scale(0.97)` on `:active` for `.btn` and the segmented control. |
+| Press feedback on everything pressable | `transform: scale(0.97)` on `:active` for `.btn`, the segmented control and text links; `scale(0.95)` for the small setpoint buttons, so the press still shows. |
 | Hover only for real pointers | Hover styles live inside `@media (hover: hover) and (pointer: fine)`. |
 | Respect reduced motion | Under `prefers-reduced-motion: reduce`, movement and press scaling stop; opacity and colour fades stay. |
 | No animation on keyboard-driven changes | Keyboard actions apply instantly. |
@@ -107,8 +107,9 @@ New UI that enters or leaves (a sheet, a toast) starts from `scale(0.95)` and `o
 - The focus ring is `outline: 2px solid var(--cool)` with a 2px offset on `:focus-visible`. Never remove it.
 - The status line is `aria-live="polite"`, so screen readers hear the boiler state change without being interrupted.
 - Decorative graphics (the brand mark, the guard bar) are `aria-hidden="true"`. Graphics that carry data, such as the timeline, have an `aria-label`.
-- Touch targets are at least 44 px tall on touch screens. Under `(pointer: coarse)`, buttons, the segmented controls and the token field get `min-height: 44px` (segment buttons also `min-width: 44px`). Desktop buttons stay about 32 px tall.
+- Touch targets are at least 44 px tall on touch screens. Under `(pointer: coarse)`, buttons, the segmented controls and the token field get `min-height: 44px` (segment buttons also `min-width: 44px`), the setpoint buttons grow to 44 by 44 px, and text links get 13 px of padding above and below, cancelled by a negative margin, so the hit area grows without moving the layout. Desktop buttons stay about 32 px tall.
 - The alerts toggle is a `<button>` with `aria-expanded` and `aria-controls`. Sign-in errors use `role="alert"`.
+- The setpoint stepper is a `role="group"` labelled with the room name. Each button has its own label ("Raise Lounge setpoint by 0.5°") and the value is `aria-live="polite"`, so each press is read out. A button is disabled at 5° or 28°.
 
 Stale data is the one deliberate exception to the contrast rule: it dims to 55% opacity so it reads as out of date, and the status line above it keeps full contrast and says how old it is.
 
@@ -116,7 +117,8 @@ Stale data is the one deliberate exception to the contrast rule: it dims to 55% 
 
 UI text follows the same writing rules as the docs: UK English, metric units, no em or en dashes as punctuation, plain words.
 
-- **Point first.** Say the state, then the detail: "Burner on for 12 min." then "Heating Lounge, Bedroom 3."
+- **Point first.** Say the state, then the detail: "Burner on for 12 min." then "Heating Lounge and Bedroom 3."
+- **Say why the burner is on.** When no room is calling, the status line names the rooms the heat is going to and why: "Burner on for 290 min, topping up Bedroom 2 and Dining room to save a second burn soon." or "Burner on for 6 min to finish its minimum burn, with the heat going to Toilet." When the hot-water store is on, it ends with "Hot water on."
 - **Room name first in reasons**: "Lounge: fire lit, radiator closed and learning paused". Reasons come from the core's `Reason.message`, so write them there with the UI in mind.
 - **Plain words over internal terms.** "Opening valves" for the `lead` state, "Resting" for `rest`, "learning paused: hot water" for the `store_recovery` gate. Glossary terms appear where the reader needs them, such as "Opening limit" and "Supply factor".
 - **Sentence case** for labels and buttons: "Boost hot water", "Fire lit".
@@ -138,11 +140,23 @@ Every view has to make sense in each of these states. When you add a component, 
 | Alerts | What needs attention, in words | Amber "Needs attention" panel under the rooms, one alert per list item. A problem shared by several rooms is one line, for example "TRV not reachable (8 rooms): Bedroom 1, …". After four lines the rest sit behind "Show N more" |
 | Sign-in | That the server needs its token | When the API answers 401, a sign-in card replaces the page. The token is kept in `localStorage` and sent as a Bearer header and as the stream's first message. Never shown through Home Assistant ingress or in the demo |
 | Safe mode | That the boiler is stopping and why | Shown as an alert |
-| Boiler states | Idle, opening valves, firing, resting, with minimum burn and minimum off progress | Chip, status line and guard bar |
-| Room states | Heating, preheating, heat sink, fire lit, comfortable, waiting, bypass | Badge per room card |
+| Boiler states | Idle, opening valves, firing, resting, with minimum burn and minimum off progress, and why the burner is on | Chip, status line and guard bar. The guard bar and countdown use the effective minimum off from `state` |
+| Short-cycling | That minimum off has been raised and for how long | Line under the guard bar with an amber "Short-cycling" tag: "Minimum off raised to 15 min for the next 23 h 30 min, so the burner starts less often." Hidden when `boiler.short_cycle` is absent or null |
+| Daily accounting | Burner time and starts today, how well balanced yesterday was | "Burner today" (hours, starts, and litres and kWh when a nozzle rating is set) and "Balance, yesterday" (score out of 100, and "Last room 22 min after the first" for the median arrival spread) in the statistics. "No full day yet" until a day has closed. Servers without `accounting` show the old "Burner hours" total |
+| Room states | Heating, preheating, topping up, heat sink, fire lit, comfortable, waiting, bypass | Badge per room card. "Topping up" (heat colours) is a burn extension, which keeps the burner on; "Heat sink" (cool) is a room opened only so the heat has somewhere to go. Each has a one-line reason on the card. A server without `extend` shows "Topped up" |
+| Setpoint held | That the schedule is overridden, until when, and how to undo it | Stepper turns cool; the label reads "Held until 22:30", "Held for 1 h 20 min" or "Held until cleared", with a "Resume schedule" link. A failed change reads "Not saved. Try again." in amber |
+| Stuck valve | That a radiator stays cold when it should heat | Amber line on the card: "Valve may be stuck: radiator stayed cold for 3 burns." Also in the alerts |
 | Learning paused | Why the room is not learning | Metadata line under each room, for example "learning paused: window" |
 | Passive room | That Radiate observes but does not control it | Badge "Bypass, not controlled"; the valve bar is hidden |
 | Missing data | Which values are unknown | `–` placeholder |
+
+## Components
+
+**Room card.** Name and badge; the room temperature with the target after an arrow; the setpoint row; the stuck-valve line when it applies; the opening limit bar; one reason line; learned-model metadata; the fire button for rooms with an open fire.
+
+**Setpoint row.** Shown for every controllable room. On the left, "Setpoint" or the hold; on the right, a stepper (minus, value, plus) in steps of 0.5 °C from 5 to 28 °C. Presses change the value at once and are sent together 600 ms after the last one, so several quick presses make one request. The page then asks for the state straight away, as the server only streams once a tick. The value stays as pressed until a state confirms it, or for 5 s. A hold ends at the next scheduled change by default.
+
+**Boiler statistics.** Burner today, starts in the last hour, predicted burn, yesterday's balance score and the supply factor. Secondary detail sits under a value in 0.75rem muted text. Every value is optional: a missing key or a null shows `–`.
 
 ## Phone width
 

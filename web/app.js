@@ -13,8 +13,18 @@ const fmtT = (t) => (t == null ? "–" : `${t.toFixed(1)}°`);
 const mins = (s) => `${Math.max(0, Math.round(s / 60))} min`;
 const clock = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// "Lounge", "Lounge and Kitchen", "Lounge, Kitchen and Toilet".
+const names = (list) => (list.length < 2 ? list.join("") : `${list.slice(0, -1).join(", ")} and ${list.at(-1)}`);
+// 80 -> "1 h 20 min", 45 -> "45 min", 3000 -> "2 days".
+const span = (m) => {
+  if (m >= 2880) return `${Math.round(m / 1440)} days`;
+  if (m < 60) return `${m} min`;
+  const rest = m % 60;
+  return rest ? `${Math.floor(m / 60)} h ${rest} min` : `${m / 60} h`;
+};
 
 const cards = new Map();
+const rooms = new Map(); // latest state per room, for the setpoint control
 let last = null;
 let lastAt = null;
 let house = null;
@@ -125,7 +135,10 @@ function badgeFor(r) {
   if (r.fire) return ["Fire lit", "fire"];
   if (r.preheating) return ["Preheating", "preheat"];
   if (r.calling) return ["Heating", "calling"];
-  if (r.topup) return ["Heat sink", "sink"];
+  // Older servers send `topup` without `extend`, so cannot tell the two apart.
+  if (r.topup && r.extend === true) return ["Topping up", "extend"];
+  if (r.topup && r.extend === false) return ["Heat sink", "sink"];
+  if (r.topup) return ["Topped up", "sink"];
   if (r.temperature != null && r.target != null && r.temperature >= r.target - 0.3) return ["Comfortable", "ok"];
   return ["Waiting", ""];
 }
@@ -157,25 +170,166 @@ function ensureCard(r) {
       try { await post(`rooms/${r.id}/fire`, { lit }); } catch { fire.setAttribute("aria-pressed", String(!lit)); }
     });
   }
+  const stepper = node.querySelector(".stepper");
+  stepper.setAttribute("aria-label", `${r.name} setpoint`);
+  for (const btn of stepper.querySelectorAll(".step")) {
+    const step = Number(btn.dataset.step);
+    btn.setAttribute("aria-label", `${step < 0 ? "Lower" : "Raise"} ${r.name} setpoint by 0.5°`);
+    btn.addEventListener("click", () => nudge(r.id, step));
+  }
+  node.querySelector(".hold-clear").addEventListener("click", () => resumeSchedule(r.id));
   $("rooms").appendChild(node);
   cards.set(r.id, node);
   return node;
 }
 
+// Setpoint control. Presses change the shown value at once and are sent together
+// once the reader pauses, so five quick taps are one request, not five. The pending
+// value stays until a state shows the server holding it.
+const SETPOINT_MIN = 5;
+const SETPOINT_MAX = 28;
+const SEND_AFTER_MS = 600;
+const PENDING_MAX_MS = 5000;
+const setpoints = new Map(); // room id -> { pending, timer, expiry, error, clearing }
+
+function control(id) {
+  if (!setpoints.has(id)) setpoints.set(id, { pending: null, timer: null, expiry: null, error: "", clearing: false });
+  return setpoints.get(id);
+}
+
+function heldSetpoint(r) {
+  const c = control(r.id);
+  if (c.pending != null) return c.pending;
+  if (r.override?.setpoint != null && !c.clearing) return r.override.setpoint;
+  return r.setpoint ?? r.target ?? null;
+}
+
+function nudge(id, step) {
+  const r = rooms.get(id);
+  if (!r) return;
+  const c = control(id);
+  const base = heldSetpoint(r) ?? 20;
+  const next = Math.min(SETPOINT_MAX, Math.max(SETPOINT_MIN, Math.round((base + step) * 2) / 2));
+  if (next === base) return;
+  c.pending = next;
+  c.error = "";
+  c.clearing = false;
+  clearTimeout(c.timer);
+  clearTimeout(c.expiry);
+  c.timer = setTimeout(() => sendSetpoint(id), SEND_AFTER_MS);
+  renderRoom(r);
+}
+
+async function sendSetpoint(id) {
+  const c = control(id);
+  c.timer = null;
+  const value = c.pending;
+  try {
+    await post(`rooms/${id}/setpoint`, { setpoint: value });
+  } catch {
+    if (c.pending === value) {
+      c.pending = null;
+      c.error = "Not saved. Try again.";
+    }
+    if (rooms.has(id)) renderRoom(rooms.get(id));
+    return;
+  }
+  // Let go of the pending value if no state confirms it, for example after a restart.
+  c.expiry = setTimeout(() => {
+    if (c.pending === value && !c.timer) {
+      c.pending = null;
+      if (rooms.has(id)) renderRoom(rooms.get(id));
+    }
+  }, PENDING_MAX_MS);
+  refresh();
+}
+
+async function resumeSchedule(id) {
+  const c = control(id);
+  clearTimeout(c.timer);
+  c.timer = null;
+  c.pending = null;
+  c.error = "";
+  c.clearing = true;
+  if (rooms.has(id)) renderRoom(rooms.get(id));
+  try {
+    await post(`rooms/${id}/setpoint`, { setpoint: null });
+  } catch {
+    c.clearing = false;
+    c.error = "Not saved. Try again.";
+    if (rooms.has(id)) renderRoom(rooms.get(id));
+    return;
+  }
+  refresh();
+}
+
+// The server streams once a tick; ask for the state now so a change shows at once.
+async function refresh() {
+  try { render(await transport.state()); } catch { /* the stream catches up */ }
+}
+
+function holdText(o) {
+  if (o.until === "cleared") return "Held until cleared";
+  if (o.expires_in_min == null) return "Held until the next change";
+  if (o.until === "duration") return `Held for ${span(o.expires_in_min)}`;
+  return last ? `Held until ${clock((last.minute_of_day + o.expires_in_min) % 1440)}` : "Held until the next change";
+}
+
+function controllable(r) {
+  const known = house?.rooms?.find((h) => h.id === r.id);
+  return known ? known.controllable : r.role !== "passive";
+}
+
 function renderRoom(r) {
   // `last` is set before rooms render, so the next-setpoint clock is current.
   const n = ensureCard(r);
+  rooms.set(r.id, r);
   const [label, kind] = badgeFor(r);
   const badge = n.querySelector(".badge");
   badge.textContent = label;
   badge.dataset.kind = kind;
   n.querySelector(".now").textContent = fmtT(r.temperature);
-  n.querySelector(".target").textContent = r.target != null ? `→ ${r.target.toFixed(1)}°` : r.setpoint != null ? `set ${r.setpoint.toFixed(1)}°` : "";
+
+  // Setpoint control and any hold on it.
+  const c = control(r.id);
+  if (c.pending != null && !c.timer && r.override?.setpoint === c.pending) {
+    c.pending = null;
+    clearTimeout(c.expiry);
+  }
+  if (c.clearing && !r.override) c.clearing = false;
+  const canSet = controllable(r);
+  const sp = n.querySelector(".sp");
+  sp.hidden = !canSet;
+  const target = n.querySelector(".target");
+  target.textContent = r.target != null ? `→ ${r.target.toFixed(1)}°` : !canSet && r.setpoint != null ? `set ${r.setpoint.toFixed(1)}°` : "";
+  if (canSet) {
+    const shown = heldSetpoint(r);
+    const held = c.pending == null && !c.clearing && r.override?.setpoint != null;
+    sp.dataset.held = String(held || c.pending != null);
+    sp.dataset.error = String(Boolean(c.error));
+    sp.querySelector(".sp-val").textContent = fmtT(shown);
+    const [down, up] = sp.querySelectorAll(".step");
+    down.disabled = shown != null && shown <= SETPOINT_MIN;
+    up.disabled = shown != null && shown >= SETPOINT_MAX;
+    sp.querySelector(".sp-label").textContent = c.error || (held ? holdText(r.override) : "Setpoint");
+    sp.querySelector(".hold-clear").hidden = !held;
+  }
+
+  // Stuck-valve check (spec 7): the radiator stayed cold for burns in a row.
+  const flag = n.querySelector(".flag");
+  flag.hidden = !r.valve?.untrusted;
+  if (r.valve?.untrusted) {
+    flag.textContent = r.valve.misses
+      ? `Valve may be stuck: radiator stayed cold for ${plural(r.valve.misses, "burn", "burns")}.`
+      : "Valve may be stuck: radiator not warming.";
+  }
   const opening = r.opening ?? 0;
   n.querySelector(".valve-val").textContent = r.opening == null ? "–" : `${opening}%`;
   n.querySelector(".fill").style.transform = `scaleX(${opening / 100})`;
   n.dataset.idle = String(!(r.calling || r.topup));
   let reason = r.reason || "";
+  if (!r.calling && r.topup && r.extend === true) reason = "Topped up now so it does not need a second burn soon.";
+  if (!r.calling && r.topup && r.extend === false) reason = "Opened so the burner's heat has somewhere to go.";
   if (!reason && r.role === "passive") reason = "Manual valve, always open: counted as the system's open path.";
   if (!reason && r.heat_source === "continuous") reason = "Range cooker heat is learned as a steady background.";
   if (!reason && r.next_setpoint != null && r.next_in_min != null && last) {
@@ -221,22 +375,17 @@ function render(s) {
   last = s;
   const b = s.boiler;
   const firing = b.state === "firing";
-  const status = {
-    idle: "Boiler idle. Rooms are within comfort.",
-    lead: "Opening valves before calling the burner.",
-    firing: `Burner on for ${mins(b.burn_elapsed_s)}.`,
-    rest: `Burner resting: minimum off time, ${mins(b.state_elapsed_s)} so far.`,
-  }[b.state];
-  const calling = s.rooms.filter((r) => r.calling).map((r) => r.name);
-  $("status").textContent = calling.length ? `${status} Heating ${calling.join(", ")}.` : status;
+  const minBurn = house?.boiler.min_burn_s ?? 480;
+  // Effective minimum off: raised for a day after short-cycling. Older servers only
+  // report the configured value, in /house.
+  const minOff = b.min_off_s ?? house?.boiler.min_off_s ?? 600;
+  $("status").textContent = statusLine(s, minBurn);
   $("outdoor").textContent = s.outdoor != null ? `Outside ${s.outdoor.toFixed(1)}°` : "";
   for (const btn of $("mode").querySelectorAll("button")) btn.setAttribute("aria-checked", String(btn.dataset.mode === s.mode));
 
   const chip = $("boiler-chip");
   chip.textContent = { idle: "Idle", lead: "Opening valves", firing: "Firing", rest: "Resting" }[b.state];
   chip.dataset.state = b.state;
-  const minBurn = house?.boiler.min_burn_s ?? 480;
-  const minOff = house?.boiler.min_off_s ?? 600;
   const guard = $("guard");
   let frac = 0;
   if (firing) frac = Math.min(1, b.burn_elapsed_s / minBurn);
@@ -252,8 +401,9 @@ function render(s) {
   lane(document.querySelector(".lane.store"), s.timeline.store, s.timeline.window_s);
   $("s-starts").textContent = `${b.starts_last_hour}`;
   $("s-pred").textContent = b.predicted_burn_min ? `${b.predicted_burn_min} min` : "–";
-  $("s-hours").textContent = s.telemetry?.burner_hours != null ? s.telemetry.burner_hours.toFixed(1) : "–";
-  $("s-supply").textContent = b.supply.toFixed(2);
+  renderAccounting(s);
+  $("s-supply").textContent = b.supply != null ? b.supply.toFixed(2) : "–";
+  renderShortCycle(b);
 
   const banner = $("banner");
   if (s.telemetry?.simulated) {
@@ -267,6 +417,79 @@ function render(s) {
   lastAt = new Date();
   delete document.body.dataset.link;
   if (!house) loadHouse();
+}
+
+// Why the burner is doing what it is doing, point first. When no room is calling,
+// say what the heat is for, so a long burn with every room comfortable makes sense.
+function statusLine(s, minBurn) {
+  const b = s.boiler;
+  const active = s.rooms.filter((r) => r.role !== "passive");
+  const calling = active.filter((r) => r.calling).map((r) => r.name);
+  const extending = active.filter((r) => !r.calling && r.topup && r.extend === true).map((r) => r.name);
+  const sinks = active.filter((r) => !r.calling && r.topup && r.extend !== true).map((r) => r.name);
+  const water = s.store?.relay ? " Hot water on." : "";
+  const on = `Burner on for ${mins(b.burn_elapsed_s)}`;
+  const extend = (list) => `topping up ${names(list)} to save a second burn soon`;
+  switch (b.state) {
+    case "idle":
+      return water ? `Heating idle.${water}` : "Boiler idle. Rooms are within comfort.";
+    case "lead":
+      return `Opening valves before calling the burner.${calling.length ? ` Heating ${names(calling)}.` : ""}${water}`;
+    case "rest":
+      return `Burner resting: minimum off time, ${mins(b.state_elapsed_s)} so far.${water}`;
+    case "firing":
+      if (calling.length) {
+        const also = extending.length ? ` Also ${extend(extending)}.` : "";
+        return `${on}. Heating ${names(calling)}.${also}${water}`;
+      }
+      if (extending.length) return `${on}, ${extend(extending)}.${water}`;
+      if (b.burn_elapsed_s < minBurn) {
+        const into = sinks.length ? `, with the heat going to ${names(sinks)}` : "";
+        return `${on} to finish its minimum burn${into}.${water}`;
+      }
+      return `${on}. Stopping now that rooms are warm.${water}`;
+    default:
+      return "";
+  }
+}
+
+// Accounting per local day (spec 5.6). Absent on older servers, and today's values
+// are partial, so every field may be missing or null.
+function renderAccounting(s) {
+  const today = s.accounting?.today;
+  const yesterday = s.accounting?.yesterday;
+  const label = $("s-today-label");
+  if (today) {
+    label.textContent = "Burner today";
+    $("s-today").textContent = today.burner_hours != null ? `${today.burner_hours.toFixed(1)} h` : "–";
+    const parts = [];
+    if (today.starts != null) parts.push(plural(today.starts, "start", "starts"));
+    if (today.litres != null) parts.push(`${today.litres.toFixed(1)} L`);
+    if (today.kwh != null) parts.push(`${Math.round(today.kwh)} kWh`);
+    $("s-today-sub").textContent = parts.join(", ");
+  } else {
+    label.textContent = "Burner hours";
+    const total = s.telemetry?.burner_hours;
+    $("s-today").textContent = total != null ? total.toFixed(1) : "–";
+    $("s-today-sub").textContent = "";
+  }
+  const balance = yesterday?.balance;
+  $("s-balance").textContent = balance?.score != null ? `${Math.round(balance.score)}/100` : "–";
+  let note = "No full day yet";
+  if (yesterday) note = balance?.score != null ? "" : "No burns with two or more rooms";
+  if (balance?.arrival_spread_min != null) note = `Last room ${Math.round(balance.arrival_spread_min)} min after the first`;
+  $("s-balance-sub").textContent = note;
+}
+
+function renderShortCycle(b) {
+  const sc = b.short_cycle;
+  const box = $("short-cycle");
+  box.hidden = !sc;
+  if (!sc) return;
+  const off = b.min_off_s != null ? `${Math.round(b.min_off_s / 60)} min` : null;
+  const raised = off ? `Minimum off raised to ${off}` : `Minimum off raised by ${sc.extra_off_min} min`;
+  const ends = sc.ends_in_h != null ? ` for the next ${span(Math.max(1, Math.round(sc.ends_in_h * 60)))}` : "";
+  $("short-cycle-text").textContent = `${raised}${ends}, so the burner starts less often.`;
 }
 
 // Dry run: the live driver reads devices but holds back every write.
