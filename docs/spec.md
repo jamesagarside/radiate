@@ -334,7 +334,7 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 | `POST /api/v1/mode` | `{"mode": "auto"}` | `auto`, `off` or `frost` |
 | `GET /api/v1/stream` | | WebSocket: the state on connect and after every tick |
 
-Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` needs `Authorization: Bearer <token>`. In the HA App, requests from the Supervisor's ingress address (`RADIATE_INGRESS_IP`) that carry an `X-Ingress-Path` header are trusted without a token. The web UI at `/` and `/static/` is not protected.
+Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` needs `Authorization: Bearer <token>`. Browsers cannot set headers on a WebSocket, so `stream` also accepts the token as its first message, `{"token": "<token>"}`; it waits up to 10 s and closes with code 4401 if the token is missing or wrong. In the HA App, requests from the Supervisor's ingress address (`RADIATE_INGRESS_IP`) that carry an `X-Ingress-Path` header are trusted without a token. The web UI at `/` and `/static/` is not protected.
 
 ### 8.2 Home Assistant integration
 
