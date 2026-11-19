@@ -2,7 +2,7 @@
 
 ## What this is
 
-A local-first, subscription-free whole-house hydronic balancing and boiler controller. One engine, three editions: standalone service with web UI, Home Assistant App (plus a thin HACS integration), and a cloud version whose control loop still runs on a local edge. See README.md, docs/adr/ and docs/spec.md.
+A local-first, subscription-free whole-house hydronic balancing and boiler controller. One engine, three editions: standalone service with web UI, Home Assistant App (plus a thin HACS integration), and a planned cloud version whose control loop still runs on a local edge. See README.md, docs/adr/ and docs/spec.md.
 
 ## Owner preferences
 
@@ -19,6 +19,7 @@ A local-first, subscription-free whole-house hydronic balancing and boiler contr
 - `docs/GLOSSARY.md`: before naming code or writing docs. Use its terms; it maps each to its code identifier.
 - `docs/standards/engineering.md`: before changing `src/`, `custom_components/` or `app/`. Pure core, drivers, time handling, safety rules, testing.
 - `docs/standards/design.md`: before changing `web/` or any UI text. Tokens, motion, accessibility, copy.
+- `docs/implementation-status.md`: before saying a feature exists, and in the same change as any code that builds one. `docs/spec.md` marks unbuilt parts **Not yet implemented** and owner decisions **Open question**: leave an open question for the owner to settle.
 - `docs/deployment.md`: when changing the CLI, Dockerfiles, `app/`, env vars or the watchdog. Keep it accurate.
 - `CONTRIBUTING.md`: test, lint and simulator commands, including the separate `.venv-ha` for `tests/ha`.
 - `docs/README.md`: index of everything else.

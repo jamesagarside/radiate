@@ -4,7 +4,7 @@ The shared language for Radiate. Use these words in code, docs, UI text, commit 
 
 Units follow the spec: °C for temperatures, K for differences, K/h for heating and cooling rates, 1/h for loss rates, and % for valve openings. Code keeps times in seconds (`_s`), the configuration file uses minutes (`_min`), and the UI shows minutes.
 
-Terms that docs or code use inconsistently are listed under [Ambiguities](#ambiguities) at the end.
+Questions about terms or behaviour that are still open are listed under [Ambiguities](#ambiguities) at the end.
 
 ## House and rooms
 
@@ -43,7 +43,7 @@ The temperature the TRV measures at the radiator. Used for arrival lag, and as t
 Symbol `T_trv`, °C. Code: `RoomInput.trv_temperature` (Zigbee2MQTT `local_temperature`).
 
 **TRV bias**:
-The offset added to `T_trv` to estimate room temperature. Default -1.5 K, because the TRV sits beside its radiator and reads high while the radiator is warm. Fixed: it is not refined from observations (see [ambiguity 21](#ambiguities)).
+The offset added to `T_trv` to estimate room temperature. Default -1.5 K, because the TRV sits beside its radiator and reads high while the radiator is warm. Fixed: it is not refined from observations, because no single offset fits both a cold and a warm radiator (see [spec 4.6](spec.md#46-learning-gates-and-exclusions)).
 Code: `RoomConfig.trv_bias_k`, config key `rooms[].trv_bias_k`.
 
 **TRV setpoint frame**:
@@ -180,33 +180,33 @@ The share of boiler flow each open radiator gets. It falls as more valves open.
 Symbol `S`, 0 to 1. Code: `supply_factor`, `EngineState.supply`, Elastic `supply.factor`.
 
 **Kappa**:
-How strongly the supply factor falls with total opening.
+How strongly the supply factor falls with total opening. Fixed at 0.15; learning it is planned.
 Symbol `κ`, dimensionless. Code: `HouseConfig.supply_kappa`.
 
 **Bypass equivalent**:
-The always-open path through the bypass radiator, counted in fully open radiators.
+The always-open path through the bypass radiator, counted in fully open radiators. Default 0.4.
 Symbol `κ_bypass`. Code: `HouseConfig.bypass_equivalent`.
 
 **Heat availability**:
-Whether hot water is reaching a radiator: 0 while the boiler is off or the store has priority, and only after the arrival lag once flow starts.
-Symbol `φ`, 0 to 1. Code: computed inline in `decide` (`flowing`, `avail`); no named field.
+Whether hot water is reaching a radiator: 0 while the boiler is off or the store has priority, and 1 once the arrival lag has passed after flow starts.
+Symbol `φ`, 0 or 1. Code: computed inline in `decide` (`flowing`, `avail`); no named field.
 
 **Drive**:
-The low-pass filtered product of supply factor, flow fraction and heat availability for one radiator. It is the heating input to the room model.
+The product of supply factor, flow fraction and heat availability for one radiator, low-pass filtered with a 15-minute time constant. It is the heating input to the room model.
 Unit 0 to 1. Code: `RoomState.drive`.
 
 **Arrival lag**:
-Time from heat becoming available to a clear rise in a radiator's TRV internal temperature. Short lag means near the boiler or high flow. The median of the last 15 measurements.
+Time from heat becoming available to a clear rise in a radiator's TRV internal temperature: a 0.6 K rise within 40 minutes of flow starting. Short lag means near the boiler or high flow. The median of the last 15 measurements, and 8 minutes before the first.
 Symbol `τ_r`, min. Code: `RoomState.arrival_lag_s`, `RoomState.lag_samples`, HA sensor `arrival_lag`, Elastic `model.arrival_lag_min`.
 _Avoid_: delay, warm-up time.
 
 **Flow sensitivity**:
-How much a room's observed heating gain changes with the supply factor. A flow-limited room (`η >= 0.5`) is helped by balancing; an emitter-limited room (`η < 0.2`) is not, because its radiator is too small.
+How much a room's observed heating gain changes with the supply factor. A flow-limited room (`η >= 0.5`) is helped by balancing; an emitter-limited room (`η < 0.2`) is not, because its radiator is too small. Not learned yet: every room uses 0.7, so every room counts as flow-limited.
 Symbol `η`, dimensionless. Code: `AllocRoom.eta`, `EMITTER_LIMITED_ETA`.
 
 **Learning gate**:
 A rule that stops a sample being used to update a room model. A room is learning when no gate is closed.
-Code: `RoomState.learning_gate`, values `fire`, `fire_holdoff`, `window`, `shower`, `cooker_spike`, `unexplained_heat`, `store_recovery`, `setpoint_change`, `no_data`, `trv_offline`. Elastic `learning.gate`.
+Code: `RoomState.learning_gate`, values `fire`, `fire_holdoff`, `window`, `shower`, `cooker_spike`, `unexplained_heat`, `no_heat`, `valve_untrusted`, `valve_leaking`, `valve_rejected`, `no_data`, `trv_offline`, `store_recovery`, `setpoint_change`, and `starting` before the first tick. Elastic `learning.gate`.
 
 **Disturbance**:
 A detected event that heats or cools a room for reasons other than its radiator. Each one closes a learning gate while it lasts.
@@ -263,7 +263,7 @@ The time until a preheating room's next scheduled setpoint applies. The allocato
 Code: `RoomState.deadline_s`, `AllocRoom.deadline_h`, `DEADLINE_SAFETY`.
 
 **Lockshield cap**:
-A room's long-run opening limit: the 90th percentile of its allocated openings while the boiler fires. Radiate writes it whenever the room is not being allocated, so balancing persists without Radiate. Named after the plumber's lockshield valve.
+A room's long-run opening limit: the 90th percentile of its allocated openings while the boiler fires, from a histogram that decays by half in about 23 hours of firing, and 60 % until there is enough data. Radiate writes it whenever the room is not being allocated, so balancing persists without Radiate. Named after the plumber's lockshield valve.
 Symbol `L_r`, %. Code: `RoomState.lockshield`, `RoomState.lockshield_hist`, Elastic `valve.lockshield_pct`.
 _Avoid_: cap (on its own), max opening.
 
@@ -306,7 +306,7 @@ How long the current calling rooms need the burner, taken from the target arriva
 Symbol `B`, min. Code: `predicted_burn_s` in `decide`, API `boiler.predicted_burn_min`.
 
 **Top-up**:
-A temporary target a little above setpoint given to a room that is not calling, so it absorbs heat during a burn. Covers both burn extension and heat sinks.
+A temporary target a little above the room's target given to a room that is not calling, so it absorbs heat during a burn: `max(target + 0.3, min(T₀ + 0.5, target + 1.0))`, where `T₀` is the temperature when the top-up started. Covers both burn extension and heat sinks.
 Code: `RoomState.topup`, `_topup_target`, `TOPUP_K`, Elastic `demand.topup`.
 
 **Burn extension**:
@@ -315,17 +315,17 @@ Code: `RoomState.extend`, reason `boiler.topup`, API `rooms[].extend`, UI badge 
 _Avoid_: heat sink for this case; the UI status line says "topping up Bedroom 2 to save a second burn soon".
 
 **Heat sink**:
-A room opened as somewhere for the burner's heat to go, because too few radiators are open. Also called a dump room in the spec.
+A room opened as somewhere for the burner's heat to go, because too few radiators are open. Older text called it a dump room, and the reason code keeps that name.
 Code: `_ensure_sink`, reason `boiler.dump_room`, API `rooms[].topup` with `extend` false, UI badge "Heat sink".
-_Avoid_: dump room in UI text.
+_Avoid_: dump room.
 
 **Open-path guarantee**:
-Before and during a burn, open radiators plus the bypass equivalent must add up to at least the sink minimum (default 1.5 fully open radiators). If not, Radiate opens heat sinks.
+During lead and firing, the rooms calling or topped up, each counted as one fully open radiator, plus the bypass equivalent must add up to at least the sink minimum (default 1.5 fully open radiators). If not, Radiate opens heat sinks.
 Code: `HouseConfig.sink_min`, `_ensure_sink`.
 
 **Stuck valve**:
-A radiator that stays cold for several burns in a row while its valve should be open and other radiators warm. Radiate alerts and stops trusting that valve until it warms again.
-Code: `ValveCheck` in `radiate.core.health`, reason `valve.stuck`, API `rooms[].valve` (`untrusted`, `misses`), UI line "Valve may be stuck".
+A radiator that stays cold for three burns in a row while its valve should be open and other radiators warm. Radiate alerts and stops trusting that valve until it warms again.
+Code: `ValveCheck` in `radiate.core.health`, reason `valve.stuck`, API `rooms[].valve` (`untrusted`, `misses`), HA binary sensor "Stuck valve", UI line "Valve may be stuck".
 
 **Leaking valve**:
 A radiator that warms during a burn while its valve should be shut: the TRV's reading rises at least 1 K against the room sensor in 2 of the last 5 judged burns. Usually lost calibration or a worn seat. Radiate alerts, stops trusting the valve and pauses learning for the room until 5 judged burns in a row stay cool. The spec calls this "rise with valve closed".
@@ -371,12 +371,15 @@ A local day Radiate did not see in full: it started after midnight (a first inst
 Code: `DayTotals.partial`, `PARTIAL_AFTER_S` in `radiate.core.accounting`, API `accounting.{today,yesterday}.partial`, Elastic `radiate.partial_day`.
 
 **Starts per hour**:
-The most relay starts allowed in any 60 minutes. Default 3.
+The most relay starts allowed in any 60 minutes. Default 3. Always relay starts, never burner starts.
 Code: `BoilerConfig.max_starts_per_hour`, `BoilerGuard.starts_last_hour`.
 
 **Relay start**:
 The heating relay switching on. Radiate controls these.
-_Avoid_: burner start, which is the burner firing; the boiler's own thermostat can cycle the burner several times within one relay start.
+_Avoid_: burner start for this.
+
+**Burner start**:
+The burner itself firing. The boiler's own thermostat can cycle the burner several times within one relay start. Radiate can't see burner starts without a burner-firing signal; the simulator counts them as "physical burner starts".
 
 **Frost threshold**:
 Any room below it makes the boiler fire regardless of pooling. Default 7 °C. Below the hard frost threshold, 5 °C, the start also ignores minimum off and starts per hour.
@@ -536,26 +539,17 @@ The local standalone server that runs the control loop for the cloud edition. No
 
 ## Ambiguities
 
-For the lead. Each item names the conflict and a suggested resolution.
+What is still open after the spec was reconciled with the code in November 2026. The earlier items are settled: the spec now uses the terms above, describes the code where the code had deliberately gone another way, and marks planned parts as not yet implemented.
 
-1. **Opening, opening limit, cap.** The spec says "opening" and "cap", the UI and HA say "opening limit", Elastic says `valve.opening_pct`, ADR-0001 says "cap". The TRV decides the actual valve position; Radiate only sets a limit. Suggest "opening limit" everywhere for `valve_opening_degree`, "allocated opening" for the allocator's output, and "lockshield cap" only for `L_r`.
-2. **Comfort limit means two things.** Spec 4.4 step 6 uses "comfort limit" for 150 minutes of arrival time; spec 5.1 uses it for 0.5 K of pooling. The code separates them (`comfort_horizon_s`, `comfort_limit_k`). Suggest "comfort horizon" for the time and "comfort limit" for the temperature, and update spec 4.4.
-3. **Store means two things.** The hot-water store, and `radiate.server.store.Store` (the SQLite state database). Suggest renaming the class or module, for example `StateDb`, when that code is next touched.
-4. **Safe mode.** Spec section 7 says safe mode starts when the coordinator or MQTT is down, stops the heartbeat so the watchdog takes over, and writes lockshield caps. The code enters it when no TRV is reachable, which a broker or Zigbee2MQTT outage causes, and hands the relay to the watchdog once its own burn is over. Lockshield caps are written whenever a room is not allocated, not as a safe mode step.
-5. **Supply factor formula and kappa.** Spec 4.1: `S = 1 / (1 + κ·Σf + κ_bypass)`, with `κ` learned. Code: `S = 1 / (1 + κ·(Σf + bypass_equivalent))`, with `κ` a fixed 0.15 and the bypass in radiator equivalents. Suggest the spec follow the code and say `κ` is not learned yet.
-6. **Flow sensitivity is not learned.** Spec 4.2 estimates `η` per room; the code always uses the default 0.7, so no room is treated as emitter-limited.
-7. **Heat availability.** Spec 4.1 has `φ` rising with a 6-minute time constant after the lag. The code treats it as on or off after the arrival lag and smooths the whole drive with a 15-minute time constant.
-8. **Arrival lag measurement.** Spec 4.1: time to `dT_trv/dt > 0.05 K/min`. Code: time to a 0.6 K rise in `T_trv` within 40 minutes, with an 8-minute default before any sample.
-9. **Lockshield cap computation.** Spec 4.4: 90th percentile of allocated openings over the last 7 days. Code: 90th percentile of a decaying histogram fed only while firing, 60 % until enough data. The code comment says the decay is "roughly a 3 day half-life", but 0.9995 per minute-sample halves in about 1,400 samples, roughly 23 hours of firing.
-10. **Fire detection thresholds.** Spec 4.6: residual above +1.5 K/h for 10 minutes, or a 0.8 K/h rise with the valve closed. Code: residual above 2.0 K/h with confidence at least 0.6, or a 0.8 K/h rise after the radiator has been off for 30 minutes. `docs/simulation.md` explains the change; spec 4.6 has not caught up.
-11. **Top-up covers two things.** `RoomState.topup` is set for both burn extensions and heat sinks, and `extend` tells them apart. The API reports both flags, and the UI labels a burn extension "Topping up" and a heat sink "Heat sink". Spec 5.3 and 5.4 give both a target of setpoint + 0.3 K; the code uses `max(target + 0.3, min(temperature + 0.5, target + 1.0))`.
-12. **Pooled demand `D`.** Spec 5.3 defines a gain-weighted pooled demand. The code never computes it; it fires on the largest gap, predicted burn, preheating or frost.
-13. **Target, setpoint and TRV setpoint.** The spec uses `T_set` for everything. The code has the schedule or override setpoint, the effective target, and the TRV setpoint (the target in the TRV setpoint frame, plus the call bias or the sink lead, as a 0.5 °C step). Spec 4.5 now describes the TRV setpoint.
-14. **Calling.** Used both for a TRV whose thermostat is open and for a room in Radiate's demand latch. Suggest "calling" for Radiate's latch only.
-15. **Relay start and burner start.** `docs/simulation.md` separates them; the spec's "starts per hour" and the UI's "Starts, last hour" mean relay starts. Suggest always qualifying.
-16. **Dump room and heat sink.** The spec says dump room, the code reason is `boiler.dump_room`, and the UI says "Heat sink". Suggest "heat sink" in prose and UI.
-17. **Valve trusted and valve exercise.** Spec 4.6 has a "valve trusted" learning gate and spec 4.5 a weekly valve exercise. The gate exists in code as three gates (`valve_untrusted` for a stuck valve, `valve_leaking`, `valve_rejected` for a reconciler failure); the exercise does not. `unexplained_heat` exists in code but not in the spec.
-18. **`actuation_enabled` and `actuate`.** The spec names the flag `actuation_enabled`; the configuration key is `actuate`. Both are fine but should be introduced together.
-19. **Internal sensor only and "TRV only".** `docs/configuration.md` describes the role as "TRV only"; the value is `internal_sensor_only`.
-20. **Preheat and optimum start.** The spec says "optimum start"; the code and UI say "preheating". Suggest "optimum start" for the feature and "preheating" for the room state.
-21. **TRV bias refinement.** Spec 4.6 says the internal-sensor bias is refined once the TRV has been closed for 2 hours and its radiator is cold. The code keeps the configured bias. With a cold radiator the TRV reads the room, so the observed offset is about 0 K, while a warm radiator lifts the reading by 2 to 3 K in simulation. One bias cannot match both, and the variants tried in simulation made comfort worse (see [simulation](simulation.md#internal-sensor-rooms-and-the-trv-bias)).
+Behaviour, for the owner (each is marked **Open question** in the spec):
+
+1. **Learning memory.** Spec 4.3 aimed at a memory of about 3 days. The forgetting factor, `1 − 1/2000` (`FORGETTING` in `radiate.core.estimator`), gives about 2,000 learning updates, roughly 33 hours, although its comment says about 3 days.
+2. **Pooled demand.** Spec 5.3 defined a gain-weighted pooled demand `D` so one cold toilet does not count like a cold lounge. The fire rule never used it and the code doesn't compute it, so any single calling room more than the comfort limit below its target fires the boiler.
+3. **Learning on a stale room sensor.** The plan stopped a room learning when its room sensor is stale. The code falls back to the TRV reading plus the TRV bias and keeps learning.
+
+Names in code and UI text, for whoever next touches that code:
+
+4. **Store means two things.** The hot-water store, and `radiate.server.store.Store` (the SQLite state database). Suggest renaming the class or module, for example `StateDb`.
+5. **Heat sink and `boiler.dump_room`.** Prose and UI say heat sink; the reason code is still `boiler.dump_room`. Reason codes reach Elastic, so a rename is an API change.
+6. **"Stuck valve" covers leaking valves.** The HA binary sensor (`valve_untrusted`, named "Stuck valve") and API `valve.untrusted` are on for a stuck or a leaking valve. Suggest a name such as "Valve problem".
+7. **Comments that disagree with their constants.** `LOCKSHIELD_DECAY` in `radiate.core.decide` says "roughly a 3 day half-life", but 0.9995 a sample halves in about 1,400 samples, roughly 23 hours of firing. `FORGETTING` has the same kind of mismatch (item 1).

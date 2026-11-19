@@ -55,6 +55,7 @@ Run your own house. Draft the file from Zigbee2MQTT's device list, then check it
 | `--demo` | | Drive the simulated reference house. Use exactly one of `--demo` and `--config` |
 | `--config FILE` | | Drive real devices described in `FILE` |
 | `--dry-run` | off | Force dry run whatever the file says |
+| `--data-dir DIR` | `house.data_dir` | Keep `radiate.db` in `DIR` instead |
 | `--speed N` | 60 | Demo only: simulated minutes per real minute |
 | `--host HOST` | `0.0.0.0` | Address to listen on |
 | `--port PORT` | 8099 | Port to listen on |
@@ -221,11 +222,11 @@ For each room Radiate controls:
 
 - A climate entity. Setting its target temperature (5 to 28 °C in 0.5 °C steps) creates a setpoint override that ends at the room's next scheduled change and survives a server restart. Its attributes show the opening limit, learning state, latest reason, and the override's setpoint (`override_setpoint`), how it ends (`override_until`) and minutes left (`override_expires_in_min`).
 - Sensors: temperature, opening limit, heating gain, loss rate, arrival lag, model confidence and learning state.
-- A Stuck valve binary sensor (problem class). It turns on when the room stays cold through burns that warm other rooms, which usually means the valve needs checking.
+- A Stuck valve binary sensor (problem class). It turns on when the room stays cold through burns that warm other rooms, or warms while its valve should be shut. Either way the valve needs checking.
 
 For each room with an open fire or stove (an episodic heat source):
 
-- A Fire lit switch. Turn it on when you light the fire so Radiate pauses the room's learning. The server forgets it when it restarts.
+- A Fire lit switch. Turn it on when you light the fire, so Radiate closes the room's radiator, leaves the room out of boiler demand and pauses its learning. The server forgets it when it restarts.
 - A Fire detected binary sensor, on while Radiate treats the fire as lit, either because of the switch or because the room is warming faster than the radiator explains.
 
 Rooms Radiate cannot control, such as a bypass radiator, get a temperature sensor only.
@@ -276,13 +277,13 @@ done
 
 `<data_dir>/radiate.db` is a SQLite database in WAL mode, so you also see `radiate.db-wal` and `radiate.db-shm` next to it. It holds:
 
-- Learned room models, arrival lags, lockshield caps, disturbance hold-offs and the boiler guard. A restart in the middle of a burn still honours minimum burn.
+- Learned room models, arrival lags, lockshield caps, disturbance hold-offs, stuck and leaking valve verdicts, the short-cycle adaptation, the day's accounting and the boiler guard. A restart in the middle of a burn still honours minimum burn.
 - The house ID used by Elastic and the Home Assistant integration.
-- The heating mode.
+- The heating mode and setpoint overrides.
 - The Elastic export queue.
 - The tick history: each tick's snapshot and decisions for the last `house.history_days` days (14 by default), about 1.2 MB a day for a 9-room house. See [configuration](configuration.md#tick-history-and-replay).
 
-Radiate saves engine state every 5 minutes and when it stops cleanly. Setpoint overrides are not saved.
+Radiate saves engine state every 5 minutes and when it stops cleanly. The manual fire switch is not saved.
 
 If the database is lost or unreadable, Radiate starts from its priors and learns again. It also gets a new house ID, so Elastic sees a new house.
 

@@ -2,7 +2,7 @@
 
 The v1 specification ([spec.md](spec.md)) and the v1 items of the [coverage matrix](research/coverage-matrix.md) ("Radiate standalone" column), checked against the code. Update this page in the same change as the code.
 
-Last audit: November 2026, against `main` at `c4657fe`.
+Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the spec was reconciled with the code at `925b7a1`: where the code had deliberately gone another way the spec now describes the code, and the rows below changed to match.
 
 **Status:** done (matches the spec), partial (works, but differs from the spec or misses part of it), missing (not in the code). Paths are relative to `src/radiate/` unless they start with a top-level folder. "Unsure" marks a row the audit could not settle from the code alone.
 
@@ -10,8 +10,8 @@ Last audit: November 2026, against `main` at `c4657fe`.
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 102 |
-| Partial | 26 | 28 |
+| Done | 82 | 106 |
+| Partial | 26 | 24 |
 | Missing | 37 | 22 |
 
 Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), the learner bootstraps from that history, and `radiate discover` drafts the configuration from Zigbee2MQTT.
@@ -22,6 +22,7 @@ Top remaining gaps, most important first:
 2. **Valve recalibration service** (section 7): blocked, the TRVZB has no calibration command in Zigbee2MQTT (see the row below).
 3. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, bootstrap from the Home Assistant recorder (sections 4.1 to 4.3, 5.5).
 4. **TRV bias refinement** for internal-sensor rooms (section 4.6): tried and dropped, see the row below.
+5. **Three behaviour choices for the owner**, marked open questions in the spec (section 12): the learning memory, pooled demand, and learning on a stale room sensor.
 
 ## 2. House model
 
@@ -56,18 +57,18 @@ Top remaining gaps, most important first:
 | 4.1 Learned per-valve dead zone | missing | | Defaults only |
 | 4.1 Supply factor with bypass | done | `core/valve.py` `supply_factor` | |
 | 4.1 House-wide `κ` learned | missing | `core/types.py` `supply_kappa` | Fixed at 0.15 |
-| 4.1 Arrival lag learned per radiator, median of 15 | partial | `core/decide.py` lag probe | Criterion is a 0.6 K TRV rise within 40 min, not `dT_trv/dt > 0.05 K/min`; availability is a step, no `τ_w` |
+| 4.1 Arrival lag learned per radiator, median of 15 | done | `core/decide.py` lag probe | A 0.6 K TRV rise within 40 min; heat availability is a step and the drive is smoothed over 15 min. The spec now describes this |
 | 4.2 Flow sensitivity `η` | missing | `core/allocator.py` `AllocRoom.eta` | Always the 0.7 default; no emitter-limited report |
-| 4.3 RLS with forgetting, priors, bounds | done | `core/estimator.py` | |
+| 4.3 RLS with forgetting, priors, bounds | done | `core/estimator.py` | Open question: the forgetting factor gives a memory of about 33 hours of learning, not the 3 days planned (spec 4.3) |
 | 4.3 Diagnostic when a parameter sits on a bound for 24 h | missing | | |
 | 4.3 Bootstrap from 14 days of history | partial | `core/bootstrap.py`, `server/runtime.py` `restore`, `cli.py` `bootstrap` | From the standalone database's tick history, on start without usable saved state or with `radiate bootstrap`; keeps models, lags and lockshield histograms only. Not from the Home Assistant recorder |
 | 4.3 Outlier rejection at 4 σ | done | `core/estimator.py` | |
 | 4.3 Per-room confidence | done | `core/estimator.py` | |
 | 4.4 Synchronised arrival allocation | done | `core/allocator.py` | Deadline-aware for optimum start |
 | 4.4 Opening floor 20 % | done | `core/allocator.py` | |
-| 4.4 Capacity limited: open everything and log | partial | `core/allocator.py` | Paces at the horizon instead; `capacity_limited` is never logged |
-| 4.4 Steady-state allocation with a 30 min horizon | partial | `core/decide.py` | Lockshield cap used whenever not firing |
-| 4.4 Lockshield cap `L_r` | partial | `core/decide.py` `_record_lockshield` | 90th percentile of a decaying histogram (about 23 firing hours half-life), not a 7 day window |
+| 4.4 Capacity limited: pace at the horizon and log | partial | `core/allocator.py` | Paces at the horizon, as the spec now says; `capacity_limited` is never logged or reported |
+| 4.4 Steady-state allocation with a 30 min horizon | missing | `core/decide.py` | The lockshield cap is written instead whenever a room is not allocated |
+| 4.4 Lockshield cap `L_r` | done | `core/decide.py` `_record_lockshield` | 90th percentile of a decaying histogram (about 23 firing hours half-life), written whenever a room is not allocated. The spec now describes this instead of a 7 day window written in safe mode |
 | 4.5 Governed mode settings | done | `drivers/z2m.py` `TrvWriter` | |
 | 4.5 TRV setpoint in the TRV's frame, call bias, sink lead | done | `core/decide.py` `_trv_setpoint` | Rounded to 0.5 K, clamped 4 to 35 °C. Internal-sensor rooms also get their mirrored schedule in this frame (`drivers/live.py` `_mirror`). The TRVZB's own hysteresis (assumed 0.5 K) needs checking on the pilot valve |
 | 4.5 Schedule mirror into the TRVZB | done | `drivers/z2m.py`, `config/schedule.py` | |
@@ -76,18 +77,18 @@ Top remaining gaps, most important first:
 | 4.5 Reconciler, 3 attempts then a diagnostic | done | `drivers/z2m.py`, `drivers/live.py` `alerts` | |
 | 4.5 Summer valve exercise | missing | | |
 | 4.5 Per-valve `actuation_enabled`, global dry run | done | `config/site.py`, `drivers/live.py` | |
-| 4.6 Gate: sensor fresh | partial | `core/decide.py` | A stale room sensor falls back to the TRV reading and learning carries on |
+| 4.6 Gate: sensor fresh | partial | `core/decide.py` | A stale room sensor falls back to the TRV reading and learning carries on. Open question: should it (spec 4.6) |
 | 4.6 Gate: window | done | `core/disturbance.py` | |
 | 4.6 Gate: store recovery | partial | `core/decide.py` | Time-based only; no "`T_trv` rising again" check |
 | 4.6 Gate: settled after setpoint change | done | `core/decide.py` | |
 | 4.6 Gate: shower | done | `core/disturbance.py` | |
-| 4.6 Gate: valve trusted (no reconciler failure) | done | `core/decide.py`, `drivers/live.py` | Settings the TRV rejected reach the core as `RoomInput.trv_rejected` and pause learning while they last and for an hour after (`valve_rejected`), listed per room as `valve.rejected` in `describe()`. Not reported in dry run, where nothing is sent. A stuck (`valve_untrusted`) or leaking (`valve_leaking`) valve also pauses learning |
+| 4.6 Gate: valve rejected (reconciler failure), stuck or leaking | done | `core/decide.py`, `drivers/live.py` | Settings the TRV rejected reach the core as `RoomInput.trv_rejected` and pause learning while they last and for an hour after (`valve_rejected`), listed per room as `valve.rejected` in `describe()`. Not reported in dry run, where nothing is sent. A stuck (`valve_untrusted`) or leaking (`valve_leaking`) valve also pauses learning |
 | 4.6 Gate: not passive | done | `core/decide.py` | Passive rooms have no engine state |
-| 4.6 Open fire detection, closing and 4 h hold-off | done | `core/disturbance.py` | Residual threshold 2.0 K/h with confidence ≥ 0.6, not 1.5 K/h (tuned in simulation) |
+| 4.6 Open fire detection, closing and 4 h hold-off | done | `core/disturbance.py` | Residual threshold 2.0 K/h with confidence ≥ 0.6, and the rise rule needs the radiator off 30 min (tuned in simulation, now in the spec) |
 | 4.6 Range cooker: free `d`, cooking spikes excluded | done | `core/estimator.py`, `core/disturbance.py` | |
 | 4.6 Range cooker "self-heated" after 14 days | missing | | |
 | 4.6 Stairs bypass in the supply factor | done | `core/types.py` `bypass_equivalent` | |
-| 4.6 Stairs rise as a heat-availability check | missing | | |
+| 4.6 Stairs rise as a heat-availability check | done | `core/health.py` `NoHeat` | A 0.3 K rise on a passive room counts as heat in the no-heat check |
 | 4.6 Toilet: TRV reading with bias, 1.0 K hysteresis, never sets the pace | done | `core/decide.py` | The TRV setpoint goes out as `target - bias` (plus the call bias, rounded up), so the TRV opens when the core calls |
 | 4.6 Toilet: bias refinement, confidence capped at 0.5 | partial | `core/decide.py` `new_estimator` | Confidence cap done. Bias refinement deliberately not done: with a cold radiator the observed offset is about 0 K, but the bias also has to cover the warm radiator, and every variant tried in simulation left the toilet short of heat and raised the house comfort deficit ([simulation](simulation.md#internal-sensor-rooms-and-the-trv-bias)) |
 
@@ -98,12 +99,12 @@ Top remaining gaps, most important first:
 | 5.1 Guard parameters and ranges | done | `core/types.py`, `config/site.py` | |
 | 5.2 State machine IDLE, LEAD, FIRING, REST | done | `core/boiler.py` | |
 | 5.2 Frost override, hard frost ignores minimum off | done | `core/boiler.py`, `core/decide.py` | |
-| 5.3 Pooled demand `D` (gain-weighted) | partial | `core/decide.py` | Fire rule uses the largest gap and predicted burn; `D` is not computed |
+| 5.3 Pooled demand `D` (gain-weighted) | partial | `core/decide.py` | Fire rule uses the largest gap and predicted burn; `D` is not computed. Open question: should a small room alone fire the boiler less readily (spec 5.3) |
 | 5.3 Fire rules (comfort limit, 1.5 × minimum burn, optimum start) | done | `core/decide.py` | |
-| 5.3 Stop rule | partial | `core/decide.py` | Demand latch (gap ≤ 0) rather than "predicted to arrive within one tick" |
+| 5.3 Stop rule | done | `core/decide.py` | Demand latch: stop when no room is calling or extended. The spec now describes this instead of "predicted to arrive within one tick" |
 | 5.3 Burn extension (top-up) | done | `core/decide.py` | |
 | 5.3 Store merging (opt-in) | missing | | |
-| 5.4 Open-path guarantee with dump rooms | done | `core/decide.py` `_ensure_sink`, `_trv_setpoint` | A dump or top-up room's TRV setpoint is at least its reading + 1 K, rounded up, so its own hysteresis cannot keep it shut. Relay time with no TRV open: 0 % in simulation (was 3 to 6 %), asserted in `tests/sim`. A top-up-only room does not count as open for the no-heat check |
+| 5.4 Open-path guarantee with heat sinks | done | `core/decide.py` `_ensure_sink`, `_trv_setpoint` | Each room calling or topped up counts as one open radiator. A heat sink or top-up room's TRV setpoint is at least its reading + 1 K, rounded up, so its own hysteresis cannot keep it shut. Relay time with no TRV open: 0 % in simulation (was 3 to 6 %), asserted in `tests/sim`. A top-up-only room does not count as open for the no-heat check |
 | 5.5 Store schedule, up to 4 windows | done | `core/decide.py`, `config/site.py` | |
 | 5.5 Store boost | done | `server/app.py` | |
 | 5.5 Priority awareness: no heat during recovery, learning gated | done | `core/decide.py` | |
@@ -132,7 +133,7 @@ Top remaining gaps, most important first:
 
 | Failure | Status | Where | Note |
 |---|---|---|---|
-| Room sensor stale | partial | `core/decide.py` | Falls back to the TRV reading and stops sending external temperature; learning is not switched off |
+| Room sensor stale | partial | `core/decide.py` | Falls back to the TRV reading and stops sending external temperature; learning is not switched off (open question, spec 4.6) |
 | TRV offline | partial | `core/decide.py`, `drivers/live.py` | Excluded from demand and learning, alert raised; not counted as possibly open in the supply factor |
 | Coordinator or MQTT down: safe mode | done | `core/decide.py` `force_stop`, `drivers/live.py` | Broker disconnected or Zigbee2MQTT offline marks every TRV unreachable; relay off after minimum burn (the off command is now sent; before, the relay stayed on until the watchdog took over), then no relay commands and no heartbeat, so the watchdog takes over. Radiate follows the watchdog's burns meanwhile and adopts the relay on hand-back |
 | Radiate process dies | done | `shelly/radiate-watchdog.js`, schedule mirror | Simulated in `tests/sim` |
