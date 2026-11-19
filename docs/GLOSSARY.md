@@ -134,8 +134,8 @@ The rules that hold back valve writes to protect batteries and calibration: skip
 Code: `_discipline` in `radiate.core.decide`, `MIN_OPENING_STEP`, `OPENING_WRITE_INTERVAL_S`, `BIG_OPENING_STEP`.
 
 **Reconciler**:
-The part of the TRV writer that resends a setting when the TRV's reported value disagrees with what was sent for more than 5 minutes (2 minutes for the setpoint). After three attempts it marks the setting failed and raises an alert.
-Code: `TrvWriter.plan`, `TrvWriter.failed`, `RECONCILE_GRACE_S`, `MAX_ATTEMPTS`, alert `driver.write_failed`.
+The part of the TRV writer that resends a setting when the TRV's reported value disagrees with what was sent for more than 5 minutes (2 minutes for the setpoint). After three attempts it marks the setting failed (rejected) and raises an alert. A rejected setting pauses learning for the room while it lasts and for an hour after. Not reported in dry run, where nothing is sent.
+Code: `TrvWriter.plan`, `TrvWriter.failed`, `RECONCILE_GRACE_S`, `MAX_ATTEMPTS`, alert `driver.write_failed`, `RoomInput.trv_rejected`, learning gate `valve_rejected`, API `rooms[].valve.rejected`.
 
 **Schedule mirror**:
 Radiate writes each room's weekly schedule into its TRVZB and runs the valve in `auto` mode, so the valve follows the schedule if Radiate stops.
@@ -541,7 +541,7 @@ For the lead. Each item names the conflict and a suggested resolution.
 14. **Calling.** Used both for a TRV whose thermostat is open and for a room in Radiate's demand latch. Suggest "calling" for Radiate's latch only.
 15. **Relay start and burner start.** `docs/simulation.md` separates them; the spec's "starts per hour" and the UI's "Starts, last hour" mean relay starts. Suggest always qualifying.
 16. **Dump room and heat sink.** The spec says dump room, the code reason is `boiler.dump_room`, and the UI says "Heat sink". Suggest "heat sink" in prose and UI.
-17. **Valve trusted and valve exercise.** Spec 4.6 has a "valve trusted" learning gate and spec 4.5 a weekly valve exercise. Neither exists in code. `unexplained_heat` exists in code but not in the spec.
+17. **Valve trusted and valve exercise.** Spec 4.6 has a "valve trusted" learning gate and spec 4.5 a weekly valve exercise. The gate exists in code as three gates (`valve_untrusted` for a stuck valve, `valve_leaking`, `valve_rejected` for a reconciler failure); the exercise does not. `unexplained_heat` exists in code but not in the spec.
 18. **`actuation_enabled` and `actuate`.** The spec names the flag `actuation_enabled`; the configuration key is `actuate`. Both are fine but should be introduced together.
 19. **Internal sensor only and "TRV only".** `docs/configuration.md` describes the role as "TRV only"; the value is `internal_sensor_only`.
 20. **Preheat and optimum start.** The spec says "optimum start"; the code and UI say "preheating". Suggest "optimum start" for the feature and "preheating" for the room state.
