@@ -197,3 +197,13 @@ def test_internal_sensor_dump_room_floor_uses_the_trv_reading():
         relay = acts.heating_relay
     assert st.rooms["loo"].topup
     assert acts.valves["loo"].setpoint == 24.0  # 22.8 + 1, rounded up
+
+
+def test_internal_sensor_room_confidence_is_capped():
+    # Spec 4.6: the toilet learns from a TRV beside its radiator, so its model is
+    # never trusted as much as a room with its own sensor.
+    st = EngineState.new(CFG)
+    for rs in st.rooms.values():
+        rs.est.p[0][0] = 0.0
+    assert st.rooms["loo"].est.confidence == 0.5
+    assert st.rooms["bed"].est.confidence == 1.0

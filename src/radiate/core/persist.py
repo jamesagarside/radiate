@@ -23,10 +23,10 @@ from typing import Any
 
 from .accounting import HISTORY_DAYS
 from .boiler import BoilerGuard
-from .decide import EngineState, RoomState
+from .decide import EngineState, RoomState, new_estimator
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator
-from .types import BoilerState, HeatSource, HouseConfig
+from .types import BoilerState, HouseConfig
 
 VERSION = 1
 _DIST_TIMES = ("window_until", "shower_until", "fire_since", "fire_holdoff_until", "spike_until")
@@ -193,7 +193,7 @@ def load_state(
             continue
         raw = rooms[rc.id]
         rs: RoomState = st.rooms[rc.id]
-        est = RoomEstimator.new(rc.heat_source is HeatSource.CONTINUOUS)
+        est = new_estimator(rc)
         if not isinstance(raw, dict) or not _valid_estimator(raw.get("est"), est):
             problems.append(f"{rc.id}: saved model invalid, reset to priors")
             continue

@@ -53,6 +53,7 @@ BIG_OPENING_STEP = 15
 CLOSE_BUMP = 10
 PREHEAT_MAX_S = 3 * 3600
 PREHEAT_MARGIN = 1.2
+INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
 LOCKSHIELD_DECAY = 0.9995  # per sample, roughly a 3 day half-life at one sample a minute
 
 
@@ -120,12 +121,16 @@ class EngineState:
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
         return cls(
-            rooms={
-                r.id: RoomState(est=RoomEstimator.new(r.heat_source is HeatSource.CONTINUOUS))
-                for r in cfg.rooms
-                if r.controllable
-            }
+            rooms={r.id: RoomState(est=new_estimator(r)) for r in cfg.rooms if r.controllable}
         )
+
+
+def new_estimator(rc: RoomConfig) -> RoomEstimator:
+    """A room model at its priors, with the room's confidence cap."""
+    return RoomEstimator.new(
+        rc.heat_source is HeatSource.CONTINUOUS,
+        INTERNAL_SENSOR_MAX_CONFIDENCE if rc.role is RoomRole.INTERNAL_SENSOR_ONLY else 1.0,
+    )
 
 
 def _effective_temperature(cfg: RoomConfig, inp: RoomInput) -> float | None:

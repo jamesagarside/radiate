@@ -149,3 +149,10 @@ def test_wrong_version_starts_fresh():
     assert problems and st.boiler.state is BoilerState.IDLE
     st, problems = load_state(cfg, None, 0.0)
     assert problems
+
+
+def test_internal_sensor_room_keeps_its_confidence_cap():
+    cfg, st = learned()
+    restored, _ = load_state(cfg, dump_state(st, st.last_now), 0.0)
+    restored.rooms["toilet"].est.p[0][0] = 0.0
+    assert restored.rooms["toilet"].est.confidence == 0.5

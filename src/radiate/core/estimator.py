@@ -34,10 +34,11 @@ class RoomEstimator:
     rejected: int = 0
     residual_var: float = NOISE_SD**2
     prior_sd_a: float = PRIOR_A[1]
+    max_confidence: float = 1.0  # lower for rooms measured only by the TRV (spec 4.6)
     _hist: list[float] = field(default_factory=list)
 
     @classmethod
-    def new(cls, continuous_source: bool = False) -> RoomEstimator:
+    def new(cls, continuous_source: bool = False, max_confidence: float = 1.0) -> RoomEstimator:
         priors = (PRIOR_A, PRIOR_B, PRIOR_D_CONTINUOUS if continuous_source else PRIOR_D)
         theta = [p[0] for p in priors]
         p = [[0.0] * 3 for _ in range(3)]
@@ -48,6 +49,7 @@ class RoomEstimator:
             p=p,
             p0_trace=sum(p[i][i] for i in range(3)),
             bounds=tuple((pr[2], pr[3]) for pr in priors),
+            max_confidence=max_confidence,
         )
 
     @property
@@ -66,7 +68,7 @@ class RoomEstimator:
     def confidence(self) -> float:
         """0..1, how far the heating gain's uncertainty has shrunk from the prior."""
         sd_a = math.sqrt(max(self.p[0][0], 0.0)) * NOISE_SD
-        return max(0.0, min(1.0, 1.0 - sd_a / self.prior_sd_a))
+        return max(0.0, min(self.max_confidence, 1.0 - sd_a / self.prior_sd_a))
 
     def predict(self, drive: float, delta_out: float) -> float:
         return self.theta[0] * drive - self.theta[1] * delta_out + self.theta[2]
