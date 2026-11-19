@@ -282,3 +282,15 @@ async def test_safe_mode_hands_the_boiler_to_the_watchdog(fake_shelly):
     await drv.apply(actions())
     assert fake_shelly.kvs[HEARTBEAT_KEY] == int(WALL)
     assert not any(a.code == "driver.watchdog_handover" for a in drv.alerts())
+
+
+async def test_internal_sensor_room_mirrors_schedule_in_trv_frame():
+    drv, _, _ = make()
+    feed(drv)
+    toilet = drv._mirror("toilet")
+    bedroom = drv._mirror("bedroom_1")
+    # Toilet target 18 at 06:30 with the default -1.5 K bias: the TRV reads 1.5 K high.
+    assert (
+        toilet["weekly_schedule_monday"] == "00:00/17.5 06:30/19.5 08:30/17.5 17:00/19.5 22:30/17.5"
+    )
+    assert bedroom["weekly_schedule_monday"] == "00:00/16 06:30/20 08:30/16 17:00/20 22:30/16"

@@ -58,6 +58,9 @@ class Result:
     alert_minutes: dict[str, int] = field(default_factory=dict)  # measured period, by code
     first_alert_s: dict[str, float] = field(default_factory=dict)  # whole run, by code
     day_summaries: list[dict] = field(default_factory=list)  # closed days from the core
+    # Relay on but no TRV-fitted radiator passing water: only the bypass takes the heat.
+    relay_on_s: float = 0.0
+    no_open_valve_s: float = 0.0
 
     @property
     def median_spread(self) -> float:
@@ -77,6 +80,10 @@ class Result:
             "mean relay burn (min)": round(sum(burns) / len(burns) / 60, 1) if burns else 0.0,
             "min burn violations": self.min_burn_violations,
             "min off violations": self.min_off_violations,
+            "relay min, no TRV open": round(self.no_open_valve_s / 60),
+            "no TRV open (% of relay)": round(100 * self.no_open_valve_s / self.relay_on_s, 1)
+            if self.relay_on_s
+            else 0.0,
         }
 
 
@@ -208,6 +215,14 @@ def run(
 
         if house.now >= measure_from:
             _measure(house, res, minute, period_tracking, day, d)
+            if house.heating_relay:
+                res.relay_on_s += STEP_S
+                if not any(
+                    r.radiator.conductance() > 0
+                    for r in house.rooms.values()
+                    if r.radiator.trv is not None
+                ):
+                    res.no_open_valve_s += STEP_S
 
     res.burner_starts = house.boiler.burner_starts - max(0, starts_before)
     res.burner_hours = (house.boiler.burner_on_s - max(0.0, burner_s_before)) / 3600

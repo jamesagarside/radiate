@@ -87,7 +87,19 @@ def test_daily_document():
     assert doc["boiler"]["burns"]["histogram"]["over_120"] == 1
     assert doc["balance"] == {"arrival_spread_min": 30.0, "score": 75.0, "starts_measured": 3}
     assert doc["rooms"]["comfort_minutes_below"] == 15.0
+    assert doc["radiate"]["partial_day"] is False  # older summaries have no flag
     assert DAILY_STREAM in bulk_body([doc])
+
+
+def test_daily_document_marks_a_partial_day():
+    exp = ElasticExporter("http://es:9200", "key", house_id="h")
+    partial = {**SUMMARY, "partial": True, "balance": {**SUMMARY["balance"], "score": None}}
+    exp.record_daily(partial, ts=TS)
+    (doc,) = list(exp.buffer)
+    assert doc["radiate"]["partial_day"] is True
+    assert doc["balance"]["score"] is None
+    mapping = index_templates()["radiate-daily"]["template"]["mappings"]["properties"]
+    assert mapping["radiate"]["properties"]["partial_day"] == {"type": "boolean"}
 
 
 async def test_runtime_exports_the_closed_day_and_describes_accounting():
@@ -114,6 +126,11 @@ async def test_runtime_exports_the_closed_day_and_describes_accounting():
     acc = rt.describe()["accounting"]
     assert acc["today"]["day"] == 1 and acc["yesterday"]["day"] == 0
     assert {"burner_hours", "starts", "litres", "balance"} <= set(acc["today"])
+    # Radiate started at 23:48, so day 0 was not seen in full: no balance score.
+    assert acc["yesterday"]["partial"] is True
+    assert acc["yesterday"]["balance"]["score"] is None
+    assert acc["today"]["partial"] is False
+    assert rt.exporter.daily[0]["partial"] is True
 
 
 def test_templates_are_tsds_with_dimensions():

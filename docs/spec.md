@@ -148,7 +148,7 @@ Radiate does **not** pin the valve position (closing = 100 − opening). Pinning
 | TRVZB setting | Value | Why |
 |---|---|---|
 | `system_mode` | `heat` | |
-| `occupied_heating_setpoint` | room's current setpoint | TRV thermostat works on its own if Radiate stops |
+| `occupied_heating_setpoint` | room's target in the TRV's frame (see below), 0.5 K steps, 4 to 35 °C | TRV thermostat works on its own if Radiate stops |
 | `external_temperature_input` | room sensor reading, refreshed at least every 30 min | room sensor drives the TRV, well inside its 2 h revert |
 | `temperature_sensor_select` | `remote_temperature` | values: `local_temperature`, `remote_temperature`, `remote_source_offline` |
 | `valve_opening_degree` | allocated opening `o_r` | how far it opens when it calls |
@@ -156,6 +156,15 @@ Radiate does **not** pin the valve position (closing = 100 − opening). Pinning
 | `smart_temperature_control` | `false` | the adaptive PID mode disables opening limits |
 
 The TRV does the thermostat on/off; Radiate decides how far each valve may open, when the boiler fires and what each TRV believes the room temperature is.
+
+**TRV setpoint.** The TRV compares its setpoint with the reading it regulates on, so Radiate writes the setpoint in that frame. Every valve Radiate counts as open must really open, or the burner fires into shut valves:
+
+| Room | Not heating | Calling, boiler in lead or firing | Top-up or heat sink, boiler in lead or firing |
+|---|---|---|---|
+| Normal (room sensor sent as external temperature) | target | target + 0.6 K | the call setpoint, but at least room temperature + 1 K, rounded up |
+| Internal sensor only (TRV compares its own reading) | target − bias | target − bias + 0.6 K, rounded up | the call setpoint, but at least the TRV reading + 1 K, rounded up |
+
+With the default −1.5 K bias and an 18 °C target, the toilet's TRV gets 19.5 °C when idle and 20.5 °C when calling. The 0.6 K call bias and the 1 K sink lead put the setpoint far enough above the TRV's reading that its own hysteresis (about 0.5 K on the TRVZB, to be checked on the pilot valve) cannot hold the valve shut.
 
 **Schedule mirror.** Radiate also writes each room's schedule into the TRVZB's on-device weekly schedule and runs the TRV in `auto` mode, re-asserting its own setpoint every tick. If Radiate stops, the TRV picks up its schedule at the next transition instead of holding whatever setpoint it last received. In simulation, a crash at midday during setback otherwise leaves the house at 16 °C all evening.
 
@@ -195,7 +204,9 @@ While flagged: no learning for the lounge; the lounge is removed from boiler dem
 
 **Stairs radiator (unvalved bypass).** Not controllable, never actuated, never learned as a room. It is modelled as the always-open path `κ_bypass` in the supply factor, and it counts towards the open-path guarantee (section 5.4). Its room sensor is shown in the UI and used as a weak heat-availability check: a rise on the stairs after the heating relay goes on confirms flow is reaching the radiators.
 
-**Toilet (internal sensor only).** Uses `T_trv` as the room temperature with a −1.5 K default bias (the TRV sits by the radiator; the bias is refined when the TRV has been closed for 2 h and the radiator is cold). It takes part in demand with a wider 1.0 K hysteresis, does not set the pace in allocation, and its learning confidence is capped at 0.5.
+**Toilet (internal sensor only).** Uses `T_trv` as the room temperature with a −1.5 K default bias (the TRV sits by the radiator). Its TRV setpoint is written in the TRV's own frame, target − bias (section 4.5), so the TRV opens when Radiate calls. The schedule mirrored into its TRV is shifted into the same frame, so the fallback schedule holds the room near its target if Radiate stops. It takes part in demand with a wider 1.0 K hysteresis, does not set the pace in allocation, and its learning confidence is capped at 0.5.
+
+The bias is not refined. A refinement was planned for when the TRV has been closed for 2 h and the radiator is cold, but then the TRV reads the room (an offset near 0 K), while a warm radiator lifts the reading by 2 to 3 K in simulation. One bias cannot match both. Moving it towards 0 K, or fading it as the radiator cools, left the toilet short of heat and raised the house comfort deficit in simulation, so the bias stays at the configured value. See [simulation](simulation.md#internal-sensor-rooms-and-the-trv-bias).
 
 ---
 
@@ -241,7 +252,7 @@ Rooms do not fire the boiler individually. Each tick:
 
 ### 5.4 Open-path guarantee
 
-Before LEAD → FIRING, the predicted heat sink must be enough for the burner: `Σ_r f(o_r) + κ_bypass ≥ sink_min` (default equivalent to two fully open average radiators). If not, the coldest non-calling rooms (relative to setpoint, excluding fire-flagged rooms) are opened as **dump rooms** with a temporary target of setpoint + 0.3 K. The stairs bypass always counts.
+Before LEAD → FIRING, the predicted heat sink must be enough for the burner: `Σ_r f(o_r) + κ_bypass ≥ sink_min` (default equivalent to two fully open average radiators). If not, the coldest non-calling rooms (relative to setpoint, excluding fire-flagged rooms) are opened as **dump rooms** with a temporary target of setpoint + 0.3 K. A dump room is often already above that target, so its TRV setpoint is at least its reading + 1 K, rounded up to 0.5 K (section 4.5); otherwise the TRV's own hysteresis keeps the valve shut and only the bypass takes the heat. The stairs bypass always counts.
 
 ### 5.5 Hot-water store (channel 2)
 
@@ -254,6 +265,7 @@ Before LEAD → FIRING, the predicted heat sink must be enough for the burner: `
 - Burner hours, starts, burn-length histogram and starts per hour are kept per day.
 - With a nozzle rating (litres/h, from the service sheet), litres used and kWh delivered (litres × 10.35 kWh × assumed efficiency 0.85) are estimated. If relay power metering shows burner firing, actual firing time replaces relay time. Until then relay time is used, which includes the boiler thermostat's own off periods inside a call, so litres are an upper bound (about 60 % high in simulation).
 - Days follow local midnight. The day so far and the previous day are in `GET /api/v1/state` under `accounting`; each closed day goes to the daily Elastic stream.
+- A day is **partial** when Radiate did not see all of it: it started after midnight, or more than 30 min of the day went unseen between ticks (including time down across a restart). A partial day's totals cover what Radiate saw, it carries `partial: true` (Elastic `radiate.partial_day`), and its balance score is null: a first day starts with untrained models, so its arrival spread says little about the house.
 - Short-cycle alert: more than 4 relay starts in an hour, or burns under the minimum because of an external stop (the relay dropped while Radiate still called) for 2 hours running, meaning such burns at least an hour apart within the last two hours. Radiate's own guard allows at most 3 starts an hour, so this catches another controller, a manual switch or a relay dropping out.
 
 ### 5.7 Fail-safe relay watchdog (Shelly script)
@@ -358,7 +370,7 @@ Optional, off by default. Documents follow ECS and are sent with the Bulk API (A
 | `metrics-radiate.room-default` | 1 min | `radiate.room.{id,name}`, `temperature.{room,trv,setpoint}`, `valve.opening_pct`, `demand.gap_k`, `model.{a,b,d,eta,arrival_lag_min,confidence}`, `learning.{active,gate}`, `disturbance.{fire,shower,window,cooker_spike}` |
 | `metrics-radiate.boiler-default` | 1 min | `boiler.{state,relay,firing}`, `boiler.burn.{elapsed_s}`, `boiler.starts_1h`, `store.{relay,recovering}`, `supply.factor`, `outdoor.temperature` |
 | `logs-radiate.decision-default` | per decision | `event.action`, `event.reason`, `radiate.room.id`, `message` |
-| `metrics-radiate.daily-default` | daily | `radiate.day`, `balance.{arrival_spread_min,score,starts_measured}`, `boiler.{starts,max_starts_1h,burner_hours,hours_basis,litres,kwh}`, `boiler.burns.{count,mean_min,min_min,max_min,histogram.*}`, `rooms.{comfort_minutes_below}` |
+| `metrics-radiate.daily-default` | daily | `radiate.day`, `radiate.partial_day`, `balance.{arrival_spread_min,score,starts_measured}`, `boiler.{starts,max_starts_1h,burner_hours,hours_basis,litres,kwh}`, `boiler.burns.{count,mean_min,min_min,max_min,histogram.*}`, `rooms.{comfort_minutes_below}` |
 
 Common fields: `@timestamp`, `data_stream.*`, `host.name` (edge id, not the house name), `service.{name,version}`, `radiate.house.id` (random UUID). No personal data, no location.
 
@@ -366,7 +378,7 @@ Common fields: `@timestamp`, `data_stream.*`, `host.name` (edge id, not the hous
 - **Buffering**: an on-disk queue (SQLite) holds up to 7 days when Elastic is unreachable; retries with backoff; batch size 500 or 10 s.
 - **Assets**: index templates and a Kibana dashboard (balance, burns, rooms) ship in `export/elastic/`.
 
-**Balance score (daily):** for each heating start with two or more calling rooms, the spread between the first and last room reaching setpoint. Score = 100 × (1 − median spread / 120 min), clamped 0 to 100. Weather-normalised following Håkansson et al. 2025. As built: rooms are the `normal` rooms calling when the burn starts; a room still calling when the burn ends counts as arriving then; a burn where no room arrives is not scored. Weather normalisation is not done yet.
+**Balance score (daily):** for each heating start with two or more calling rooms, the spread between the first and last room reaching setpoint. Score = 100 × (1 − median spread / 120 min), clamped 0 to 100. Weather-normalised following Håkansson et al. 2025. As built: rooms are the `normal` rooms calling when the burn starts; a room still calling when the burn ends counts as arriving then; a burn where no room arrives is not scored; a partial day (section 5.6) has no score. Weather normalisation is not done yet.
 
 ---
 

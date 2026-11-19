@@ -25,7 +25,7 @@ How Radiate treats a room. One of three values:
 
 - `normal`: TRV plus room sensor. Fully controlled and learned.
 - `passive`: no controllable valve, for example an unvalved bypass radiator. Observed only.
-- `internal_sensor_only`: TRV with no room sensor. Uses the TRV's internal reading plus the TRV bias, a wider hysteresis, and never sets the pace.
+- `internal_sensor_only`: TRV with no room sensor. Uses the TRV's internal reading plus the TRV bias, a wider hysteresis, never sets the pace, and has its learning confidence capped at 0.5. Its TRV setpoint is written in the TRV's own frame.
 
 Code: `RoomRole`, config key `rooms[].role`.
 _Avoid_: "TRV only" for `internal_sensor_only`.
@@ -43,8 +43,12 @@ The temperature the TRV measures at the radiator. Used for arrival lag, and as t
 Symbol `T_trv`, °C. Code: `RoomInput.trv_temperature` (Zigbee2MQTT `local_temperature`).
 
 **TRV bias**:
-The offset added to `T_trv` to estimate room temperature. Default -1.5 K.
+The offset added to `T_trv` to estimate room temperature. Default -1.5 K, because the TRV sits beside its radiator and reads high while the radiator is warm. Fixed: it is not refined from observations (see [ambiguity 21](#ambiguities)).
 Code: `RoomConfig.trv_bias_k`, config key `rooms[].trv_bias_k`.
+
+**TRV setpoint frame**:
+The temperature a TRV compares its setpoint with, and so the frame Radiate writes the setpoint in. A normal room's TRV compares with the room sensor reading Radiate sends as its external temperature, so the setpoint is the room's target. An internal-sensor room's TRV compares with its own reading, which Radiate takes as room temperature minus the TRV bias, so the setpoint is the target minus the bias. Every TRV setpoint is a 0.5 K step from 4 to 35 °C.
+Code: `_trv_setpoint` and `_trv_step` in `radiate.core.decide`.
 
 **Bypass radiator**:
 A radiator with no controllable valve that is always open, such as the reference house's stairs radiator. It has the `passive` role and counts towards the open path.
@@ -114,8 +118,12 @@ Code: `ValveAction.external_temperature`, `TrvOptions.external_keepalive_s`, TRV
 _Avoid_: remote temperature, external sensor.
 
 **Call bias**:
-The amount, 0.6 K, Radiate adds to a TRV's setpoint while it wants that room heated and the boiler is in lead or firing, so the TRV's own thermostat keeps its valve open.
+The amount, 0.6 K, Radiate adds to a TRV's setpoint while it wants that room heated and the boiler is in lead or firing, so the TRV's own thermostat keeps its valve open. In an internal-sensor room the result is rounded up, so the TRV's hysteresis band stays above the reading at which Radiate calls.
 Code: `CALL_BIAS_K` in `radiate.core.decide`.
+
+**Sink lead**:
+The least a top-up room's TRV setpoint sits above the TRV's reading while the boiler is in lead or firing: 1 K, rounded up to 0.5 K. A top-up room is often already at its target, inside the TRV's own hysteresis band, where the valve would otherwise stay shut.
+Code: `SINK_LEAD_K` in `radiate.core.decide`.
 
 **Close bump**:
 When an opening limit falls by 10 points or more, Radiate first writes the new value plus 10, then the new value 5 seconds later. A workaround for reported TRVZB calibration drift.
@@ -351,7 +359,12 @@ Code: `EngineState.short_cycle`, API `boiler.short_cycle` (`extra_off_min`, `end
 
 **Balance score**:
 How evenly rooms that call together reach setpoint, scored per day from 0 to 100: 100 × (1 − median arrival spread / 120 min). The arrival spread is the time between the first and last room reaching setpoint after a start with two or more calling rooms.
+A partial day has no balance score.
 Code: `balance_score` in `radiate.core.accounting`, API `accounting.{today,yesterday}.balance`, UI "Balance, yesterday".
+
+**Partial day**:
+A local day Radiate did not see in full: it started after midnight (a first install, or a restart without saved state), or more than 30 minutes of the day went unseen between ticks, including time down across a restart. Its totals cover what Radiate saw, and its balance score is null. The UI shows "Not a full day of data" in place of yesterday's balance score.
+Code: `DayTotals.partial`, `PARTIAL_AFTER_S` in `radiate.core.accounting`, API `accounting.{today,yesterday}.partial`, Elastic `radiate.partial_day`.
 
 **Starts per hour**:
 The most relay starts allowed in any 60 minutes. Default 3.
@@ -503,7 +516,7 @@ For the lead. Each item names the conflict and a suggested resolution.
 10. **Fire detection thresholds.** Spec 4.6: residual above +1.5 K/h for 10 minutes, or a 0.8 K/h rise with the valve closed. Code: residual above 2.0 K/h with confidence at least 0.6, or a 0.8 K/h rise after the radiator has been off for 30 minutes. `docs/simulation.md` explains the change; spec 4.6 has not caught up.
 11. **Top-up covers two things.** `RoomState.topup` is set for both burn extensions and heat sinks, and `extend` tells them apart. The API reports both flags, and the UI labels a burn extension "Topping up" and a heat sink "Heat sink". Spec 5.3 and 5.4 give both a target of setpoint + 0.3 K; the code uses `max(target + 0.3, min(temperature + 0.5, target + 1.0))`.
 12. **Pooled demand `D`.** Spec 5.3 defines a gain-weighted pooled demand. The code never computes it; it fires on the largest gap, predicted burn, preheating or frost.
-13. **Target, setpoint and TRV setpoint.** The spec uses `T_set` for everything. The code has the schedule or override setpoint, the effective target, and the TRV setpoint (target plus the call bias, rounded to 0.5 °C). The call bias is not in the spec.
+13. **Target, setpoint and TRV setpoint.** The spec uses `T_set` for everything. The code has the schedule or override setpoint, the effective target, and the TRV setpoint (the target in the TRV setpoint frame, plus the call bias or the sink lead, as a 0.5 °C step). Spec 4.5 now describes the TRV setpoint.
 14. **Calling.** Used both for a TRV whose thermostat is open and for a room in Radiate's demand latch. Suggest "calling" for Radiate's latch only.
 15. **Relay start and burner start.** `docs/simulation.md` separates them; the spec's "starts per hour" and the UI's "Starts, last hour" mean relay starts. Suggest always qualifying.
 16. **Dump room and heat sink.** The spec says dump room, the code reason is `boiler.dump_room`, and the UI says "Heat sink". Suggest "heat sink" in prose and UI.
@@ -511,3 +524,4 @@ For the lead. Each item names the conflict and a suggested resolution.
 18. **`actuation_enabled` and `actuate`.** The spec names the flag `actuation_enabled`; the configuration key is `actuate`. Both are fine but should be introduced together.
 19. **Internal sensor only and "TRV only".** `docs/configuration.md` describes the role as "TRV only"; the value is `internal_sensor_only`.
 20. **Preheat and optimum start.** The spec says "optimum start"; the code and UI say "preheating". Suggest "optimum start" for the feature and "preheating" for the room state.
+21. **TRV bias refinement.** Spec 4.6 says the internal-sensor bias is refined once the TRV has been closed for 2 hours and its radiator is cold. The code keeps the configured bias. With a cold radiator the TRV reads the room, so the observed offset is about 0 K, while a warm radiator lifts the reading by 2 to 3 K in simulation. One bias cannot match both, and the variants tried in simulation made comfort worse (see [simulation](simulation.md#internal-sensor-rooms-and-the-trv-bias)).

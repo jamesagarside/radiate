@@ -4,6 +4,11 @@ Pure: the caller passes monotonic `now`, a local day label and what happened thi
 tick. Burner time is relay time: the relay is what Radiate sees today. A relay call
 includes the boiler's own thermostat cycling, so litres and kWh are an upper bound
 until a burner-firing signal is available (spec open question 1).
+
+A day is partial when Radiate did not see all of it: it started after midnight
+(a first install, or a restart without saved state) or there was a long gap between
+ticks. Its totals cover what was seen, and it gets no balance score: a first day
+starts with untrained models, so its arrival spread says little about the house.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from dataclasses import dataclass, field
 KWH_PER_LITRE = 10.35  # kerosene
 EFFICIENCY = 0.85  # assumed, spec 5.6
 MAX_TICK_S = 300.0  # longer gaps (restart, stalled loop) are not counted
+PARTIAL_AFTER_S = 30 * 60  # unseen time a day may have and still count as whole
 HISTORY_DAYS = 7
 BALANCE_FULL_SPREAD_MIN = 120.0
 # Burn-length histogram, minutes: under 10, 10 to 20, ..., 120 and over.
@@ -37,6 +43,11 @@ class DayTotals:
     burns_min: list[float] = field(default_factory=list)  # completed burns, minutes
     spreads_min: list[float] = field(default_factory=list)  # arrival spread per burn
     below_min: dict[str, float] = field(default_factory=dict)  # comfort minutes below
+    unseen_s: float = 0.0  # time in this day that Radiate did not see
+
+    @property
+    def partial(self) -> bool:
+        return self.unseen_s > PARTIAL_AFTER_S
 
 
 @dataclass(slots=True)
@@ -72,20 +83,28 @@ class Ledger:
         nozzle_lph: float | None = None,
     ) -> dict | None:
         """Advance one tick. Returns the summary of a day that just closed, if any."""
-        dt = 0.0 if self.last_t is None else min(MAX_TICK_S, max(0.0, now - self.last_t))
+        gap = 0.0 if self.last_t is None else max(0.0, now - self.last_t)
+        dt = min(MAX_TICK_S, gap)
+        missed = gap - dt  # not counted: Radiate was not running, or the loop stalled
         self.last_t = now
         # The interval since the last tick belongs to the day it started in.
         if self.relay:
             self.today.burner_s += dt
+        # Time since local midnight, when known, for the part of a gap in a new day.
+        since_midnight = minute * 60.0 if minute is not None else 0.0
 
         closed = None
         label = self._label(day, minute)
         if not self.started:
             self.today.day, self.started = label, True
+            self.today.unseen_s = since_midnight
         elif label != self.today.day:
+            self.today.unseen_s += max(0.0, missed - since_midnight)
             closed = self.summary(nozzle_lph)
             self.history = [*self.history, closed][-HISTORY_DAYS:]
-            self.today = DayTotals(day=label)
+            self.today = DayTotals(day=label, unseen_s=min(missed, since_midnight))
+        else:
+            self.today.unseen_s += missed
 
         t = self.today
         for rid, is_below in below.items():
@@ -142,6 +161,8 @@ class Ledger:
         spreads = t.spreads_min
         return {
             "day": t.day,
+            # Radiate missed part of the day: totals cover what it saw, no balance score.
+            "partial": t.partial,
             "basis": "relay",
             "burner_hours": round(hours, 2),
             "starts": len(t.starts),
@@ -160,7 +181,7 @@ class Ledger:
             "balance": {
                 "starts_measured": len(spreads),
                 "arrival_spread_min": round(statistics.median(spreads), 1) if spreads else None,
-                "score": balance_score(spreads),
+                "score": None if t.partial else balance_score(spreads),
             },
             "comfort_minutes_below": {rid: round(v, 1) for rid, v in sorted(t.below_min.items())},
         }

@@ -478,6 +478,8 @@ function renderAccounting(s) {
   let note = "No full day yet";
   if (yesterday) note = balance?.score != null ? "" : "No burns with two or more rooms";
   if (balance?.arrival_spread_min != null) note = `Last room ${Math.round(balance.arrival_spread_min)} min after the first`;
+  // Radiate started after midnight or was down for a while: no score for that day.
+  if (yesterday?.partial) note = "Not a full day of data";
   $("s-balance-sub").textContent = note;
 }
 

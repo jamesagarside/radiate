@@ -42,6 +42,9 @@ DEFAULT_LAG_S = 8 * 60
 LAG_RISE_K = 0.6
 LAG_TIMEOUT_S = 40 * 60
 CALL_BIAS_K = 0.6  # TRV setpoint lead while Radiate wants a room heated
+TRV_MIN_C = 4.0  # TRVZB setpoint range, 0.5 K steps
+TRV_MAX_C = 35.0
+SINK_LEAD_K = 1.0  # top-up and dump rooms: TRV setpoint at least this above its reading
 TOPUP_K = 0.3
 DEFAULT_LOCKSHIELD = 60
 MIN_OPENING_STEP = 3
@@ -50,6 +53,7 @@ BIG_OPENING_STEP = 15
 CLOSE_BUMP = 10
 PREHEAT_MAX_S = 3 * 3600
 PREHEAT_MARGIN = 1.2
+INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
 LOCKSHIELD_DECAY = 0.9995  # per sample, roughly a 3 day half-life at one sample a minute
 
 
@@ -117,12 +121,16 @@ class EngineState:
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
         return cls(
-            rooms={
-                r.id: RoomState(est=RoomEstimator.new(r.heat_source is HeatSource.CONTINUOUS))
-                for r in cfg.rooms
-                if r.controllable
-            }
+            rooms={r.id: RoomState(est=new_estimator(r)) for r in cfg.rooms if r.controllable}
         )
+
+
+def new_estimator(rc: RoomConfig) -> RoomEstimator:
+    """A room model at its priors, with the room's confidence cap."""
+    return RoomEstimator.new(
+        rc.heat_source is HeatSource.CONTINUOUS,
+        INTERNAL_SENSOR_MAX_CONFIDENCE if rc.role is RoomRole.INTERNAL_SENSOR_ONLY else 1.0,
+    )
 
 
 def _effective_temperature(cfg: RoomConfig, inp: RoomInput) -> float | None:
@@ -240,8 +248,17 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         u = flow_fraction(opening) if heating and avail else 0.0
         # "Could this radiator be getting heat?" ignores the learned arrival lag: a
         # radiator can warm the room before Radiate's lag estimate says it should.
-        if inp.trv_available and heating and opening > 0 and not rs.valve.untrusted:
-            any_open = True  # a valve known to be stuck shut does not count
+        # A valve known to be stuck shut does not count, and nor does a top-up or dump
+        # room: it is opened briefly, often at the floor, and may warm too little to
+        # show heat even when the boiler is fine.
+        if (
+            inp.trv_available
+            and heating
+            and opening > 0
+            and not rs.valve.untrusted
+            and not (rs.topup and not rs.calling)
+        ):
+            any_open = True
         if flowing and heating and opening > 0:
             rs.closed_since = None
         elif rs.closed_since is None:
@@ -500,11 +517,6 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         else:
             opening = rs.lockshield
 
-        trv_setpoint = target
-        if want_heat and firing and not rs.dist.fire:
-            trv_setpoint = (
-                _topup_target(target, rs.topup_base) if rs.topup else target
-            ) + CALL_BIAS_K
         ext = (
             inp.temperature
             if rc.role is RoomRole.NORMAL
@@ -512,7 +524,14 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             and inp.temperature_age_s <= ROOM_SENSOR_STALE_S
             else None
         )
-        action = ValveAction(rc.id, round(trv_setpoint * 2) / 2, opening, 100, ext)
+        heat = want_heat and firing and not rs.dist.fire
+        # What the TRV compares its setpoint with: its own sensor in an internal-sensor
+        # room, otherwise the room sensor sent to it (or Radiate's best estimate).
+        reading = inp.trv_temperature if rc.role is RoomRole.INTERNAL_SENSOR_ONLY else ext
+        if reading is None:
+            reading = rs.temperature
+        trv_setpoint = _trv_setpoint(rc, rs, target, heat, reading)
+        action = ValveAction(rc.id, trv_setpoint, opening, 100, ext)
         if rc.actuation_enabled and inp.trv_available:
             valves[rc.id] = _discipline(rs, action, now)
         if rs.learning_gate in (
@@ -561,6 +580,38 @@ def _preheat_due(cfg: HouseConfig, rs: RoomState, inp: RoomInput, temp: float, o
         (nxt - temp) / rate * 3600 * PREHEAT_MARGIN + rs.arrival_lag_s + cfg.boiler.valve_lead_s
     )
     return need_s >= in_s
+
+
+def _trv_step(value: float, up: bool = False) -> float:
+    """A setpoint the TRVZB accepts: a 0.5 K step within its 4 to 35 °C range."""
+    steps = math.ceil(value * 2 - 1e-9) if up else round(value * 2)
+    return max(TRV_MIN_C, min(TRV_MAX_C, steps / 2))
+
+
+def _trv_setpoint(
+    rc: RoomConfig, rs: RoomState, target: float, heat: bool, reading: float | None
+) -> float:
+    """The setpoint to send, in the frame of the reading the TRV compares it with.
+
+    A normal room's TRV compares its setpoint with the room sensor (sent as its
+    external temperature), so the room's target goes out as it is. An internal-sensor
+    room's TRV compares it with its own reading, which Radiate takes as room - bias,
+    so the target goes out as target - bias. `heat`: Radiate wants the valve open now.
+    `reading`: the temperature the TRV is comparing with, if known.
+    """
+    internal = rc.role is RoomRole.INTERNAL_SENSOR_ONLY
+    frame = -rc.trv_bias_k if internal else 0.0
+    if not heat:
+        return _trv_step(target + frame)
+    base = _topup_target(target, rs.topup_base) if rs.topup else target
+    # A learned bias is not a whole number of 0.5 K steps: round up so the TRV's
+    # hysteresis band stays above the reading at which Radiate calls.
+    setpoint = _trv_step(base + frame + CALL_BIAS_K, up=internal)
+    if rs.topup and reading is not None:
+        # A top-up or dump room is often already at or above its target, inside the
+        # TRV's own hysteresis band, where the TRV would stay shut. Clear the band.
+        setpoint = max(setpoint, _trv_step(reading + SINK_LEAD_K, up=True))
+    return setpoint
 
 
 def _topup_target(target: float, temp: float | None) -> float:

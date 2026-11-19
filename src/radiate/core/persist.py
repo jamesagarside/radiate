@@ -7,11 +7,12 @@ middle of a burn therefore still honours minimum burn, and a restart during REST
 still honours minimum off.
 
 Kept: learned room models, arrival lags, lockshield histograms, disturbance hold-offs,
-stuck-valve verdicts,
-the boiler guard, the short-cycle adaptation and the day's oil and runtime totals with
-the last 7 days' summaries. Dropped: short-lived signals (reading
-windows, radiator drive, demand latches, the no-heat check), which rebuild within a
-few ticks. Sections added after version 1 are optional, so older saves still load.
+stuck-valve verdicts, the boiler guard, the short-cycle adaptation and the day's oil
+and runtime totals with the last 7 days' summaries. The ledger's last tick is kept
+too, so the time Radiate was down counts as unseen and a long outage marks the day
+partial. Dropped: short-lived signals (reading windows, radiator drive, demand
+latches, the no-heat check), which rebuild within a few ticks. Sections added after
+version 1 are optional, so older saves still load.
 
 Corrupt or out-of-range room data resets that room to priors (spec 7).
 """
@@ -23,10 +24,10 @@ from typing import Any
 
 from .accounting import HISTORY_DAYS
 from .boiler import BoilerGuard
-from .decide import EngineState, RoomState
+from .decide import EngineState, RoomState, new_estimator
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator
-from .types import BoilerState, HeatSource, HouseConfig
+from .types import BoilerState, HouseConfig
 
 VERSION = 1
 _DIST_TIMES = ("window_until", "shower_until", "fire_since", "fire_holdoff_until", "spike_until")
@@ -101,6 +102,9 @@ def _dump_ledger(st: EngineState, now: float) -> dict[str, Any]:
         "spreads_min": list(t.spreads_min),
         "below_min": dict(t.below_min),
         "burn_start": _age(led.burn_start, now),
+        "unseen_s": t.unseen_s,
+        # The last tick, so the time Radiate is down counts as unseen (partial days).
+        "last_t": _age(led.last_t, now),
         "history": list(led.history),
     }
 
@@ -133,6 +137,10 @@ def _load_ledger(st: EngineState, raw: Any, now: float, elapsed: float) -> None:
             if isinstance(v, (int, float)) and math.isfinite(v) and v >= 0
         }
     led.burn_start = _at(raw.get("burn_start"), now, elapsed)
+    unseen = raw.get("unseen_s")
+    if isinstance(unseen, (int, float)) and math.isfinite(unseen) and unseen >= 0:
+        t.unseen_s = float(unseen)
+    led.last_t = _at(raw.get("last_t"), now, elapsed)
     history = raw.get("history")
     if isinstance(history, list):
         led.history = [h for h in history if isinstance(h, dict)][-HISTORY_DAYS:]
@@ -193,7 +201,7 @@ def load_state(
             continue
         raw = rooms[rc.id]
         rs: RoomState = st.rooms[rc.id]
-        est = RoomEstimator.new(rc.heat_source is HeatSource.CONTINUOUS)
+        est = new_estimator(rc)
         if not isinstance(raw, dict) or not _valid_estimator(raw.get("est"), est):
             problems.append(f"{rc.id}: saved model invalid, reset to priors")
             continue

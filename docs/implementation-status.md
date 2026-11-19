@@ -10,18 +10,18 @@ Last audit: November 2026, against `main` at `c4657fe`.
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 94 |
-| Partial | 26 | 27 |
-| Missing | 37 | 26 |
+| Done | 82 | 97 |
+| Partial | 26 | 26 |
+| Missing | 37 | 25 |
 
-Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed the problem described under next steps.
+Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score.
 
 Top remaining gaps, most important first:
 
-1. **Valves Radiate counts as open can stay shut** (sections 4.6, 5.4): internal-sensor rooms and dump rooms. See next steps.
-2. **Litres are an upper bound** until the burner-firing signal exists (section 5.6, open question 1).
-3. **Stuck valve, second half:** "rise with valve closed" and the recalibration service (section 7).
-4. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, recorder bootstrap (sections 4.1 to 4.3, 5.5).
+1. **Litres are an upper bound** until the burner-firing signal exists (section 5.6, open question 1).
+2. **Stuck valve, second half:** "rise with valve closed" and the recalibration service (section 7).
+3. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, recorder bootstrap (sections 4.1 to 4.3, 5.5).
+4. **TRV bias refinement** for internal-sensor rooms (section 4.6): tried and dropped, see the row below.
 
 ## 2. House model
 
@@ -69,6 +69,7 @@ Top remaining gaps, most important first:
 | 4.4 Steady-state allocation with a 30 min horizon | partial | `core/decide.py` | Lockshield cap used whenever not firing |
 | 4.4 Lockshield cap `L_r` | partial | `core/decide.py` `_record_lockshield` | 90th percentile of a decaying histogram (about 23 firing hours half-life), not a 7 day window |
 | 4.5 Governed mode settings | done | `drivers/z2m.py` `TrvWriter` | |
+| 4.5 TRV setpoint in the TRV's frame, call bias, sink lead | done | `core/decide.py` `_trv_setpoint` | Rounded to 0.5 K, clamped 4 to 35 °C. Internal-sensor rooms also get their mirrored schedule in this frame (`drivers/live.py` `_mirror`). The TRVZB's own hysteresis (assumed 0.5 K) needs checking on the pilot valve |
 | 4.5 Schedule mirror into the TRVZB | done | `drivers/z2m.py`, `config/schedule.py` | |
 | 4.5 Write discipline (3 % step, 10 min, 15 % exception) | done | `core/decide.py` `_discipline` | |
 | 4.5 Close bump | done | `core/decide.py`, `drivers/z2m.py` | |
@@ -87,8 +88,8 @@ Top remaining gaps, most important first:
 | 4.6 Range cooker "self-heated" after 14 days | missing | | |
 | 4.6 Stairs bypass in the supply factor | done | `core/types.py` `bypass_equivalent` | |
 | 4.6 Stairs rise as a heat-availability check | missing | | |
-| 4.6 Toilet: TRV reading with bias, 1.0 K hysteresis, never sets the pace | partial | `core/decide.py` | Works as specified, but the TRV is sent `target + 0.6` against its raw reading while the core judges `reading - 1.5`, so the core calls when the TRV stays shut. In simulation about a third of all burns start for the toilet alone. See next steps |
-| 4.6 Toilet: bias refinement, confidence capped at 0.5 | missing | | |
+| 4.6 Toilet: TRV reading with bias, 1.0 K hysteresis, never sets the pace | done | `core/decide.py` | The TRV setpoint goes out as `target - bias` (plus the call bias, rounded up), so the TRV opens when the core calls |
+| 4.6 Toilet: bias refinement, confidence capped at 0.5 | partial | `core/decide.py` `new_estimator` | Confidence cap done. Bias refinement deliberately not done: with a cold radiator the observed offset is about 0 K, but the bias also has to cover the warm radiator, and every variant tried in simulation left the toilet short of heat and raised the house comfort deficit ([simulation](simulation.md#internal-sensor-rooms-and-the-trv-bias)) |
 
 ## 5. Boiler logic
 
@@ -102,12 +103,12 @@ Top remaining gaps, most important first:
 | 5.3 Stop rule | partial | `core/decide.py` | Demand latch (gap ≤ 0) rather than "predicted to arrive within one tick" |
 | 5.3 Burn extension (top-up) | done | `core/decide.py` | |
 | 5.3 Store merging (opt-in) | missing | | |
-| 5.4 Open-path guarantee with dump rooms | partial | `core/decide.py` `_ensure_sink` | Dump rooms are chosen, but their top-up setpoint can sit inside the TRV's own hysteresis, so the valve stays shut. In simulation 3 to 6 % of relay time has no TRV open (the stairs bypass still flows). See next steps |
+| 5.4 Open-path guarantee with dump rooms | done | `core/decide.py` `_ensure_sink`, `_trv_setpoint` | A dump or top-up room's TRV setpoint is at least its reading + 1 K, rounded up, so its own hysteresis cannot keep it shut. Relay time with no TRV open: 0 % in simulation (was 3 to 6 %), asserted in `tests/sim`. A top-up-only room does not count as open for the no-heat check |
 | 5.5 Store schedule, up to 4 windows | done | `core/decide.py`, `config/site.py` | |
 | 5.5 Store boost | done | `server/app.py` | |
 | 5.5 Priority awareness: no heat during recovery, learning gated | done | `core/decide.py` | |
 | 5.5 Learned recovery time | missing | `core/types.py` `recovery_s` | Fixed (25 min default) |
-| 5.6 Burner hours, starts, burn-length histogram, starts per hour per day | done | `core/accounting.py` `Ledger`, `core/persist.py` | Per local day, from the observed relay; today and yesterday under `accounting` in `describe()` |
+| 5.6 Burner hours, starts, burn-length histogram, starts per hour per day | done | `core/accounting.py` `Ledger`, `core/persist.py` | Per local day, from the observed relay; today and yesterday under `accounting` in `describe()`. A day Radiate did not see in full (started after midnight, or more than 30 min unseen, including downtime) is `partial` and has no balance score |
 | 5.6 Litres and kWh from the nozzle rating | done | `core/accounting.py` | Relay time, so an upper bound (about 60 % high in simulation) until a firing signal exists |
 | 5.6 Firing time from relay power metering | missing | | |
 | 5.6 Short-cycle alert | done | `core/health.py` `ShortCycle` | Counts observed relay starts; physical burner starts inside a long call need a firing signal (open question 1) |
@@ -171,7 +172,7 @@ Top remaining gaps, most important first:
 | Room stream | partial | `export/elastic.py` `room_docs` | No `temperature.trv`, `model.eta`, or shower, window and cooker flags |
 | Boiler stream | partial | `export/elastic.py` `boiler_doc` | No `boiler.firing` or `store.recovering` |
 | Decision stream | done | `export/elastic.py` | |
-| Daily stream with balance score | done | `export/elastic.py` `daily_doc`, `server/runtime.py` | Sent when the core closes a day; index template `radiate-daily`; balance score not weather-normalised |
+| Daily stream with balance score | done | `export/elastic.py` `daily_doc`, `server/runtime.py` | Sent when the core closes a day; index template `radiate-daily`; `radiate.partial_day` marks a day not seen in full; balance score not weather-normalised |
 | Common fields | partial | `export/elastic.py` | No `host.name` (edge id) |
 | TSDS index templates | done | `export/elastic.py` `index_templates` | Built in code; no install command |
 | On-disk buffer, 7 days, batch 500 or 10 s | done | `server/store.py`, `export/elastic.py` | |
@@ -188,7 +189,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Boiler strip with 24 h burn timeline and countdowns | done | `web/app.js` | Countdown uses the effective minimum off; short-cycling note under the guard bar |
 | Why the burner is on | done | `web/app.js` `statusLine` | Names burn extensions ("Topping up") and heat sinks separately, from `rooms[].extend` |
 | Setpoint control and hold | done | `web/app.js`, `server/bridge.py` | Stepper per room, 0.5 °C steps, 5 to 28 °C; shows the hold and resumes the schedule. Server and demo |
-| Daily accounting and stuck valves in the UI | done | `web/app.js` | Burner hours and starts today, yesterday's balance score, a line on a room whose valve may be stuck |
+| Daily accounting and stuck valves in the UI | done | `web/app.js` | Burner hours and starts today, yesterday's balance score ("Not a full day of data" for a partial day), a line on a room whose valve may be stuck |
 | Setup wizard | missing | | |
 
 ## 11. Simulator
@@ -234,7 +235,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 
 Larger items left for later, each with a short design note.
 
-- **Make every valve Radiate counts as open actually open.** Two cases found in simulation, both changing control behaviour, so they need the owner's view and a check on the pilot valve. (1) Internal-sensor rooms: send the TRV `target - bias + 0.6` when calling (and `target - bias` otherwise), so the TRV's own thermostat agrees with the core; and refine the bias as spec 4.6 says (towards 0 once the radiator has been off for 2 h, since a cold radiator does not warm the TRV), or the room will overheat by the bias. (2) Dump and top-up rooms: send at least `room temperature + 1 K`, rounded up to 0.5 K, so the TRV's hysteresis cannot keep the valve shut. Then re-run `radiate sim`; expect fewer night burns.
+- **Check the TRV setpoint frame on the pilot valve.** Confirm the TRVZB opens when its reading is 0.5 K below the setpoint, and that a heat sink sent its reading + 1 K opens. If the toilet runs warm, set its `trv_bias_k` closer to 0, for example -1.0 K.
 - **"Rise with valve closed" and recalibration.** Flag a room whose TRV warms while its valve is commanded shut and no external heat source is flagged; add a `recalibrate_valve` API call and HA service that sends the TRVZB calibration command (check the Zigbee2MQTT converter for the attribute first).
 - **Reconciler failures into the core.** Pass the writer's failed settings in `RoomInput` so the "valve trusted" learning gate covers them.
 

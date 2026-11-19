@@ -39,3 +39,9 @@ def test_local_slope():
     pts = [(t * 60.0, 18.0 + 0.5 * t / 60.0) for t in range(16)]  # 0.5 K/h
     assert abs(local_slope(pts) - 0.5) < 1e-6
     assert local_slope(pts[:3]) is None
+
+
+def test_confidence_cap():
+    est = RoomEstimator.new(max_confidence=0.5)
+    est.p[0][0] = 0.0  # as certain as it can be
+    assert est.confidence == 0.5
