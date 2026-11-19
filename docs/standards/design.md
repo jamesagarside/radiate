@@ -22,19 +22,33 @@ All colours are CSS custom properties on `:root`, with a dark set under `@media 
 | `--surface` | `#ffffff` | `#1e1c1a` | Cards, header |
 | `--surface-2` | `#f1eee9` | `#26231f` | Tracks, segmented control, neutral chips |
 | `--text` | `#1d1b19` | `#f1ede8` | Body text |
-| `--muted` | `#6e6862` | `#a39b92` | Secondary text, labels |
+| `--muted` | `#67615b` | `#a39b92` | Secondary text, labels |
 | `--line` | `#e6e1da` | `#34302b` | Borders |
-| `--heat` | `#e0662b` | `#f08a4b` | Burns, valve bars, the brand mark |
+| `--heat` | `#d95f24` | `#f08a4b` | Burns, valve bars, the brand mark |
 | `--heat-soft` | `#fbe3d6` | `#3d2618` | Background for heating and fire states |
-| `--ember` | `#c2410c` | `#c2410c` (no dark value) | Text on `--heat-soft` |
-| `--cool` | `#3c6e91` | `#7fb2d6` | Rest, store, demo banner, focus ring |
+| `--ember` | `#b53c0b` | `#f5a06a` | Text on `--heat-soft` |
+| `--cool` | `#386787` | `#7fb2d6` | Rest, store, demo banner, focus ring, the sign-in button |
 | `--cool-soft` | `#dde9f2` | `#1d2c37` | Background for rest, heat sink and demo |
-| `--ok` | `#2f7d5b` | `#6cc59c` | Comfortable |
+| `--ok` | `#2a7253` | `#6cc59c` | Comfortable |
 | `--ok-soft` | `#dcefe5` | `#17302a` | Background for comfortable |
-| `--warn` | `#a35a00` | `#f0b45a` | Lead, preheating, alerts |
+| `--warn` | `#975300` | `#f0b45a` | Lead, preheating, alerts, dry run, stale data |
 | `--warn-soft` | `#fbecd2` | `#36290f` | Background for those states |
 
 Colour carries meaning, so keep it consistent: heat colours for anything burning or calling, cool for resting and hot water, green for comfortable, amber for waiting or needing attention. Every coloured state also has a text label, so colour is never the only signal.
+
+These text pairs meet WCAG 2.1 AA for small text (4.5:1). Badges, chips and the pressed button use them at 0.72rem to 0.9rem.
+
+| Text on background | Light | Dark |
+|---|---|---|
+| `--ember` on `--heat-soft` | 4.7:1 | 6.8:1 |
+| `--warn` on `--warn-soft` | 5.1:1 | 7.7:1 |
+| `--ok` on `--ok-soft` | 4.8:1 | 6.8:1 |
+| `--cool` on `--cool-soft` | 4.9:1 | 6.3:1 |
+| `--muted` on `--surface-2` | 5.3:1 | 5.7:1 |
+| `--muted` on `--cool-soft` (demo banner note) | 4.9:1 | 5.2:1 |
+| `--surface` on `--cool` (sign-in button) | 6.1:1 | 7.5:1 |
+
+Bars meet 3:1 against their track: `--heat` on `--surface-2` is 3.2:1 in light mode and 6.3:1 in dark mode.
 
 ## Type
 
@@ -83,7 +97,7 @@ Colour carries meaning, so keep it consistent: heat colours for anything burning
 | Name exact properties | List each transitioned property. Never `transition: all`. |
 | Use transitions, not keyframes, for live data | Values change every tick; transitions retarget, keyframes restart. |
 
-New UI that enters or leaves (a sheet, a toast) starts from `scale(0.95)` and `opacity: 0`, never from `scale(0)`.
+New UI that enters or leaves (a sheet, a toast) starts from `scale(0.95)` and `opacity: 0`, never from `scale(0)`. The sign-in card enters from `scale(0.98)` and `opacity: 0` with `@starting-style`. Stale data fades to `opacity: 0.55` over 200 ms.
 
 ## Accessibility
 
@@ -93,13 +107,10 @@ New UI that enters or leaves (a sheet, a toast) starts from `scale(0.95)` and `o
 - The focus ring is `outline: 2px solid var(--cool)` with a 2px offset on `:focus-visible`. Never remove it.
 - The status line is `aria-live="polite"`, so screen readers hear the boiler state change without being interrupted.
 - Decorative graphics (the brand mark, the guard bar) are `aria-hidden="true"`. Graphics that carry data, such as the timeline, have an `aria-label`.
-- Touch targets aim for at least 44 by 44 px on phones.
+- Touch targets are at least 44 px tall on touch screens. Under `(pointer: coarse)`, buttons, the segmented controls and the token field get `min-height: 44px` (segment buttons also `min-width: 44px`). Desktop buttons stay about 32 px tall.
+- The alerts toggle is a `<button>` with `aria-expanded` and `aria-controls`. Sign-in errors use `role="alert"`.
 
-Known gaps against these rules, as of this page:
-
-- Dark mode `--ember` on `--heat-soft` measures about 2.7:1, below AA. `--ember` needs a dark value.
-- In light mode the small badge and chip text on its soft background measures 4.2:1 to 4.5:1. That passes for large text only, and badges are 0.72rem to 0.8rem.
-- Buttons are about 32 px tall, under the 44 px target on phones.
+Stale data is the one deliberate exception to the contrast rule: it dims to 55% opacity so it reads as out of date, and the status line above it keeps full contrast and says how old it is.
 
 ## Copy
 
@@ -111,7 +122,7 @@ UI text follows the same writing rules as the docs: UK English, metric units, no
 - **Sentence case** for labels and buttons: "Boost hot water", "Fire lit".
 - **Units every time**: `20.5°` for temperatures, `35%` for openings, `12 min` for durations, `K/h` for rates. Times are 24-hour local time (`07:10`).
 - **Missing values** show a single placeholder glyph, `–`, never `0` or blank. This is the only place a dash character appears.
-- **Errors say what happened and what Radiate is doing about it**: "Cannot reach Radiate. Retrying…".
+- **Errors say what happened and what Radiate is doing about it**: "Cannot reach Radiate. Retrying… Showing data from 14:32.".
 - No exclamation marks, no blame, no marketing words.
 
 ## States to design for
@@ -121,10 +132,11 @@ Every view has to make sense in each of these states. When you add a component, 
 | State | What the reader must see | How it shows today |
 |---|---|---|
 | Loading | That the page is connecting | Status line "Connecting…" until the first state arrives |
-| Offline | That the data is stale and Radiate is retrying | Partly. "Cannot reach Radiate. Retrying…" appears only when a poll fails. When the WebSocket drops, the page reconnects every 2 s but keeps showing the last state with no stale marker |
+| Offline | That the data is stale and Radiate is retrying | When the WebSocket drops, the page polls once per reconnect attempt (2 s, backing off to 15 s). If the poll fails too, the page dims and the status line, in amber, says "Cannot reach Radiate. Retrying… Showing data from 14:32." The next state from either path clears it |
 | Demo | That nothing is real | Cool banner with the simulated time and boiler, store and stairs temperatures |
-| Dry run | That Radiate is not writing to devices | Not shown yet. The state's `telemetry.dry_run` is true. It needs a persistent banner, like the demo one, with the count of intended writes |
-| Alerts | What needs attention, in words | Amber alerts panel under the rooms |
+| Dry run | That Radiate is not writing to devices | Persistent notice under the header with an amber "Dry run" tag, the held-back valve writes and boiler commands, and the latest five writes behind a disclosure |
+| Alerts | What needs attention, in words | Amber "Needs attention" panel under the rooms, one alert per list item. A problem shared by several rooms is one line, for example "TRV not reachable (8 rooms): Bedroom 1, …". After four lines the rest sit behind "Show N more" |
+| Sign-in | That the server needs its token | When the API answers 401, a sign-in card replaces the page. The token is kept in `localStorage` and sent as a Bearer header and as the stream's first message. Never shown through Home Assistant ingress or in the demo |
 | Safe mode | That the boiler is stopping and why | Shown as an alert |
 | Boiler states | Idle, opening valves, firing, resting, with minimum burn and minimum off progress | Chip, status line and guard bar |
 | Room states | Heating, preheating, heat sink, fire lit, comfortable, waiting, bypass | Badge per room card |

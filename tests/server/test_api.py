@@ -1,7 +1,9 @@
 import pytest
+from aiohttp import WSMsgType
 from aiohttp.test_utils import TestClient, TestServer
 
-from radiate.server.app import create_app
+from radiate.server import app as app_module
+from radiate.server.app import WS_UNAUTHORISED, create_app
 from radiate.server.demo import DemoDriver
 from radiate.server.runtime import Runtime
 from radiate.sim.reference import house_config
@@ -92,3 +94,71 @@ async def test_bad_bodies_are_400_not_500(client):
     assert r.status == 400
     r = await client.post("/api/v1/rooms/nope/fire", data="{bad", headers=H)
     assert r.status == 404
+
+
+async def test_non_ascii_token_is_401_not_500(client):
+    r = await client.get("/api/v1/state", headers={"Authorization": "Bearer café"})
+    assert r.status == 401
+
+
+async def test_stream_accepts_the_bearer_header(client):
+    async with client.ws_connect("/api/v1/stream", headers=H) as ws:
+        state = await ws.receive_json(timeout=5)
+        assert "boiler" in state
+
+
+async def test_stream_accepts_the_token_as_first_message(client, caplog):
+    caplog.set_level("DEBUG")
+    async with client.ws_connect("/api/v1/stream") as ws:
+        await ws.send_json({"token": "secret"})
+        state = await ws.receive_json(timeout=5)
+        assert "rooms" in state
+    assert "secret" not in caplog.text
+
+
+async def test_stream_closes_on_a_wrong_token(client):
+    async with client.ws_connect("/api/v1/stream") as ws:
+        await ws.send_json({"token": "nope"})
+        msg = await ws.receive(timeout=5)
+        assert msg.type == WSMsgType.CLOSE
+        assert ws.close_code == WS_UNAUTHORISED
+
+
+@pytest.mark.parametrize("first", ["secret", "[]", '{"token": 1}', '{"token": "café"}'])
+async def test_stream_rejects_malformed_handshakes(client, first):
+    async with client.ws_connect("/api/v1/stream") as ws:
+        await ws.send_str(first)
+        await ws.receive(timeout=5)
+        assert ws.close_code == WS_UNAUTHORISED
+
+
+async def test_stream_closes_when_no_token_arrives(client, monkeypatch):
+    monkeypatch.setattr(app_module, "STREAM_AUTH_TIMEOUT_S", 0.05)
+    async with client.ws_connect("/api/v1/stream") as ws:
+        await ws.receive(timeout=5)
+        assert ws.close_code == WS_UNAUTHORISED
+
+
+async def test_plain_get_on_stream_needs_the_token(client):
+    assert (await client.get("/api/v1/stream")).status == 401
+
+
+async def test_stream_needs_no_handshake_without_a_token():
+    rt = Runtime(house_config(), DemoDriver())
+    await rt.step()
+    async with (
+        TestClient(TestServer(create_app(rt))) as c,
+        c.ws_connect("/api/v1/stream") as ws,
+    ):
+        assert "boiler" in await ws.receive_json(timeout=5)
+
+
+async def test_stream_trusts_ingress_from_supervisor_address():
+    rt = Runtime(house_config(), DemoDriver())
+    await rt.step()
+    app = create_app(rt, token="secret", ingress_ip="127.0.0.1")
+    async with (
+        TestClient(TestServer(app)) as c,
+        c.ws_connect("/api/v1/stream", headers={"X-Ingress-Path": "/x"}) as ws,
+    ):
+        assert "boiler" in await ws.receive_json(timeout=5)

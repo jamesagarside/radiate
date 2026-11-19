@@ -2,48 +2,106 @@
 // Elements are created once and updated in place so transitions can retarget.
 //
 // All server traffic goes through a transport: { house(), state(), post(path, body),
-// subscribe(onState) }. The default talks HTTP and WebSocket to the Radiate server.
-// The static demo (<html data-transport="demo">) swaps in demo.js, which runs the
-// same engine in a Web Worker. Both share this one UI.
+// subscribe(onState, onLink) }. The default talks HTTP and WebSocket to the Radiate
+// server and reports the link as "live", "lost" or "auth" through onLink. The static
+// demo (<html data-transport="demo">) swaps in demo.js, which runs the same engine in
+// a Web Worker, needs no token and never loses its link. Both share this one UI.
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
 const fmtT = (t) => (t == null ? "–" : `${t.toFixed(1)}°`);
 const mins = (s) => `${Math.max(0, Math.round(s / 60))} min`;
 const clock = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 const cards = new Map();
 let last = null;
+let lastAt = null;
 let house = null;
 
+// The server answered 401: the token is missing or wrong.
+class AuthError extends Error {}
+
+// With RADIATE_TOKEN set, the token lives in this browser's localStorage. Storage can
+// be blocked (private windows, strict settings), so fall back to memory.
+const TOKEN_KEY = "radiate.token";
+function loadToken() {
+  try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
+}
+function storeToken(value) {
+  try {
+    if (value) localStorage.setItem(TOKEN_KEY, value);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch { /* memory only */ }
+}
+
 function httpTransport() {
-  const getJson = async (path) => {
-    const res = await fetch(api(path));
-    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
-    return res.json();
+  let token = loadToken();
+  let ws = null;
+  let timer = null;
+  let retryMs = 2000;
+  let onState = null;
+  let onLink = null;
+
+  const headers = (extra = {}) => (token ? { ...extra, Authorization: `Bearer ${token}` } : extra);
+  const send = async (path, init = {}) => {
+    const res = await fetch(api(path), { ...init, headers: headers(init.headers) });
+    if (res.status === 401) throw new AuthError(path);
+    if (!res.ok) throw new Error(`${path}: HTTP ${res.status} ${await res.text()}`);
+    return res;
   };
+
+  // Browsers cannot set headers on a WebSocket, so the token goes in the first
+  // message, never in the URL. The server closes with 4401 if it is wrong.
+  const connect = () => {
+    timer = null;
+    const url = new URL(api("stream"));
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      ws = null;
+      onLink("lost");
+      timer = setTimeout(connect, retryMs);
+      return;
+    }
+    const sock = ws;
+    sock.onopen = () => { if (token) sock.send(JSON.stringify({ token })); };
+    sock.onmessage = (ev) => {
+      retryMs = 2000;
+      onLink("live");
+      onState(JSON.parse(ev.data));
+    };
+    sock.onclose = (ev) => {
+      if (ws === sock) ws = null;
+      if (ev.code === 4401) { onLink("auth"); return; }
+      onLink("lost");
+      timer = setTimeout(connect, retryMs);
+      retryMs = Math.min(retryMs * 2, 15000);
+    };
+    sock.onerror = () => sock.close();
+  };
+
   return {
-    house: () => getJson("house"),
-    state: () => getJson("state"),
+    hasToken: () => Boolean(token),
+    setToken(value) {
+      token = value;
+      storeToken(value);
+    },
+    house: async () => (await send("house")).json(),
+    state: async () => (await send("state")).json(),
     async post(path, body) {
-      const res = await fetch(api(path), {
+      await send(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await res.text());
     },
-    subscribe(onState) {
-      const connect = () => {
-        const url = new URL(api("stream"));
-        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-        let ws;
-        try { ws = new WebSocket(url); } catch { setInterval(poll, 5000); return; }
-        ws.onmessage = (ev) => onState(JSON.parse(ev.data));
-        ws.onclose = () => setTimeout(connect, 2000);
-        ws.onerror = () => ws.close();
-      };
-      connect();
+    // Safe to call again after signing in: it connects only if not already connected.
+    subscribe(stateCb, linkCb) {
+      onState = stateCb;
+      onLink = linkCb;
+      if (!ws && !timer) connect();
     },
   };
 }
@@ -51,7 +109,16 @@ function httpTransport() {
 const transport = document.documentElement.dataset.transport === "demo"
   ? (await import("./demo.js")).createDemoTransport()
   : httpTransport();
-const post = (path, body) => transport.post(path, body);
+
+async function post(path, body) {
+  try {
+    await transport.post(path, body);
+  } catch (err) {
+    if (err instanceof AuthError) askForToken();
+    else console.error(err);
+    throw err;
+  }
+}
 
 function badgeFor(r) {
   if (r.role === "passive") return ["Bypass, not controlled", ""];
@@ -193,29 +260,205 @@ function render(s) {
     banner.hidden = false;
     $("banner-text").textContent = `Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time. Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
   }
+  renderDryRun(s.telemetry);
   for (const r of s.rooms) renderRoom(r);
-  const alerts = $("alerts");
-  alerts.hidden = !s.alerts.length;
-  alerts.textContent = s.alerts.join(" ");
+  renderAlerts(s.alerts);
+
+  lastAt = new Date();
+  delete document.body.dataset.link;
+  if (!house) loadHouse();
 }
 
-$("mode").addEventListener("click", async (e) => {
+// Dry run: the live driver reads devices but holds back every write.
+let intendedKey = "";
+function renderDryRun(t) {
+  const box = $("dryrun");
+  box.hidden = !t?.dry_run;
+  if (box.hidden) return;
+  const valves = t.intended_writes ?? 0;
+  const boiler = t.shelly_intended;
+  const held = boiler != null
+    ? `${plural(valves, "valve write", "valve writes")} and ${plural(boiler, "boiler command", "boiler commands")}`
+    : plural(valves, "valve write", "valve writes");
+  $("dryrun-count").textContent = valves || boiler ? `Held back so far: ${held}.` : "Nothing held back yet.";
+
+  const recent = t.recent_intended ?? [];
+  const key = JSON.stringify(recent);
+  if (key === intendedKey) return;
+  intendedKey = key;
+  const details = $("dryrun-recent");
+  details.hidden = !recent.length;
+  const list = details.querySelector("ul");
+  list.textContent = "";
+  for (const w of [...recent].reverse()) {
+    const li = document.createElement("li");
+    const topic = document.createElement("code");
+    topic.textContent = w.topic;
+    const payload = document.createElement("code");
+    payload.className = "payload";
+    payload.textContent = typeof w.payload === "string" ? w.payload : JSON.stringify(w.payload);
+    li.append(topic, payload);
+    list.appendChild(li);
+  }
+}
+
+// Alerts arrive as sentences, room name first ("Lounge: TRV not reachable"). When
+// several rooms share a problem, list it once with the rooms, so ten offline TRVs
+// read as one line. Past ALERTS_SHOWN lines, the rest sit behind a toggle.
+const ALERTS_SHOWN = 4;
+let alertsKey = "";
+function groupAlerts(alerts) {
+  const groups = new Map();
+  for (const text of alerts) {
+    const at = text.indexOf(": ");
+    const problem = at > 0 ? text.slice(at + 2) : text;
+    const g = groups.get(problem) ?? { problem, first: text, rooms: [] };
+    if (at > 0) g.rooms.push(text.slice(0, at));
+    groups.set(problem, g);
+  }
+  return [...groups.values()].map((g) => {
+    if (g.rooms.length < 2) return g.first;
+    const problem = g.problem[0].toUpperCase() + g.problem.slice(1);
+    return `${problem} (${plural(g.rooms.length, "room", "rooms")}): ${g.rooms.join(", ")}`;
+  });
+}
+
+function renderAlerts(alerts) {
+  const key = JSON.stringify(alerts);
+  if (key === alertsKey) return;
+  alertsKey = key;
+  const box = $("alerts");
+  box.hidden = !alerts.length;
+  const lines = groupAlerts(alerts);
+  const list = $("alerts-list");
+  list.textContent = "";
+  lines.forEach((line, i) => {
+    const li = document.createElement("li");
+    li.textContent = line;
+    li.dataset.extra = String(i >= ALERTS_SHOWN);
+    list.appendChild(li);
+  });
+  const more = $("alerts-more");
+  const extra = lines.length - ALERTS_SHOWN;
+  more.hidden = extra <= 0;
+  more.dataset.extra = String(Math.max(0, extra));
+  setAlertsExpanded(more.getAttribute("aria-expanded") === "true");
+}
+
+function setAlertsExpanded(open) {
+  const more = $("alerts-more");
+  more.setAttribute("aria-expanded", String(open));
+  more.textContent = open ? "Show fewer" : `Show ${more.dataset.extra} more`;
+  $("alerts-list").dataset.expanded = String(open);
+}
+
+$("alerts-more").addEventListener("click", () => {
+  setAlertsExpanded($("alerts-more").getAttribute("aria-expanded") !== "true");
+});
+
+$("mode").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-mode]");
-  if (!btn) return;
-  try { await post("mode", { mode: btn.dataset.mode }); } catch (err) { console.error(err); }
+  if (btn) post("mode", { mode: btn.dataset.mode }).catch(() => {});
 });
-$("boost").addEventListener("click", async () => {
-  try { await post("store/boost", { minutes: last?.store.boost ? 0 : 60 }); } catch (err) { console.error(err); }
+$("boost").addEventListener("click", () => {
+  post("store/boost", { minutes: last?.store.boost ? 0 : 60 }).catch(() => {});
 });
+
+// Connection state. While the live stream is down, poll once per reconnect attempt;
+// if that fails too, dim the page and say how old the data is. The next state that
+// arrives, from either path, clears it.
+function markOffline() {
+  if (!last) {
+    $("status").textContent = "Cannot reach Radiate. Retrying…";
+    return;
+  }
+  document.body.dataset.link = "stale";
+  const at = `${String(lastAt.getHours()).padStart(2, "0")}:${String(lastAt.getMinutes()).padStart(2, "0")}`;
+  $("status").textContent = `Cannot reach Radiate. Retrying… Showing data from ${at}.`;
+}
 
 async function poll() {
   try {
     render(await transport.state());
-  } catch {
-    $("status").textContent = "Cannot reach Radiate. Retrying…";
+    return true;
+  } catch (err) {
+    if (err instanceof AuthError) askForToken();
+    else markOffline();
+    return false;
   }
 }
 
-try { house = await transport.house(); } catch { /* render will retry */ }
-await poll();
-transport.subscribe(render);
+function onLink(link) {
+  if (link === "lost") poll();
+  else if (link === "auth") askForToken();
+}
+
+let houseLoading = false;
+async function loadHouse() {
+  if (houseLoading) return;
+  houseLoading = true;
+  try { house = await transport.house(); } catch { /* retried on the next render */ }
+  houseLoading = false;
+}
+
+async function start() {
+  try {
+    house = await transport.house();
+  } catch (err) {
+    if (err instanceof AuthError) { askForToken(); return; }
+  }
+  await poll();
+  if (document.body.dataset.auth !== "needed") transport.subscribe(render, onLink);
+}
+
+// Sign-in: only reachable when the server has RADIATE_TOKEN set and the request did
+// not come through Home Assistant ingress. The demo never gets here.
+function askForToken() {
+  if (document.body.dataset.auth === "needed") return;
+  const rejected = transport.hasToken();
+  transport.setToken("");
+  document.body.dataset.auth = "needed";
+  $("signin").hidden = false;
+  $("status").textContent = "Sign in to see the house.";
+  const error = $("signin-error");
+  error.hidden = !rejected;
+  error.textContent = rejected ? "The saved token was not accepted. Enter it again." : "";
+  $("signin-token").focus();
+}
+
+$("signin-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $("signin-token");
+  const button = $("signin-form").querySelector("button");
+  const error = $("signin-error");
+  const value = input.value.trim();
+  error.hidden = true;
+  if (!value) return;
+  button.disabled = true;
+  // A header can carry only printable ASCII, so anything else cannot be the token.
+  const sendable = /^[\x21-\x7e]+$/.test(value);
+  if (sendable) transport.setToken(value);
+  try {
+    if (!sendable) throw new AuthError("token");
+    house = await transport.house();
+  } catch (err) {
+    button.disabled = false;
+    error.hidden = false;
+    if (err instanceof AuthError) {
+      transport.setToken("");
+      error.textContent = "That token was not accepted. Check it and try again.";
+    } else {
+      error.textContent = "Cannot reach Radiate. Try again in a moment.";
+    }
+    input.select();
+    return;
+  }
+  button.disabled = false;
+  input.value = "";
+  $("signin").hidden = true;
+  delete document.body.dataset.auth;
+  $("status").textContent = "Connecting…";
+  await start();
+});
+
+await start();
