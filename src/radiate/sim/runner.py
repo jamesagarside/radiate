@@ -176,12 +176,15 @@ def run(
     outage: tuple[float, float] | None = None,
     zigbee_outage: tuple[float, float] | None = None,
     watchdog_windows: tuple[tuple[int, int], ...] = WATCHDOG_SCHEDULE,
+    leaking_valves: dict[str, float] | None = None,
 ) -> Result:
     """One closed-loop run.
 
     `crash_at_s`: Radiate stops for good. `outage`: Radiate is down from the first time
     to the second, then restarts from its saved state (as `radiate serve` would).
     `zigbee_outage`: no TRV reachable for that span, so Radiate enters safe mode.
+    `seized_valves`: no flow at any opening. `leaking_valves`: room id to the share of
+    full flow that still passes when the valve is shut (lost calibration).
     """
     d = disturbances or Disturbances()
     cfg = cfg or house_config()
@@ -189,6 +192,8 @@ def run(
     house.outdoor_mean = outdoor_mean
     for rid in seized_valves:
         house.rooms[rid].radiator.pipe_k = 0.0  # pin seized shut: the head moves, no flow
+    for rid, share in (leaking_valves or {}).items():
+        house.rooms[rid].radiator.leak = share
     if pump_qmax is not None:
         house.pump_qmax = pump_qmax
     st = engine or EngineState.new(cfg)
