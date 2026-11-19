@@ -10,17 +10,17 @@ Last audit: November 2026, against `main` at `c4657fe`.
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 97 |
-| Partial | 26 | 26 |
-| Missing | 37 | 25 |
+| Done | 82 | 98 |
+| Partial | 26 | 27 |
+| Missing | 37 | 24 |
 
-Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score.
+Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), and the learner bootstraps from that history.
 
 Top remaining gaps, most important first:
 
 1. **Litres are an upper bound** until the burner-firing signal exists (section 5.6, open question 1).
 2. **Stuck valve, second half:** "rise with valve closed" and the recalibration service (section 7).
-3. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, recorder bootstrap (sections 4.1 to 4.3, 5.5).
+3. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, bootstrap from the Home Assistant recorder (sections 4.1 to 4.3, 5.5).
 4. **TRV bias refinement** for internal-sensor rooms (section 4.6): tried and dropped, see the row below.
 
 ## 2. House model
@@ -60,7 +60,7 @@ Top remaining gaps, most important first:
 | 4.2 Flow sensitivity `η` | missing | `core/allocator.py` `AllocRoom.eta` | Always the 0.7 default; no emitter-limited report |
 | 4.3 RLS with forgetting, priors, bounds | done | `core/estimator.py` | |
 | 4.3 Diagnostic when a parameter sits on a bound for 24 h | missing | | |
-| 4.3 Bootstrap from 14 days of history | missing | | |
+| 4.3 Bootstrap from 14 days of history | partial | `core/bootstrap.py`, `server/runtime.py` `restore`, `cli.py` `bootstrap` | From the standalone database's tick history, on start without usable saved state or with `radiate bootstrap`; keeps models, lags and lockshield histograms only. Not from the Home Assistant recorder |
 | 4.3 Outlier rejection at 4 σ | done | `core/estimator.py` | |
 | 4.3 Per-room confidence | done | `core/estimator.py` | |
 | 4.4 Synchronised arrival allocation | done | `core/allocator.py` | Deadline-aware for optimum start |
@@ -125,6 +125,7 @@ Top remaining gaps, most important first:
 | Every 60 s | done | `server/runtime.py` | |
 | Extra tick on significant input change (5 s debounce) | missing | | Fixed interval only |
 | Decision log | done | `server/runtime.py` | Boiler, disturbance and safe-mode reasons; in memory, last 500 |
+| Record every tick's snapshot and actions; replay | done | `core/history.py`, `server/history.py`, `server/replay.py`, `cli.py` `replay` | `history` table in `radiate.db`, `house.history_days` (14) retention, about 1.2 MB a day. Replay with the same code and configuration gives no differences. Live driver only |
 
 ## 7. Failure modes
 
@@ -143,7 +144,7 @@ Top remaining gaps, most important first:
 | Overheating with the valve closed | partial | `core/disturbance.py` | Gates learning (`unexplained_heat`); no alert, no valve check |
 | Frost | done | `core/decide.py` | |
 | Clock jump or DST | done | `server/runtime.py`, `drivers/live.py` | Monotonic timers; schedules in local time (`next_change` is out by an hour across a DST change) |
-| Corrupt learned state | partial | `core/persist.py` | Reset to priors and logged; no replay of recent history, no UI alert |
+| Corrupt learned state | partial | `core/persist.py`, `core/bootstrap.py` | A saved state that can't be read is relearned from the tick history; a single corrupt room is reset to priors and logged, without a replay or a UI alert |
 
 ## 8. Interfaces
 
@@ -243,7 +244,7 @@ Larger items left for later, each with a short design note.
 - **Learn `η` per room.** Needs burns with few and with many valves open for the same room. Store per-room pairs of (supply factor, fitted gain) per burn and fit the log-log slope after 10 qualifying burns. Feeds the allocator's emitter-limited rule and the "bigger radiator" advice.
 - **Learn the valve dead zone.** Per valve, the smallest commanded opening that produced a `T_trv` rise within the arrival lag plus 20 min. Needs deliberate low openings, so tie it to the summer valve exercise or a one-off calibration burn.
 - **Learn the store recovery time.** Median time from store relay on to `T_trv` rising again on any open radiator, over the last 15 recoveries. Replaces the fixed `recovery_s` in the store-recovery gate.
-- **Recorder bootstrap.** Replay up to 14 days of history (HA recorder through the integration, or the standalone database once it keeps raw readings) through `decide` with actuation ignored. Needs a history source first: the server does not store raw readings yet.
+- **Recorder bootstrap.** The standalone database's tick history is replayed already. Left: the Home Assistant recorder as a second source, for installs that start with no tick history, and relearning a single room whose saved model is corrupt.
 - **Setup wizard.** Discover rooms from Zigbee2MQTT device names (or HA areas through the integration) and write the YAML file. UI work; wait for the web refactor.
 - **Cloud edge.** Out of scope until the local editions are proven (ADR-0002).
 - **Burner firing from relay power.** Add `burner_firing` to the snapshot from the Shelly `apower` once the OFTEC engineer confirms the wiring (spec open question 1), and use firing time for accounting.

@@ -39,8 +39,19 @@ The server waits up to 40 seconds for MQTT and the first TRV readings, then runs
 - The heating mode (`auto`, `off`, or `frost`).
 - The Elastic export queue, up to 7 days, so an outage or restart loses no metrics.
 - Setpoint overrides from the UI, the API or the Home Assistant climate entity. An override ends at the room's next scheduled setpoint change unless it was set for a duration or until cleared, and one that ends while Radiate is stopped is dropped on restart.
+- The tick history: every tick's inputs and decisions for the last `house.history_days` days. See [Tick history and replay](#tick-history-and-replay).
 
 For Docker, the Home Assistant App and the other ways to run the server, see [deployment](deployment.md).
+
+## Tick history and replay
+
+Each minute the live server records the tick's snapshot (every room's readings, setpoints and relay states) and what Radiate decided: valve settings, relays, the boiler state, and the reason and alert codes. Reason messages aren't stored. The server also records how its engine state was built each time it starts, and a copy of the engine state every 6 hours.
+
+The history keeps `house.history_days` days, 14 by default, and Radiate deletes older entries every hour. Each tick takes about 0.7 kB, compressed, so the reference house uses about 1.2 MB a day and 17 MB for 14 days. The demo doesn't record.
+
+`radiate replay` shows what Radiate would have done during a dry run and why, and checks a code or configuration change against real days before you use it. If Radiate starts without usable saved state, it replays the history to learn its room models again. See [replay and bootstrap](deployment.md#replay-and-bootstrap).
+
+In dry run, Radiate only decides valve settings for the rooms it actuates, which is the pilot valve unless rooms set `actuate`. To see every room's valve settings in the history while nothing is written, set `actuate: true` on every room and keep `dry_run: true`.
 
 ## Secrets
 
@@ -62,6 +73,7 @@ mqtt:
 | `outdoor_sensor` | none | Zigbee2MQTT name of an outdoor temperature sensor. Without one, the model assumes 5 °C |
 | `data_dir` | `./data` | Folder for `radiate.db` |
 | `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale |
+| `history_days` | 14 | Days of tick history kept in `radiate.db`, 0 to 90. Set 0 to turn recording off |
 
 ### mqtt
 

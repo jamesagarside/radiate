@@ -112,7 +112,7 @@ Online recursive least squares (RLS) per room, parameters `θ_r = [a_r, b_r, d_r
 - **Forgetting factor** λ chosen for a memory of about 3 days of heating, so seasonal drift is tracked but a single odd day is not.
 - **Priors:** `a = 1.5 K/h`, `b = 0.08 /h`, `d = 0`, with prior strength equal to 6 hours of data. `d` keeps a strong prior towards 0 except in rooms with a continuous heat source.
 - **Bounds:** `0.1 ≤ a ≤ 12 K/h`, `0.005 ≤ b ≤ 0.6 /h`, `−0.5 ≤ d ≤ 3 K/h`. Values that hit a bound for 24 h raise a diagnostic.
-- **Bootstrap:** on first start, replay up to 14 days of history (Home Assistant recorder or the standalone database) through the same estimator, so day one is not a cold start.
+- **Bootstrap:** on first start, replay up to 14 days of history (Home Assistant recorder or the standalone database) through the same estimator, so day one is not a cold start. As built: the standalone database's tick history is replayed through `decide` from priors with a throwaway state, whenever there is no usable saved state, and with `radiate bootstrap`. Only the room models, arrival lags and lockshield histograms are kept; the boiler guard and timers come from the saved state. The Home Assistant recorder is not a source yet.
 - **Outlier rejection:** samples with a residual beyond 4 σ (rolling) are dropped and counted.
 - **Confidence:** parameter covariance gives a per-room confidence (0 to 1), shown in the UI and exported.
 
@@ -293,6 +293,8 @@ every 60 s and on significant input change (debounced 5 s):
 
 `decide` is pure: no clock, no I/O, deterministic. It returns actions (valve settings, relay states, alerts) and a list of **reasons** (`reason_code`, room, values) used by the UI and exported to Elastic.
 
+`record` keeps each tick's snapshot and a compact form of its actions (valve settings, relays, boiler state, reason and alert codes) in the state database for `house.history_days` days, 14 by default, with a start entry that describes how the engine state was built at each start. Recording errors are logged and never stop the loop. `radiate replay` runs the recorded snapshots through `decide` again and reports where the actions differ; with the same code and configuration there are none.
+
 Order inside `decide`:
 
 1. Validate inputs and update health (section 7).
@@ -323,7 +325,7 @@ Order inside `decide`:
 | Overheating | room > setpoint + 2 K with valve closed | Flag episodic heat (section 4.6); if a valve, not external heat, is to blame, close it and alert |
 | Frost | any room < 7 °C | Frost override (section 5.2) |
 | Clock jump or DST | monotonic clock in the server | Timers use monotonic time; schedules use local time |
-| Corrupt learned state | non-finite or out-of-bounds parameters | Reset that room to priors and replay recent history; alert |
+| Corrupt learned state | non-finite or out-of-bounds parameters | Reset that room to priors and replay recent history; alert. As built: a whole saved state that can't be read is relearned from the history; a single room is reset to priors |
 
 **Safe mode** writes each valve's lockshield cap `L_r`, its schedule setpoint and closing degree 100, so every radiator is balanced and thermostatic without Radiate.
 

@@ -460,6 +460,19 @@ Code: `Reason` (`code`, `message`, `room_id`, `values`).
 A reason that needs a person's attention, for example an offline TRV or an unreachable relay.
 Code: `Actions.alerts`, `LiveDriver.alerts`.
 
+**Tick history**:
+Every live tick's snapshot and compact actions (valve settings, relays, boiler state, reason and alert codes), kept in the state database for `house.history_days` days. A start entry records how the engine state was built at each start; a checkpoint copies the engine state every 6 hours.
+Code: `radiate.core.history`, `radiate.server.history.History`, `Recorder`, table `history`, config key `house.history_days`.
+_Avoid_: "recorder" for this, which means the Home Assistant recorder.
+
+**Replay**:
+Running recorded snapshots through `decide` again, in order, and comparing the result with the recorded actions. With saved state it reproduces the recorded actions exactly; with fresh state it starts from priors. Replay is open loop: the recorded temperatures don't respond to the replayed decisions.
+Code: `Replayer`, `radiate replay`.
+
+**Bootstrap**:
+Learning room models from the tick history by replaying it from priors with a throwaway state, then keeping only the learned parts (models, arrival lags, lockshield histograms). The boiler guard and timers come from the saved state.
+Code: `radiate.core.bootstrap`, `Runtime.restore`, `radiate bootstrap`.
+
 **Decision log**:
 The last 500 boiler, disturbance and safe mode reasons, with the time they happened.
 Code: `Runtime.decisions`, `DecisionRecord`, API `GET /api/v1/decisions`.
@@ -481,7 +494,7 @@ The server object that owns configuration, engine state and a driver, runs ticks
 Code: `Runtime` in `radiate.server.runtime`.
 
 **State database**:
-The SQLite file that holds engine state, the house ID, the mode and the Elastic export queue.
+The SQLite file that holds engine state, the house ID, the mode, the Elastic export queue and the tick history.
 Code: `radiate.server.store.Store`, file `<data_dir>/radiate.db`.
 _Avoid_: "store" on its own, which means the hot-water store.
 
