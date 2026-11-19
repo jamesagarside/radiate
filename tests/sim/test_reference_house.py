@@ -22,6 +22,15 @@ def test_guards_never_violated(runs):
         assert radiate.max_starts_in_hour <= 3
 
 
+def test_burner_does_not_fire_into_shut_valves(runs):
+    # Relay time with no TRV open, only the stairs bypass taking the heat. It was 2.6 to
+    # 6.1 % per seed while the toilet's setpoint was sent in the wrong frame and dump
+    # rooms sat inside their TRV's hysteresis; now it is 0 to 0.3 %.
+    for _, radiate in runs.values():
+        assert radiate.relay_on_s > 0
+        assert radiate.no_open_valve_s <= 0.01 * radiate.relay_on_s
+
+
 def test_baseline_short_cycles_without_guards(runs):
     # The comparison is only meaningful if the baseline really does short-cycle.
     assert sum(b.min_burn_violations for b, _ in runs.values()) > 0
