@@ -327,7 +327,7 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 |---|---|---|
 | `GET /api/v1/health` | | `{"ok": true}`; never needs a token |
 | `GET /api/v1/house` | | House ID, version, driver name, rooms (id, name, role, heat source, controllable) and boiler guard settings |
-| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler, store, per-room temperatures, opening limits, demand flags, learning gate, learned model and latest reason, 24 h relay timeline, alerts and driver telemetry |
+| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler (with short-cycle state), store, per-room temperatures, opening limits, demand flags, learning gate, learned model, latest reason, override, detected fire, manual fire flag (`fire_switch`) and stuck-valve check, daily accounting, 24 h relay timeline, alerts (`alerts` as messages, `alert_details` with `code`, `message` and `room_id`) and driver telemetry |
 | `GET /api/v1/decisions?since=T` | | Decision log entries (`at`, `code`, `message`, `room_id`) after `T`, in the server's monotonic seconds |
 | `POST /api/v1/rooms/{id}/setpoint` | `{"setpoint": 21.0}` | Override the schedule, 5 to 28 °C, until the room's next scheduled change. Optional `"duration_min": 90` holds it for that long instead (up to 7 days); `"until": "cleared"` holds it until `{"setpoint": null}` clears it. Saved across restarts; the response and each room's `override` in `state` give `until` and `expires_in_min` |
 | `POST /api/v1/rooms/{id}/fire` | `{"lit": true}` | Manual fire flag |
@@ -339,7 +339,13 @@ Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` 
 
 ### 8.2 Home Assistant integration
 
-Thin client (ADR-0002). Per room: `climate` entity (setpoint, mode, current temperature), sensors for opening, heating gain, loss rate, arrival lag, confidence, learning state; switch for "fire lit". House: boiler state, starts today, burner hours, litres today, balance score. Services: `radiate.boost_store`, `radiate.set_mode`, `radiate.recalibrate_valve`.
+Thin client (ADR-0002): it reads `house` and `state` and posts to the routes in 8.1. An entity whose key an older server does not report is not created, and becomes unavailable if the key disappears.
+
+- Per controllable room: a `climate` entity with current and target temperature and heating action. Setting its target creates an override that ends at the room's next scheduled change. Attributes give the opening limit, learning state, latest reason and the override's `override_setpoint`, `override_until` and `override_expires_in_min`. Sensors for temperature, opening limit, heating gain, loss rate, arrival lag, model confidence and learning state, and a stuck-valve binary sensor (problem class, from `valve.untrusted`).
+- Per room with an episodic heat source: a "Fire lit" switch that posts `rooms/{id}/fire` and shows `fire_switch`, and a "Fire detected" binary sensor for fire as Radiate sees it, from detection or the switch.
+- Rooms Radiate cannot control get a temperature sensor only.
+- House: boiler state, boiler firing, starts in the last hour, predicted burn, outdoor temperature, short-cycle extra off time (with when it ends and the effective minimum off), and an alerts count with each alert's code, message and room as attributes. From `accounting`: burner hours and starts today, litres and kWh today when a nozzle rating is set (all reset at local midnight), and yesterday's balance score.
+- Services: `radiate.boost_store`, `radiate.set_mode`, `radiate.set_override` (a climate entity, `temperature`, optional `until` and `duration_min`, as in 8.1), `radiate.clear_override` and `radiate.recalibrate_valve` (not built yet).
 
 ---
 
