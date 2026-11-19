@@ -103,6 +103,7 @@ Every variant left the toilet short of heat and raised the house comfort deficit
 
 - **Crash:** Radiate stops at midday during setback. TRVs pick up their mirrored on-device schedules and the Shelly watchdog runs the boiler. Comfort degrades to about the smart-TRV level (within 10 %), with no guard violations.
 - **Fire:** five fire evenings in a row leave the lounge's learned heating gain within 35 % and loss rate within 0.03 /h of a no-fire run. With no fires, fewer than 2 hours are falsely flagged over 3 days.
+- **Watchdog hand-back:** the simulated watchdog follows the Shelly script (takes over 10 minutes after the last heartbeat, with its own minimum burn and off). Radiate comes back from a crash 3 minutes into a watchdog burn, or 3 minutes after one ended, or from a Zigbee outage in safe mode, morning and evening. No guard violations over seeds 1 to 3. Without adoption, the same runs cut a burn to 3 minutes or restarted the burner 2 to 3 minutes after it stopped.
 - **Leaking valve:** the dining valve lets 20 % of its full flow past when shut (`run(leaking_valves=...)`). Radiate flags it within two days on seeds 1 to 3.
 
 ### Tuning the leak check
