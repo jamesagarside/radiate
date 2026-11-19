@@ -12,8 +12,16 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
-server = ["aiohttp>=3.10"]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "aiohttp>=3.10", "ruff>=0.6"]
+server = ["aiohttp>=3.10", "pyyaml>=6", "aiomqtt>=2.3", "tzdata"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "aiohttp>=3.10",
+    "pyyaml>=6",
+    "aiomqtt>=2.3",
+    "tzdata",
+    "ruff>=0.6",
+]
 
 [project.scripts]
 radiate = "radiate.cli:main"
@@ -23,9 +31,10 @@ packages = ["src/radiate"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "web" = "radiate/web"
+"shelly" = "radiate/shelly"
 
 [tool.pytest.ini_options]
-testpaths = ["tests/core", "tests/sim", "tests/server"]
+testpaths = ["tests/core", "tests/config", "tests/drivers", "tests/sim", "tests/server"]
 pythonpath = [".", "src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

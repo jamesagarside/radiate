@@ -159,7 +159,7 @@ The TRV does the thermostat on/off; Radiate decides how far each valve may open,
 
 **Schedule mirror.** Radiate also writes each room's schedule into the TRVZB's on-device weekly schedule and runs the TRV in `auto` mode, re-asserting its own setpoint every tick. If Radiate stops, the TRV picks up its schedule at the next transition instead of holding whatever setpoint it last received. In simulation, a crash at midday during setback otherwise leaves the house at 16 °C all evening.
 
-Attribute names are from the Zigbee2MQTT converter (`zigbee-herdsman-converters` `src/devices/sonoff.ts`, commit `f368dcd`).
+Attribute names are from the Zigbee2MQTT converter (`zigbee-herdsman-converters` `src/devices/sonoff.ts`, commit `f368dcd`, rechecked on master in November 2026). The weekly schedule is written as `weekly_schedule_<day>` strings of up to six `HH:mm/temperature` transitions, the first at 00:00. `external_temperature_input` accepts 0 to 99.9 °C, so colder readings are sent as 0. Whether a setpoint written in `auto` mode holds until the next schedule transition must be confirmed on the pilot valve; the reconciler re-asserts it either way.
 
 **Write discipline** (protects batteries and calibration):
 
@@ -168,7 +168,7 @@ Attribute names are from the Zigbee2MQTT converter (`zigbee-herdsman-converters`
 - A reconciler re-sends any setting whose echoed value disagrees with the target for more than 5 min (maximum 3 attempts, then a diagnostic).
 - Valve exercise: in summer (no heating for 7 days), each valve is opened fully and closed once a week at 11:00.
 
-**Test first on one valve** (CLAUDE.md): v1 ships with a per-valve `actuation_enabled` flag, default off for all but one TRV until the owner turns them on.
+**Test first on one valve** (CLAUDE.md): v1 ships with a per-valve `actuation_enabled` flag, default off for all but one TRV until the owner turns them on. A global **dry run** (the default for a new configuration) reads every device and logs intended writes without sending any. See [configuration](configuration.md).
 
 ### 4.6 Learning gates and exclusions
 
@@ -264,7 +264,7 @@ A small Shelly Gen4 script runs on the relay itself:
 - Heartbeat returns: control goes back to Radiate.
 - A hard auto-off of 120 min on channel 1 means the relay can never latch on indefinitely.
 
-The script is published in the repository and installed by the user (or by Radiate over the Shelly local API with consent).
+The script is published in the repository and installed by the user, or with `radiate shelly install-watchdog --yes` over the Shelly local API. Radiate keeps the fallback windows in KVS keys `radiate_heat` (derived from the room schedules, started an hour early) and `radiate_store`.
 
 ---
 
@@ -301,6 +301,7 @@ Order inside `decide`:
 | TRV offline (> 30 min) | Z2M availability | Treated as possibly open at its last opening; excluded from allocation and learning; alert |
 | Coordinator or MQTT down | all TRVs or the broker unavailable | Enter **safe mode**: heating relay off after the current minimum burn; heartbeat stops so the Shelly schedule takes over; TRVs keep their last setpoint and cap |
 | Radiate process dies | (no detection needed) | TRVs keep governed settings and run their own thermostats; Shelly watchdog takes over after 10 min |
+| Radiate restarts | saved state in SQLite | Learned models, lockshield caps and the boiler guard are restored, with timers moved on by the downtime, so minimum burn and minimum off still hold. TRV settings are re-sent |
 | Home Assistant restarts or is down | | No effect on control (MQTT drivers); the HA integration shows unavailable |
 | Internet down | | No effect on control; cloud telemetry buffered on disk (up to 7 days) |
 | Boiler lockout or out of oil | heating relay on 30 min, no `T_trv` rise anywhere and no stairs rise | Alert "No heat: check oil and boiler lockout"; keep calling (the boiler may recover) but stop learning |

@@ -11,11 +11,11 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections import deque
 from datetime import UTC, datetime
 from typing import Any
 
 from radiate import __version__
+from radiate.server.store import ExportQueue, MemoryQueue
 
 LOG = logging.getLogger(__name__)
 
@@ -233,14 +233,21 @@ class ElasticExporter:
     """Buffers documents and ships them in batches. Never blocks the control loop."""
 
     def __init__(
-        self, url: str, api_key: str, house_id: str, batch: int = 500, interval_s: float = 10.0
+        self,
+        url: str,
+        api_key: str,
+        house_id: str,
+        batch: int = 500,
+        interval_s: float = 10.0,
+        queue: ExportQueue | None = None,
     ):
         self.url = url.rstrip("/")
         self.api_key = api_key
         self.house_id = house_id
         self.batch = batch
         self.interval_s = interval_s
-        self.buffer: deque[dict] = deque(maxlen=MAX_BUFFER)
+        # In memory by default; the server passes an on-disk SqliteQueue (spec 9).
+        self.buffer: ExportQueue = queue if queue is not None else MemoryQueue(MAX_BUFFER)
         self.sent = 0
         self.failures = 0
         self._task: asyncio.Task | None = None
@@ -252,15 +259,16 @@ class ElasticExporter:
         ts: datetime | None = None,
     ) -> None:
         ts = ts or datetime.now(UTC)
-        self.buffer.extend(room_docs(state, self.house_id, ts))
-        self.buffer.append(boiler_doc(state, self.house_id, ts))
+        docs = room_docs(state, self.house_id, ts)
+        docs.append(boiler_doc(state, self.house_id, ts))
         for code, message, room in decisions:
-            self.buffer.append(decision_doc(code, message, room, self.house_id, ts))
+            docs.append(decision_doc(code, message, room, self.house_id, ts))
+        self.buffer.extend(docs)
 
     async def flush(self, session) -> bool:
         if not self.buffer:
             return True
-        docs = [self.buffer[i] for i in range(min(self.batch, len(self.buffer)))]
+        docs = self.buffer.peek(self.batch)
         try:
             async with session.post(
                 f"{self.url}/_bulk",
@@ -284,8 +292,7 @@ class ElasticExporter:
                 i for i in body.get("items", []) if i.get("create", {}).get("status", 200) >= 300
             ]
             LOG.warning("Elastic rejected %d of %d documents", len(bad), len(docs))
-        for _ in docs:
-            self.buffer.popleft()
+        self.buffer.drop(len(docs))
         self.sent += len(docs)
         return True
 

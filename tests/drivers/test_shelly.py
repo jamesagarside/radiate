@@ -1,0 +1,169 @@
+import hashlib
+
+import aiohttp
+import pytest
+from aiohttp.test_utils import TestServer
+
+from radiate.config import ShellyConfig, parse_week
+from radiate.drivers.shelly import (
+    HEARTBEAT_KEY,
+    ShellyBoiler,
+    ShellyError,
+    ShellyRpc,
+    challenge,
+    chunks,
+    digest_header,
+    fallback_heating_windows,
+    kvs_windows,
+    watchdog_code,
+)
+
+from .fake_shelly import FakeShelly
+
+
+@pytest.fixture
+async def shelly():
+    fake = FakeShelly(password="pw")
+    server = TestServer(fake.app())
+    await server.start_server()
+    async with aiohttp.ClientSession() as session:
+        fake.host = f"{server.host}:{server.port}"
+        fake.session = session
+        yield fake
+    await server.close()
+
+
+def boiler(fake, dry_run=False, password="pw"):
+    cfg = ShellyConfig(host=fake.host, password=password)
+    return ShellyBoiler(cfg, ShellyRpc(fake.host, password, fake.session), dry_run=dry_run)
+
+
+# --- pure ------------------------------------------------------------------------------
+
+
+def test_digest_matches_rfc7616_formula():
+    chal = challenge('Digest qop="auth", realm="dev1", nonce="abc", algorithm=SHA-256')
+    assert chal == {"qop": "auth", "realm": "dev1", "nonce": "abc", "algorithm": "SHA-256"}
+    header = digest_header("secret", chal, 1, "c0ffee")
+    sha = lambda s: hashlib.sha256(s.encode()).hexdigest()  # noqa: E731
+    expected = sha(f"{sha('admin:dev1:secret')}:abc:00000001:c0ffee:auth:{sha('POST:/rpc')}")
+    assert f'response="{expected}"' in header and "nc=00000001" in header
+
+
+def test_digest_rejects_other_algorithms():
+    with pytest.raises(ShellyError):
+        digest_header("p", {"realm": "r", "nonce": "n", "algorithm": "MD5"}, 1, "c")
+    with pytest.raises(ShellyError):
+        challenge("Basic realm=x")
+
+
+def test_chunks():
+    assert chunks("abcde", 2) == ["ab", "cd", "e"]
+    assert "".join(chunks(watchdog_code())) == watchdog_code()
+
+
+def test_fallback_windows_from_schedules():
+    a = parse_week("00:00/16 06:30/20 08:30/16 17:00/20 22:30/16")
+    b = parse_week("00:00/16 07:00/21 09:00/16")
+    assert fallback_heating_windows([a, b], 0) == [[330, 540], [960, 1350]]
+
+
+def test_fallback_windows_capped_at_four():
+    weeks = [
+        parse_week(f"00:00/16 {a:02d}:00/20 {a + 1:02d}:00/16 {b:02d}:00/20 {b + 1:02d}:00/16")
+        for a, b in ((2, 6), (10, 14), (18, 22))
+    ]
+    w = fallback_heating_windows(weeks, 0, lead_min=0)
+    assert len(w) == 4
+    # Every original span is still covered.
+    for start in (120, 360, 600, 840, 1080, 1320):
+        assert any(a <= start and start + 60 <= b for a, b in w), start
+    assert len(kvs_windows(w)) <= 253
+
+
+# --- RPC and relay ---------------------------------------------------------------------
+
+
+async def test_rpc_digest_auth(shelly):
+    rpc = ShellyRpc(shelly.host, "pw", shelly.session)
+    assert (await rpc.call("Switch.GetStatus", {"id": 0}))["output"] is False
+    # Nonce reused with an incrementing nc, no second challenge.
+    await rpc.call("Switch.GetStatus", {"id": 1})
+    assert shelly.seen_nc == {"00000001", "00000002"}
+
+
+async def test_rpc_wrong_or_missing_password(shelly):
+    with pytest.raises(ShellyError, match="rejected"):
+        await ShellyRpc(shelly.host, "nope", shelly.session).call("Switch.GetStatus", {"id": 0})
+    with pytest.raises(ShellyError, match="requires a password"):
+        await ShellyRpc(shelly.host, None, shelly.session).call("Switch.GetStatus", {"id": 0})
+
+
+async def test_rpc_error_result(shelly):
+    with pytest.raises(ShellyError, match="KVS.Get"):
+        await ShellyRpc(shelly.host, "pw", shelly.session).call("KVS.Get", {"key": "none"})
+
+
+async def test_command_rearms_auto_off_and_heartbeat(shelly):
+    b = boiler(shelly)
+    await b.refresh()
+    await b.command(heating=True, store=False, unix_now=1_700_000_000)
+    assert shelly.switches[0] == {"output": True, "apower": 0.0, "timer_duration": 7200}
+    assert shelly.kvs[HEARTBEAT_KEY] == 1_700_000_000
+    await b.command(heating=False, store=True, unix_now=1_700_000_060)
+    assert shelly.switches[0]["output"] is False and "timer_duration" not in shelly.switches[0]
+    assert shelly.switches[1]["output"] is True
+    await b.refresh()
+    assert b.heating.output is False and b.store.output is True and b.reachable
+
+
+async def test_dry_run_writes_nothing(shelly):
+    b = boiler(shelly, dry_run=True)
+    await b.refresh()
+    await b.command(heating=True, store=True, unix_now=1)
+    await b.push_fallback([[330, 510]], [[360, 450]])
+    assert not shelly.kvs and shelly.switches[0]["output"] is False
+    assert [m for m, _ in shelly.calls] == ["Switch.GetStatus", "Switch.GetStatus"]
+    assert [m for m, _ in b.intended] == [
+        "Switch.Set",
+        "Switch.Set",
+        "KVS.Set",
+        "KVS.Set",
+        "KVS.Set",
+    ]
+
+
+async def test_unreachable_shelly_is_reported():
+    async with aiohttp.ClientSession() as session:
+        cfg = ShellyConfig(host="127.0.0.1:9")
+        b = ShellyBoiler(cfg, ShellyRpc(cfg.host, None, session, timeout_s=0.5), dry_run=False)
+        await b.refresh()
+        assert not b.reachable and b.errors == 1
+        await b.command(True, False, 1)  # must not raise
+        assert b.errors == 2
+
+
+async def test_push_fallback_only_on_change(shelly):
+    b = boiler(shelly)
+    await b.push_fallback([[330, 510]], ((360, 450),))
+    assert shelly.kvs == {"radiate_heat": "[[330,510]]", "radiate_store": "[[360,450]]"}
+    n = len(shelly.calls)
+    await b.push_fallback([[330, 510]], ((360, 450),))
+    assert len(shelly.calls) == n
+
+
+async def test_install_and_verify_watchdog(shelly):
+    b = boiler(shelly)
+    code = watchdog_code()
+    assert not (await b.watchdog_status(code)).installed
+    status = await b.install_watchdog(code)
+    assert status.ok and len(code) > 1024  # uploaded in several chunks
+    puts = [p for m, p in shelly.calls if m == "Script.PutCode"]
+    assert len(puts) == len(chunks(code)) and puts[0]["append"] is False
+    # Idempotent: nothing re-uploaded when already current.
+    shelly.calls.clear()
+    assert (await b.install_watchdog(code)).ok
+    assert not any(m == "Script.PutCode" for m, _ in shelly.calls)
+    # A changed script is stopped, replaced and restarted.
+    status = await b.install_watchdog(code + "\n// v2\n")
+    assert status.ok and ("Script.Stop", {"id": status.script_id}) in shelly.calls

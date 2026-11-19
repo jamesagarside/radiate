@@ -16,6 +16,7 @@ from typing import Protocol
 
 from radiate import __version__
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
+from radiate.core.persist import dump_state, load_state
 from radiate.core.types import BoilerState, RoomRole
 
 
@@ -64,10 +65,45 @@ class Runtime:
     )
     listeners: list[asyncio.Queue] = field(default_factory=list)
     exporter: object | None = None  # radiate.export.elastic.ElasticExporter
+    store: object | None = None  # radiate.server.store.Store; None keeps state in memory
+    save_every_s: float = 300.0
+    _saved_at: float | None = None
     _task: asyncio.Task | None = None
 
     def __post_init__(self) -> None:
         self.state = EngineState.new(self.cfg)
+
+    # --- persistence ---------------------------------------------------------------------
+
+    def restore(self) -> list[str]:
+        """Load the house id, mode and engine state from the store, if any."""
+        if self.store is None:
+            return []
+        saved_id = self.store.get("house_id")
+        if saved_id is not None and isinstance(saved_id[0], str):
+            self.house_id = saved_id[0]
+        else:
+            self.store.put("house_id", self.house_id)
+        saved_rt = self.store.get("runtime")
+        if saved_rt is not None and isinstance(saved_rt[0], dict):
+            with contextlib.suppress(ValueError):
+                self.mode = Mode(saved_rt[0].get("mode", "auto"))
+        saved = self.store.get("engine")
+        if saved is None:
+            return []
+        data, saved_wall = saved
+        elapsed = max(0.0, time.time() - saved_wall)
+        self.state, problems = load_state(self.cfg, data, self.driver.clock(), elapsed)
+        self._saved_at = self.driver.clock()
+        return problems
+
+    def save(self) -> None:
+        if self.store is None:
+            return
+        now = self.driver.clock()
+        self.store.put("engine", dump_state(self.state, now))
+        self.store.put("runtime", {"mode": self.mode.value})
+        self._saved_at = now
 
     async def step(self) -> Actions:
         now = self.driver.clock()
@@ -76,6 +112,13 @@ class Runtime:
         )
         actions = decide(self.cfg, snap, self.state)
         await self.driver.apply(actions)
+        driver_alerts = getattr(self.driver, "alerts", None)
+        if callable(driver_alerts):
+            actions.alerts.extend(driver_alerts())
+        if self.store is not None and (
+            self._saved_at is None or now - self._saved_at >= self.save_every_s
+        ):
+            self.save()
         self.last_actions, self.last_snapshot = actions, snap
         self.relay_history.append((now, actions.heating_relay, actions.store_relay))
         logged = []
@@ -110,6 +153,7 @@ class Runtime:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+        self.save()
 
     # --- views ---------------------------------------------------------------------------
 

@@ -1,0 +1,99 @@
+# Radiate configuration for a 9-radiator house with an on/off oil combi.
+# Device names are Zigbee2MQTT friendly names; rename them to match yours.
+# Check it with:  radiate check-config examples/reference-house.yaml
+
+house:
+  timezone: Europe/London
+  # Dry run reads every device but writes nothing: no valve settings, no relay
+  # switching, no Shelly heartbeat. Intended writes are logged. Set to false only
+  # when you are ready for Radiate to control the house.
+  dry_run: true
+  # outdoor_sensor: outdoor_temperature   # optional Zigbee2MQTT sensor
+  data_dir: ./data                        # SQLite state and the export queue
+
+mqtt:
+  host: localhost
+  port: 1883
+  username: radiate
+  password: ${RADIATE_MQTT_PASSWORD}
+  base_topic: zigbee2mqtt
+
+shelly:
+  host: 192.0.2.10            # Shelly 2PM Gen4 at the boiler
+  password: ${RADIATE_SHELLY_PASSWORD}
+  heating_switch: 0           # channel 1: central heating demand
+  store_switch: 1             # channel 2: hot-water store
+  auto_off_min: 120
+
+boiler:
+  min_burn_min: 8
+  min_off_min: 10
+  max_starts_per_hour: 3
+  output_kw: 13
+  # nozzle_lph: 0.35          # from the service sheet, for oil accounting
+
+store:
+  priority_over_heating: true
+  recovery_min: 25
+  windows: ["06:00-07:30", "17:00-21:00"]
+
+trv:
+  schedule_mirror: true       # fallback schedule on each TRV if Radiate stops
+
+schedules:
+  comfort_20:
+    daily: "00:00/16 06:30/20 08:30/16 17:00/20 22:30/16"
+  comfort_21:
+    daily: "00:00/16 06:30/21 08:30/16 17:00/21 22:30/16"
+  comfort_18:
+    daily: "00:00/16 06:30/18 08:30/16 17:00/18 22:30/16"
+
+rooms:
+  - id: bedroom_1
+    name: Bedroom 1
+    trv: trv_bedroom_1
+    sensor: temp_bedroom_1
+    schedule: comfort_20
+    actuate: true             # pilot valve: test one TRV first (spec 4.5)
+  - id: bedroom_2
+    name: Bedroom 2
+    trv: trv_bedroom_2
+    sensor: temp_bedroom_2
+    schedule: comfort_20
+  - id: bedroom_3
+    name: Bedroom 3
+    trv: trv_bedroom_3
+    sensor: temp_bedroom_3
+    schedule: comfort_20
+  - id: bathroom
+    name: Bathroom
+    trv: trv_bathroom
+    sensor: temp_bathroom
+    humidity: true            # shower detection
+    schedule: comfort_21
+  - id: dining
+    name: Dining room
+    trv: trv_dining
+    sensor: temp_dining
+    schedule: comfort_20
+  - id: lounge
+    name: Lounge
+    trv: trv_lounge
+    sensor: temp_lounge
+    heat_source: episodic     # open fire
+    schedule: comfort_21
+  - id: kitchen
+    name: Kitchen
+    trv: trv_kitchen
+    sensor: temp_kitchen
+    heat_source: continuous   # range cooker
+    schedule: comfort_20
+  - id: toilet
+    name: Toilet
+    role: internal_sensor_only
+    trv: trv_toilet
+    schedule: comfort_18
+  - id: stairs
+    name: Stairs
+    role: passive             # unvalved bypass radiator, observed only
+    sensor: temp_stairs
