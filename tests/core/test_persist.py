@@ -82,6 +82,67 @@ def test_corrupt_room_resets_to_priors():
     assert restored.rooms["dining"].est.theta == st.rooms["dining"].est.theta
 
 
+def test_raised_minimum_off_survives_a_restart():
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    sc = st.short_cycle
+    sc.extra_off_s, sc.until, sc.raised_at = 600.0, 5000.0 + 20 * 3600, 5000.0
+    sc.starts, sc.cut_burns = [4000.0, 4500.0], [4200.0]
+    data = json.loads(json.dumps(dump_state(st, 5000.0)))
+    restored, problems = load_state(cfg, data, now=10.0, elapsed_s=3600.0)
+    assert problems == []
+    r = restored.short_cycle
+    assert r.extra_off_s == 600.0
+    assert math.isclose(r.until - 10.0, 19 * 3600)  # an hour of the 20 left went by
+    assert [10.0 - t for t in r.starts] == [4600.0, 4100.0]
+    assert r.relay is None  # the first relay reading after a restart is not a start
+
+
+def test_accounting_survives_a_restart():
+    cfg, st = learned()  # two simulated days: day 0 closed, day 1 running
+    now = st.last_now
+    led = st.ledger
+    assert led.history and led.history[-1]["day"] == 0
+    data = json.loads(json.dumps(dump_state(st, now)))
+    restored, problems = load_state(cfg, data, now=7.0, elapsed_s=120.0)
+    assert problems == []
+    r = restored.ledger
+    assert r.history == led.history
+    assert r.today.day == led.today.day
+    assert r.today.burner_s == led.today.burner_s
+    assert r.today.burns_min == led.today.burns_min
+    assert r.today.spreads_min == led.today.spreads_min
+    assert r.today.below_min == led.today.below_min
+    assert [7.0 - t for t in r.today.starts] == [now - t + 120.0 for t in led.today.starts]
+    assert r.relay is None and r.arrival is None
+
+
+def test_stuck_valve_verdicts_survive_a_restart():
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    st.rooms["bedroom_2"].valve.misses = 3
+    st.rooms["bedroom_2"].valve.untrusted = True
+    st.rooms["dining"].valve.misses = 1
+    data = json.loads(json.dumps(dump_state(st, 100.0)))
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == []
+    assert restored.rooms["bedroom_2"].valve.untrusted
+    assert restored.rooms["bedroom_2"].valve.misses == 3
+    assert restored.rooms["dining"].valve.misses == 1
+    assert not restored.rooms["bedroom_1"].valve.untrusted
+
+
+def test_state_saved_before_health_data_still_loads():
+    cfg, st = learned()
+    data = dump_state(st, st.last_now)
+    del data["health"]
+    del data["accounting"]
+    restored, problems = load_state(cfg, data, 0.0)
+    assert problems == []
+    assert restored.short_cycle.extra_off_s == 0.0
+    assert restored.ledger.history == [] and restored.ledger.today.starts == []
+
+
 def test_wrong_version_starts_fresh():
     cfg = house_config()
     st, problems = load_state(cfg, {"version": 99}, 0.0)

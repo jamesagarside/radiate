@@ -26,6 +26,30 @@
 
   <div class="banner" id="banner" hidden><p id="banner-text"></p></div>
 
+  <section class="notice" id="dryrun" aria-labelledby="dryrun-h" hidden>
+    <div class="notice-copy">
+      <p><strong class="notice-tag" id="dryrun-h">Dry run</strong> Radiate is reading the house but not controlling valves or the boiler.</p>
+      <p class="muted" id="dryrun-count"></p>
+    </div>
+    <details class="notice-more" id="dryrun-recent" hidden>
+      <summary>Latest held-back writes</summary>
+      <ul></ul>
+    </details>
+  </section>
+
+  <section class="card signin" id="signin" aria-labelledby="signin-h" hidden>
+    <h2 id="signin-h">Sign in to Radiate</h2>
+    <p class="muted">This server needs its access token, the value of <code>RADIATE_TOKEN</code> where Radiate runs. This browser keeps it, so you sign in once.</p>
+    <form id="signin-form" class="signin-form">
+      <label for="signin-token">Access token</label>
+      <div class="signin-row">
+        <input id="signin-token" name="token" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" required>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+      </div>
+      <p class="signin-error" id="signin-error" role="alert" hidden></p>
+    </form>
+  </section>
+
   <main>
     <section class="card boiler" aria-labelledby="boiler-h">
       <div class="boiler-head">
@@ -53,7 +77,11 @@
       <div class="rooms" id="rooms"></div>
     </section>
 
-    <section class="alerts" id="alerts" hidden></section>
+    <section class="alerts" id="alerts" aria-labelledby="alerts-h" hidden>
+      <h2 id="alerts-h">Needs attention</h2>
+      <ul id="alerts-list"></ul>
+      <button class="btn alerts-more" id="alerts-more" type="button" aria-expanded="false" aria-controls="alerts-list" hidden></button>
+    </section>
   </main>
 
   <template id="room-tpl">

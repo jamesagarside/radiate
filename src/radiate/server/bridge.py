@@ -47,10 +47,17 @@ def room(rt: Runtime, room_id: str) -> RoomConfig:
 
 
 def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
+    """Override a room's setpoint.
+
+    Optional `until`: `next_change` (the default, ends at the room's next scheduled
+    setpoint), `duration` (with `duration_min`) or `cleared`. A `duration_min` on its
+    own implies `duration`. `{"setpoint": null}` clears the override.
+    """
     rc = room(rt, room_id)
-    value = require_object(body).get("setpoint")
+    body = require_object(body)
+    value = body.get("setpoint")
     if value is None:
-        rt.overrides.pop(rc.id, None)
+        rt.clear_override(rc.id)
         return {"ok": True}
     if isinstance(value, bool):
         raise RequestError(400, "setpoint must be a number")
@@ -60,8 +67,20 @@ def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
         raise RequestError(400, "setpoint must be a number") from err
     if not SETPOINT_MIN_C <= value <= SETPOINT_MAX_C:
         raise RequestError(400, "setpoint out of range 5 to 28")
-    rt.overrides[rc.id] = value
-    return {"ok": True}
+    until = body.get("until")
+    minutes = body.get("duration_min")
+    if until is not None and not isinstance(until, str):
+        raise RequestError(400, "until must be next_change, duration or cleared")
+    if minutes is not None:
+        if isinstance(minutes, bool) or not isinstance(minutes, (int, float)):
+            raise RequestError(400, "duration_min must be a number")
+        minutes = float(minutes)
+    try:
+        override = rt.set_override(rc.id, value, until=until, minutes=minutes)
+    except ValueError as err:
+        raise RequestError(400, str(err)) from err
+    view = rt.override_view(rc.id, rt.driver.clock())
+    return {"ok": True, "until": override.until, "expires_in_min": view["expires_in_min"]}
 
 
 def set_fire(rt: Runtime, room_id: str, body: Any) -> dict:

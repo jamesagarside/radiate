@@ -115,7 +115,7 @@ docker run --rm -p 8099:8099 radiate radiate serve --demo --speed 60
 
    To force dry run whatever the file says, add `--dry-run` to the end of the command.
 
-6. Watch the log with `docker logs -f radiate`. In dry run, each write Radiate would have made appears as a `dry run: would publish` line.
+6. Watch the log with `docker logs -f radiate`. In dry run, each write Radiate would have made appears as a `dry run: would publish` line. The web UI shows a **Dry run** notice with the number of held-back writes and the latest five.
 
 The container makes outbound connections to the MQTT broker and the Shelly, so the default bridge network works as long as the host can reach both.
 
@@ -123,13 +123,15 @@ The container makes outbound connections to the MQTT broker and the Shelly, so t
 
 | Variable | Meaning |
 |---|---|
-| `RADIATE_TOKEN` | If set, every `/api/` request except `/api/v1/health` needs the header `Authorization: Bearer <token>` |
+| `RADIATE_TOKEN` | If set, every `/api/` request except `/api/v1/health` needs the header `Authorization: Bearer <token>`. The WebSocket at `/api/v1/stream` also accepts it as the first message, `{"token": "<token>"}` |
 | `RADIATE_ELASTIC_URL`, `RADIATE_ELASTIC_API_KEY` | Turn on [Elastic export](#elastic-export) |
 | `RADIATE_INGRESS_IP` | Set by the Home Assistant App only. Requests from this address with an `X-Ingress-Path` header skip the token check |
 | `RADIATE_WEB_DIR` | Serve the web UI from another folder, for UI development |
 | Any name used as `${NAME}` in the configuration file | Substituted when the file loads |
 
-The built-in web UI does not send a token. If you set `RADIATE_TOKEN` on a standalone install, the UI loads but cannot fetch any data. Until that changes, leave the token unset on standalone installs, keep port 8099 on a trusted network, and never expose it to the internet.
+We recommend setting `RADIATE_TOKEN` on a standalone install. The built-in web UI then shows a sign-in card the first time you open it. Enter the token, and the browser keeps it in its local storage, so you sign in once per browser. The UI sends it as a Bearer header, and as the first message on the live WebSocket, because browsers cannot set headers there. The token never goes in a URL, so it stays out of access and proxy logs. To sign out, clear the site data for Radiate in your browser.
+
+The token stops casual access, but the server speaks plain HTTP. Keep port 8099 on a trusted network and never expose it to the internet. Through Home Assistant ingress the sidebar panel needs no token, and the UI never asks for one.
 
 To check the server is up, request `http://HOST:8099/api/v1/health`, which returns `{"ok": true}` without a token.
 

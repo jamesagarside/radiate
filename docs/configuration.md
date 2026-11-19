@@ -38,8 +38,7 @@ The server waits up to 40 seconds for MQTT and the first TRV readings, then runs
 - The house ID used in Elastic exports, so it stays the same across restarts.
 - The heating mode (`auto`, `off`, or `frost`).
 - The Elastic export queue, up to 7 days, so an outage or restart loses no metrics.
-
-Setpoint overrides, set through the API or the Home Assistant climate entity, are not saved yet; they clear on restart.
+- Setpoint overrides from the UI, the API or the Home Assistant climate entity. An override ends at the room's next scheduled setpoint change unless it was set for a duration or until cleared, and one that ends while Radiate is stopped is dropped on restart.
 
 For Docker, the Home Assistant App and the other ways to run the server, see [deployment](deployment.md).
 
@@ -83,6 +82,8 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 ### boiler
 
 `min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none). Ranges are checked against spec section 5.1.
+
+`nozzle_lph` is the burner nozzle rating in litres per hour, from the boiler's service sheet. With it, the daily accounting also estimates litres and kWh. Burner time comes from the heating relay, so the litres are an upper bound.
 
 ### store
 

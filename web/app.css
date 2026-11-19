@@ -9,17 +9,17 @@
   --surface: #ffffff;
   --surface-2: #f1eee9;
   --text: #1d1b19;
-  --muted: #6e6862;
+  --muted: #67615b;
   --line: #e6e1da;
-  --heat: #e0662b;
+  --heat: #d95f24;
   --heat-soft: #fbe3d6;
-  --cool: #3c6e91;
+  --cool: #386787;
   --cool-soft: #dde9f2;
-  --ok: #2f7d5b;
+  --ok: #2a7253;
   --ok-soft: #dcefe5;
-  --warn: #a35a00;
+  --warn: #975300;
   --warn-soft: #fbecd2;
-  --ember: #c2410c;
+  --ember: #b53c0b;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --radius: 14px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
@@ -44,6 +44,7 @@
     --ok-soft: #17302a;
     --warn: #f0b45a;
     --warn-soft: #36290f;
+    --ember: #f5a06a;
     --shadow: none;
   }
 }
@@ -76,10 +77,45 @@ h2, h3, p { margin: 0; }
 .seg button[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .seg button:active { transform: scale(0.97); }
 
-.banner {
-  margin: 12px max(16px, calc((100% - 1148px) / 2)) 0; padding: 8px 16px; font-size: 0.85rem;
-  color: var(--cool); background: var(--cool-soft); border-radius: 10px;
+.banner, .notice { margin: 12px max(16px, calc((100% - 1148px) / 2)) 0; border-radius: 10px; font-size: 0.85rem; }
+.banner { padding: 8px 16px; color: var(--cool); background: var(--cool-soft); }
+
+/* Dry run: calm and persistent. Neutral surface, the amber tag carries the state. */
+.notice {
+  padding: 10px 16px; background: var(--surface); border: 1px solid var(--line);
+  display: grid; gap: 6px;
 }
+.notice-copy { display: grid; gap: 2px; }
+.notice-tag {
+  display: inline-block; margin-right: 6px; padding: 1px 8px; border-radius: 999px;
+  font-size: 0.78rem; font-weight: 600; background: var(--warn-soft); color: var(--warn);
+}
+.notice-more summary { cursor: pointer; color: var(--muted); width: max-content; max-width: 100%; }
+.notice-more ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.notice-more li { display: flex; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+.notice-more code { font-size: 0.78rem; overflow-wrap: anywhere; }
+.notice-more .payload { color: var(--muted); }
+
+/* Sign-in, shown only when the server asks for RADIATE_TOKEN. */
+.signin {
+  max-width: 440px; width: calc(100% - 32px); margin: 32px auto; padding: 20px 22px;
+  display: grid; gap: 12px;
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+@starting-style { .signin { opacity: 0; transform: scale(0.98); } }
+.signin h2 { font-size: 1.05rem; }
+.signin p { font-size: 0.9rem; }
+.signin-form { display: grid; gap: 6px; }
+.signin-form label { font-size: 0.85rem; font-weight: 600; }
+.signin-row { display: flex; gap: 8px; }
+.signin-row input {
+  flex: 1; min-width: 0; font: inherit; font-size: 1rem; padding: 7px 10px; border-radius: 10px;
+  border: 1px solid var(--muted); background: var(--surface); color: var(--text);
+}
+.signin-error { color: var(--warn); font-size: 0.9rem; }
+body[data-auth="needed"] main,
+body[data-auth="needed"] .right,
+body[data-auth="needed"] .notice { display: none; }
 
 main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20px; }
 .section-h { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 4px 0 10px; font-weight: 600; }
@@ -93,8 +129,12 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 }
 .btn:active { transform: scale(0.97); }
 .btn[aria-pressed="true"] { background: var(--heat-soft); border-color: var(--heat); color: var(--ember); }
+.btn-primary { background: var(--cool); border-color: var(--cool); color: var(--surface); font-weight: 600; }
+.btn:disabled { opacity: 0.6; cursor: progress; }
 @media (hover: hover) and (pointer: fine) {
   .btn:hover { border-color: var(--muted); }
+  .btn-primary:hover { border-color: var(--text); }
+  .notice-more summary:hover { color: var(--text); }
   .seg button:hover { color: var(--text); }
 }
 :focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
@@ -166,11 +206,32 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .meta { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .fire { justify-self: start; }
 
-.alerts { padding: 12px 16px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn); font-size: 0.9rem; }
+.alerts {
+  padding: 12px 16px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn);
+  font-size: 0.9rem; display: grid; gap: 6px; justify-items: start;
+}
+.alerts h2 { font-size: 0.9rem; font-weight: 600; }
+.alerts ul { margin: 0; padding-left: 1.2em; display: grid; gap: 2px; }
+.alerts ul:not([data-expanded="true"]) li[data-extra="true"] { display: none; }
+.alerts-more { background: transparent; border-color: var(--warn); color: var(--warn); font-size: 0.85rem; padding: 4px 10px; }
+
+/* Stale: the link is down and the last poll failed. Dim, never hide, the last state. */
+main, .banner, .notice { transition: opacity 200ms var(--ease-out); }
+body[data-link="stale"] :is(main, .banner, .notice) { opacity: 0.55; }
+body[data-link="stale"] .status { color: var(--warn); }
 
 @media (prefers-reduced-motion: reduce) {
   .fill, .guard-fill, .btn, .seg button { transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease; }
   .btn:active, .seg button:active { transform: none; }
+  .signin { transition: opacity 150ms ease; }
+  @starting-style { .signin { transform: none; } }
+}
+
+/* Touch: every control at least 44 px, without bulking up the desktop layout. */
+@media (pointer: coarse) {
+  .btn, .seg button, .signin-row input { min-height: 44px; }
+  .seg button { min-width: 44px; }
+  .notice-more summary { padding-block: 12px; }
 }
 
 @media (max-width: 560px) {

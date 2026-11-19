@@ -119,6 +119,9 @@ class Snapshot:
     store_relay: bool
     mode: Mode = Mode.AUTO
     store_boost: bool = False
+    # Local calendar day (any integer that changes at local midnight, for example
+    # `date.toordinal()`), for daily accounting. None: inferred from `minute_of_day`.
+    day: int | None = None
 
 
 @dataclass(slots=True)
@@ -147,3 +150,9 @@ class Actions:
     boiler_state: BoilerState
     reasons: list[Reason] = field(default_factory=list)
     alerts: list[Reason] = field(default_factory=list)
+    # No TRV reachable (spec 7). Once the relay is off, drivers stop commanding the
+    # boiler and stop the heartbeat, so the Shelly watchdog's schedule takes over.
+    safe_mode: bool = False
+    # Set on the first tick of a new local day: the summary of the day that closed
+    # (burner hours, starts, burns, litres, balance score; `core.accounting`).
+    day_summary: dict | None = None
