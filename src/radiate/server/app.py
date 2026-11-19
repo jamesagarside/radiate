@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
+import json
 import os
 from pathlib import Path
 
@@ -22,23 +23,55 @@ _REPO_WEB = Path(__file__).resolve().parents[3] / "web"  # source checkout
 WEB_DIR = Path(os.environ.get("RADIATE_WEB_DIR") or (_PKG_WEB if _PKG_WEB.exists() else _REPO_WEB))
 
 
+STREAM_PATH = "/api/v1/stream"
+# A browser cannot set headers on a WebSocket, so the stream also accepts the token
+# as its first message: {"token": "..."}. Close code 4401 means it was refused.
+STREAM_AUTH_TIMEOUT_S = 10.0
+WS_UNAUTHORISED = 4401
+
+
+def _token_ok(supplied: str, token: str) -> bool:
+    # Compare bytes: compare_digest rejects non-ASCII str, which a client can send.
+    return hmac.compare_digest(supplied.encode(), token.encode())
+
+
+def _authorised(request: web.Request) -> bool:
+    token = request.app[TOKEN]
+    if not token:
+        return True
+    # Home Assistant ingress authenticates upstream. Trust it only from the
+    # Supervisor's ingress address, never from the header alone.
+    ingress_ip = request.app[INGRESS_IP]
+    if ingress_ip and request.remote == ingress_ip and "X-Ingress-Path" in request.headers:
+        return True
+    auth_header = request.headers.get("Authorization", "")
+    return auth_header.startswith("Bearer ") and _token_ok(auth_header[7:], token)
+
+
 @web.middleware
 async def auth(request: web.Request, handler):
-    token = request.app[TOKEN]
     path = request.path
-    if token and path.startswith("/api/") and path != "/api/v1/health":
-        # Home Assistant ingress authenticates upstream. Trust it only from the
-        # Supervisor's ingress address, never from the header alone.
-        ingress_ip = request.app[INGRESS_IP]
-        ingress = (
-            bool(ingress_ip)
-            and request.remote == ingress_ip
-            and "X-Ingress-Path" in request.headers
-        )
-        supplied = request.headers.get("Authorization", "").removeprefix("Bearer ")
-        if not ingress and not hmac.compare_digest(supplied, token):
+    # The stream checks its own token so a browser can send it after the upgrade.
+    if path.startswith("/api/") and path not in ("/api/v1/health", STREAM_PATH):
+        if not _authorised(request):
             raise web.HTTPUnauthorized()
     return await handler(request)
+
+
+async def _stream_handshake(ws: web.WebSocketResponse, token: str) -> bool:
+    """Wait for the first message and check it carries the token."""
+    try:
+        msg = await ws.receive(timeout=STREAM_AUTH_TIMEOUT_S)
+    except TimeoutError:
+        return False
+    if msg.type is not WSMsgType.TEXT:
+        return False
+    try:
+        body = json.loads(msg.data)
+    except ValueError:
+        return False
+    supplied = body.get("token") if isinstance(body, dict) else None
+    return isinstance(supplied, str) and _token_ok(supplied, token)
 
 
 def _rt(request: web.Request) -> Runtime:
@@ -111,7 +144,13 @@ async def set_mode(request: web.Request) -> web.Response:
 async def stream(request: web.Request) -> web.WebSocketResponse:
     rt = _rt(request)
     ws = web.WebSocketResponse(heartbeat=30)
+    pending_auth = not _authorised(request)
+    if pending_auth and not ws.can_prepare(request).ok:
+        raise web.HTTPUnauthorized()
     await ws.prepare(request)
+    if pending_auth and not await _stream_handshake(ws, request.app[TOKEN]):
+        await ws.close(code=WS_UNAUTHORISED, message=b"unauthorised")
+        return ws
     q: asyncio.Queue = asyncio.Queue(maxsize=4)
     rt.listeners.append(q)
     await ws.send_json(rt.describe())
@@ -159,7 +198,7 @@ def create_app(
             web.post("/api/v1/rooms/{room_id}/fire", set_fire),
             web.post("/api/v1/store/boost", boost_store),
             web.post("/api/v1/mode", set_mode),
-            web.get("/api/v1/stream", stream),
+            web.get(STREAM_PATH, stream),
         ]
     )
     root = web_dir or WEB_DIR
