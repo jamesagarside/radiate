@@ -1,6 +1,6 @@
 # Configuration
 
-Radiate reads one YAML file that describes your house: rooms, the Zigbee2MQTT devices in each room, heating schedules, the boiler relay, and the hot-water store. Start from [`examples/reference-house.yaml`](../examples/reference-house.yaml) and change the device names to match yours.
+Radiate reads one YAML file that describes your house: rooms, the Zigbee2MQTT devices in each room, heating schedules, the boiler relay, and the hot-water store. To draft the file from the devices Zigbee2MQTT already knows, see [Start from your devices](#start-from-your-devices). To write it by hand, start from [`examples/reference-house.yaml`](../examples/reference-house.yaml) and change the device names to match yours.
 
 To check a file without touching any device:
 
@@ -9,6 +9,83 @@ radiate check-config radiate.yaml
 ```
 
 The command lists every room with its devices, marks the valves Radiate will actuate, and prints any notes. If the file has problems, it lists all of them with their location, for example `rooms[2].trv: required for a normal room`.
+
+## Start from your devices
+
+`radiate discover` drafts a configuration file from Zigbee2MQTT's device list, so you don't have to type every friendly name. It connects to the MQTT broker, reads the retained `zigbee2mqtt/bridge/devices` and `zigbee2mqtt/bridge/groups` messages, and groups the devices it recognises into rooms. It only reads: it never publishes to the broker and never writes to a device. It uses its own MQTT client ID, `radiate-discover`, so it doesn't disconnect a Radiate server that's already running.
+
+```bash
+export RADIATE_MQTT_PASSWORD=change-me
+radiate discover --host 192.0.2.20 --username radiate --out radiate.yaml
+```
+
+Then check the draft before you use it:
+
+1. Read the warnings at the top of the file, for example a TRVZB on old firmware.
+2. Check each room. Add `heat_source` to rooms with an open fire, a wood burner, or a range cooker.
+3. Place the devices listed at the end of the file by hand, or delete the list.
+4. Run `radiate check-config radiate.yaml`. It needs `RADIATE_MQTT_PASSWORD` set, because the draft refers to it as `${RADIATE_MQTT_PASSWORD}`.
+
+### What it recognises
+
+| Device | Recognised by | Becomes |
+|---|---|---|
+| TRV | Model `TRVZB`, or any device that exposes `valve_opening_degree` or `external_temperature_input` | The room's `trv`. A TRV other than the Sonoff TRVZB gets a warning: Radiate is written and tested for the TRVZB |
+| Temperature sensor | Model `SNZB-02B`, or any device that exposes `temperature` | The room's `sensor`, or `house.outdoor_sensor` if its name contains outdoor, outside, garden, exterior, or external (but not "room", so a garden room stays a room) |
+| Contact sensor | Exposes `contact` | The room's `window` |
+
+A thermostat that exposes neither valve feature is left out with a warning, because Radiate can't drive it. Discover skips the coordinator and disabled devices, and lists devices that Zigbee2MQTT doesn't support among the devices Radiate doesn't use.
+
+For each TRVZB, discover reads the firmware version from `software_build_id` and warns if it's older than 1.1.4 (no opening or closing degree) or 1.2.1 (no `external_temperature_input`), or if Zigbee2MQTT doesn't report it.
+
+### How it finds rooms
+
+Discover tries these in order for each device:
+
+1. `area: NAME` or `room: NAME` in the device's description in Zigbee2MQTT. `area: Bedroom 1` gives the room `bedroom_1`.
+2. The friendly name, with the words that describe the device removed (such as `trv`, `valve`, `radiator`, `temp`, `temperature`, `sensor`, `window`, and the device's model) and any IEEE address. `trv_bedroom_1`, `temp_bedroom_1`, `Bedroom 1 TRV`, `TRV Bedroom 1`, and `bedroom_1/trv` all give `bedroom_1`. In a path such as `upstairs/bathroom/trv`, the deepest part that names a room is used, so the room is `bathroom`. If two devices of the same kind then share a room, discover uses the whole path for every device on that path, so `upstairs/bathroom/trv` and `downstairs/bathroom/trv` become `upstairs_bathroom` and `downstairs_bathroom`.
+3. The Zigbee2MQTT group the device belongs to, named the same way. This helps when a device still has its IEEE address as its name. Discover only uses a group with at most one TRV in it, so a group such as `All radiators` doesn't count as a room.
+
+A name that is only a number after the device words are removed, such as `TRV 1`, doesn't give a room. Radiate drives one TRV, one sensor and one window per room, so a second one in the same room is listed for you to place.
+
+### What the draft contains
+
+- One room for each TRV. A room with a TRV and a sensor is `normal`. A room with a TRV and no sensor is `internal_sensor_only`.
+- A room for each sensor with no TRV, commented out as a `passive` candidate. Uncomment it only if the room's radiator has no controllable valve, such as a bypass radiator left open. Discover can't tell an unvalved radiator from a room with no radiator.
+- `humidity: true` on bathrooms and shower rooms whose sensor reports humidity.
+- One `default` schedule for every room, `dry_run: true`, and `actuate: true` on one pilot valve: the first normal room with a TRVZB on current firmware.
+- The `mqtt` section from the options you gave, with the password as `${RADIATE_MQTT_PASSWORD}`. Without `--username` or a password, the credentials are commented out.
+- The `shelly` section as a comment, to fill in once the relay is wired.
+- Comments listing the warnings, the devices discover couldn't place, and the devices Radiate doesn't use.
+
+### Options
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--host` | `localhost` | MQTT broker |
+| `--port` | 1883 | Broker port |
+| `--username` | none | Broker user name |
+| `--password` | `RADIATE_MQTT_PASSWORD` | Broker password. Prefer the environment variable, which stays out of your shell history |
+| `--tls` | off | Connect with TLS |
+| `--base-topic` | `zigbee2mqtt` | Zigbee2MQTT's base topic |
+| `--timeout` | 10 | Seconds to wait for the device list |
+| `--from-file FILE` | | Read a saved `bridge/devices` payload instead of the broker |
+| `--groups-file FILE` | | Read a saved `bridge/groups` payload, with `--from-file` |
+| `--out FILE` | stdout | Write the draft to `FILE`. Discover never overwrites an existing file unless you add `--force` |
+
+### Work from a saved device list
+
+To run discover on a machine that can't reach the broker, save the retained messages with `mosquitto_sub`. The `-C 1` option exits after the first message, which is the retained one:
+
+```bash
+mosquitto_sub -h 192.0.2.20 -u radiate -P "$RADIATE_MQTT_PASSWORD" \
+  -t zigbee2mqtt/bridge/devices -C 1 > devices.json
+mosquitto_sub -h 192.0.2.20 -u radiate -P "$RADIATE_MQTT_PASSWORD" \
+  -t zigbee2mqtt/bridge/groups -C 1 > groups.json
+radiate discover --from-file devices.json --groups-file groups.json --out radiate.yaml
+```
+
+Unless you also pass `--host`, the draft has `host: localhost`. Change it to your broker's address.
 
 ## Bring Radiate in gradually
 
