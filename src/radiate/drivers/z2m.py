@@ -99,6 +99,9 @@ class DeviceStore:
     def __init__(self, base_topic: str, names: set[str]):
         self.base = base_topic.rstrip("/")
         self.devices: dict[str, Device] = {n: Device() for n in names}
+        # Zigbee2MQTT's own state (`bridge/state`, its MQTT last will). While it is
+        # offline, retained device availability can no longer be trusted.
+        self.bridge_online: bool | None = None
 
     def subscriptions(self) -> list[str]:
         return [f"{self.base}/#"]
@@ -108,6 +111,11 @@ class DeviceStore:
         if not topic.startswith(self.base + "/"):
             return None
         rest = topic[len(self.base) + 1 :]
+        if rest == "bridge/state":
+            state = parse_availability(payload)
+            if state is not None:
+                self.bridge_online = state
+            return None
         if rest.endswith("/availability"):
             name = rest[: -len("/availability")]
             dev = self.devices.get(name)

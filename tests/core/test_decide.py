@@ -102,7 +102,14 @@ def test_safe_mode_when_no_trvs():
     off = {"trv_available": False}
     acts = drive(st, 10, temps, bed=dict(off), lounge=dict(off), loo=dict(off), stairs=dict(off))
     assert not acts.heating_relay
+    assert acts.safe_mode
     assert any(a.code == "safe_mode.no_trvs" for a in acts.alerts)
+
+
+def test_not_safe_mode_with_trvs():
+    st = EngineState.new(CFG)
+    acts = drive(st, 3, {"bed": 17.0, "lounge": 17.0, "loo": 15.0, "stairs": 17.0})
+    assert not acts.safe_mode
 
 
 def test_valve_settings_are_governed_mode():

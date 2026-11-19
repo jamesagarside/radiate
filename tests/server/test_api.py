@@ -42,6 +42,7 @@ async def test_house_and_state(client):
     assert state["boiler"]["state"] in {"idle", "lead", "firing", "rest"}
     lounge = next(r for r in state["rooms"] if r["id"] == "lounge")
     assert "model" in lounge and "opening" in lounge
+    assert lounge["valve"] == {"untrusted": False, "misses": 0}
 
 
 async def test_setpoint_override_and_validation(client):
@@ -71,6 +72,28 @@ async def test_mode_and_boost(client):
     await client.post("/api/v1/store/boost", json={"minutes": 30}, headers=H)
     state = await (await client.get("/api/v1/state", headers=H)).json()
     assert state["store"]["boost"]
+
+
+async def test_state_reports_minimum_off_and_short_cycling(client):
+    boiler = (await (await client.get("/api/v1/state", headers=H)).json())["boiler"]
+    assert boiler["min_off_s"] == 600 and boiler["short_cycle"] is None
+    sc = client.rt.state.short_cycle
+    sc.extra_off_s, sc.until = 300.0, client.rt.driver.clock() + 23.5 * 3600
+    boiler = client.rt.describe()["boiler"]
+    assert boiler["min_off_s"] == 900
+    assert boiler["short_cycle"] == {"extra_off_min": 5, "ends_in_h": 23.5}
+
+
+async def test_alerts_are_logged_once_when_they_appear():
+    driver = DemoDriver()
+    for room in driver.house.rooms.values():
+        if room.radiator.trv is not None:
+            room.radiator.trv.available = False  # every TRV unreachable: safe mode
+    rt = Runtime(house_config(), driver)
+    for _ in range(5):
+        await rt.step()
+    assert any(a.code == "safe_mode.no_trvs" for a in rt.last_actions.alerts)
+    assert [d.code for d in rt.decisions].count("safe_mode.no_trvs") == 1
 
 
 async def test_ingress_header_alone_does_not_bypass_token(client):

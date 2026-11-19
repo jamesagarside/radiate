@@ -74,6 +74,7 @@ class LiveDriver:
         self.published = 0
         self._last_heating = False
         self._last_store = False
+        self._handover = False  # safe mode: boiler left to the Shelly watchdog
         self._pending: set[asyncio.Task] = set()
 
     # --- clock -----------------------------------------------------------------------
@@ -87,6 +88,15 @@ class LiveDriver:
     def wall_minutes(self) -> int:
         t = self._local()
         return t.hour * 60 + t.minute
+
+    def next_change_s(self, room_id: str) -> float | None:
+        """Seconds until the room's schedule next changes its setpoint."""
+        rc = next((r for r in self.cfg.rooms if r.id == room_id), None)
+        if rc is None or not rc.controllable:
+            return None
+        t = self._local()
+        _, in_s = self.site.schedule_for(room_id).next_change(t.weekday(), t.hour * 60 + t.minute)
+        return in_s - t.second
 
     # --- inbound -----------------------------------------------------------------------
 
@@ -118,6 +128,9 @@ class LiveDriver:
         local = self._local()
         weekday, minute = local.weekday(), local.hour * 60 + local.minute
         silence = self.site.sensor_max_silence_s
+        # Without the broker or Zigbee2MQTT, device state is frozen at its last value:
+        # treat every TRV as unreachable so the core enters safe mode (spec 7).
+        zigbee_up = self._zigbee_up()
         rooms: dict[str, RoomInput] = {}
         for rc in self.cfg.rooms:
             dev = self.site.devices[rc.id]
@@ -135,7 +148,7 @@ class LiveDriver:
                 age = reading_age(trv, "local_temperature", now, silence)
                 inp.trv_temperature = trv.number("local_temperature")
                 inp.trv_age_s = age if age is not None else NEVER
-                inp.trv_available = is_available(trv, now, silence)
+                inp.trv_available = zigbee_up and is_available(trv, now, silence)
                 state = trv.values.get("running_state")
                 inp.trv_heating = None if state is None else state == "heat"
                 opening = trv.number("valve_opening_degree")
@@ -176,6 +189,7 @@ class LiveDriver:
             store_relay=store,
             mode=mode,
             store_boost=store_boost,
+            day=local.date().toordinal(),
         )
 
     async def apply(self, actions: Actions) -> None:
@@ -190,8 +204,19 @@ class LiveDriver:
             for write in writer.plan(action, echo, now, mirror):
                 self._send(write)
         self._last_heating, self._last_store = actions.heating_relay, actions.store_relay
+        # Safe mode with the burner off: stop commanding the relay and stop the
+        # heartbeat, so the Shelly watchdog runs its fallback schedule (spec 7).
+        handover = actions.safe_mode and not actions.heating_relay
+        if handover and not self._handover:
+            LOG.warning("safe mode: boiler handed to the Shelly watchdog")
+        elif self._handover and not handover:
+            LOG.info("safe mode over: Radiate controls the boiler again")
+        self._handover = handover
         if self.boiler is not None:
-            await self.boiler.command(actions.heating_relay, actions.store_relay, int(self._wall()))
+            if not handover:
+                await self.boiler.command(
+                    actions.heating_relay, actions.store_relay, int(self._wall())
+                )
             heat = fallback_heating_windows(
                 [self.site.schedule_for(r.id) for r in self.cfg.rooms if r.controllable],
                 weekday,
@@ -224,6 +249,9 @@ class LiveDriver:
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
 
+    def _zigbee_up(self) -> bool:
+        return self._connected() and self.devices.bridge_online is not False
+
     # --- reporting -------------------------------------------------------------------
 
     def alerts(self) -> list[Reason]:
@@ -231,6 +259,15 @@ class LiveDriver:
         now = self.clock()
         if not self._connected():
             out.append(Reason("driver.mqtt", "MQTT broker not connected"))
+        elif self.devices.bridge_online is False:
+            out.append(Reason("driver.zigbee2mqtt", "Zigbee2MQTT offline"))
+        if self._handover and self.boiler is not None:
+            out.append(
+                Reason(
+                    "driver.watchdog_handover",
+                    "Boiler on the Shelly fallback schedule: no TRVs reachable",
+                )
+            )
         for rc in self.cfg.rooms:
             dev = self.site.devices[rc.id]
             trv = self.devices.get(dev.trv)

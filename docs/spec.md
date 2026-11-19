@@ -252,8 +252,9 @@ Before LEAD → FIRING, the predicted heat sink must be enough for the burner: `
 ### 5.6 Oil and runtime accounting
 
 - Burner hours, starts, burn-length histogram and starts per hour are kept per day.
-- With a nozzle rating (litres/h, from the service sheet), litres used and kWh delivered (litres × 10.35 kWh × assumed efficiency 0.85) are estimated. If relay power metering shows burner firing, actual firing time replaces relay time.
-- Short-cycle alert: more than 4 starts in an hour, or burns under the minimum because of an external stop, for 2 hours running.
+- With a nozzle rating (litres/h, from the service sheet), litres used and kWh delivered (litres × 10.35 kWh × assumed efficiency 0.85) are estimated. If relay power metering shows burner firing, actual firing time replaces relay time. Until then relay time is used, which includes the boiler thermostat's own off periods inside a call, so litres are an upper bound (about 60 % high in simulation).
+- Days follow local midnight. The day so far and the previous day are in `GET /api/v1/state` under `accounting`; each closed day goes to the daily Elastic stream.
+- Short-cycle alert: more than 4 relay starts in an hour, or burns under the minimum because of an external stop (the relay dropped while Radiate still called) for 2 hours running, meaning such burns at least an hour apart within the last two hours. Radiate's own guard allows at most 3 starts an hour, so this catches another controller, a manual switch or a relay dropping out.
 
 ### 5.7 Fail-safe relay watchdog (Shelly script)
 
@@ -304,9 +305,9 @@ Order inside `decide`:
 | Radiate restarts | saved state in SQLite | Learned models, lockshield caps and the boiler guard are restored, with timers moved on by the downtime, so minimum burn and minimum off still hold. TRV settings are re-sent |
 | Home Assistant restarts or is down | | No effect on control (MQTT drivers); the HA integration shows unavailable |
 | Internet down | | No effect on control; cloud telemetry buffered on disk (up to 7 days) |
-| Boiler lockout or out of oil | heating relay on 30 min, no `T_trv` rise anywhere and no stairs rise | Alert "No heat: check oil and boiler lockout"; keep calling (the boiler may recover) but stop learning |
-| Valve stuck or calibration lost | commanded open, room calling, boiler firing, no `T_trv` rise for 3 burns; or rise with valve closed | Alert; offer recalibration; room flagged untrusted |
-| Short-cycling | > 4 starts per hour | Raise minimum off by 5 min (up to 30) for 24 h; alert |
+| Boiler lockout or out of oil | heating relay on for 30 min with at least one valve open (store recovery and time with every valve shut do not count), and no sign of heat: no TRV reading rising 0.6 K above its room, no ordinary calling room warming by 0.3 K/h, no 0.3 K stairs rise | Alert "No heat: check oil and boiler lockout"; keep calling (the boiler may recover) but stop learning. Clears when heat is seen again |
+| Valve stuck or calibration lost | commanded open, room calling, boiler firing, no `T_trv` rise for 3 burns; or rise with valve closed. As built: 40 min of flow per burn with the room calling, opening at least the floor and the TRV reporting heat, while another radiator warmed; the "rise with valve closed" case is not checked yet | Alert; offer recalibration; room flagged untrusted (learning paused, not counted as an open valve) until its radiator warms again. No recalibration service yet |
+| Short-cycling | > 4 starts per hour, or external stops (section 5.6) | Raise minimum off by 5 min (up to 30) for 24 h, at most once an hour; alert. Kept across restarts |
 | Overheating | room > setpoint + 2 K with valve closed | Flag episodic heat (section 4.6); if a valve, not external heat, is to blame, close it and alert |
 | Frost | any room < 7 °C | Frost override (section 5.2) |
 | Clock jump or DST | monotonic clock in the server | Timers use monotonic time; schedules use local time |
@@ -328,7 +329,7 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 | `GET /api/v1/house` | | House ID, version, driver name, rooms (id, name, role, heat source, controllable) and boiler guard settings |
 | `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler, store, per-room temperatures, opening limits, demand flags, learning gate, learned model and latest reason, 24 h relay timeline, alerts and driver telemetry |
 | `GET /api/v1/decisions?since=T` | | Decision log entries (`at`, `code`, `message`, `room_id`) after `T`, in the server's monotonic seconds |
-| `POST /api/v1/rooms/{id}/setpoint` | `{"setpoint": 21.0}` | Override the schedule, 5 to 28 °C; `{"setpoint": null}` clears it. Held in memory only |
+| `POST /api/v1/rooms/{id}/setpoint` | `{"setpoint": 21.0}` | Override the schedule, 5 to 28 °C, until the room's next scheduled change. Optional `"duration_min": 90` holds it for that long instead (up to 7 days); `"until": "cleared"` holds it until `{"setpoint": null}` clears it. Saved across restarts; the response and each room's `override` in `state` give `until` and `expires_in_min` |
 | `POST /api/v1/rooms/{id}/fire` | `{"lit": true}` | Manual fire flag |
 | `POST /api/v1/store/boost` | `{"minutes": 60}` | Boost the store for 0 to 180 minutes; 0 cancels |
 | `POST /api/v1/mode` | `{"mode": "auto"}` | `auto`, `off` or `frost` |
@@ -351,7 +352,7 @@ Optional, off by default. Documents follow ECS and are sent with the Bulk API (A
 | `metrics-radiate.room-default` | 1 min | `radiate.room.{id,name}`, `temperature.{room,trv,setpoint}`, `valve.opening_pct`, `demand.gap_k`, `model.{a,b,d,eta,arrival_lag_min,confidence}`, `learning.{active,gate}`, `disturbance.{fire,shower,window,cooker_spike}` |
 | `metrics-radiate.boiler-default` | 1 min | `boiler.{state,relay,firing}`, `boiler.burn.{elapsed_s}`, `boiler.starts_1h`, `store.{relay,recovering}`, `supply.factor`, `outdoor.temperature` |
 | `logs-radiate.decision-default` | per decision | `event.action`, `event.reason`, `radiate.room.id`, `message` |
-| `metrics-radiate.daily-default` | daily | `balance.arrival_spread_min`, `balance.score`, `boiler.{starts,burner_hours,litres,kwh}`, `rooms.{comfort_minutes_below}` |
+| `metrics-radiate.daily-default` | daily | `radiate.day`, `balance.{arrival_spread_min,score,starts_measured}`, `boiler.{starts,max_starts_1h,burner_hours,hours_basis,litres,kwh}`, `boiler.burns.{count,mean_min,min_min,max_min,histogram.*}`, `rooms.{comfort_minutes_below}` |
 
 Common fields: `@timestamp`, `data_stream.*`, `host.name` (edge id, not the house name), `service.{name,version}`, `radiate.house.id` (random UUID). No personal data, no location.
 
@@ -359,7 +360,7 @@ Common fields: `@timestamp`, `data_stream.*`, `host.name` (edge id, not the hous
 - **Buffering**: an on-disk queue (SQLite) holds up to 7 days when Elastic is unreachable; retries with backoff; batch size 500 or 10 s.
 - **Assets**: index templates and a Kibana dashboard (balance, burns, rooms) ship in `export/elastic/`.
 
-**Balance score (daily):** for each heating start with two or more calling rooms, the spread between the first and last room reaching setpoint. Score = 100 × (1 − median spread / 120 min), clamped 0 to 100. Weather-normalised following Håkansson et al. 2025.
+**Balance score (daily):** for each heating start with two or more calling rooms, the spread between the first and last room reaching setpoint. Score = 100 × (1 − median spread / 120 min), clamped 0 to 100. Weather-normalised following Håkansson et al. 2025. As built: rooms are the `normal` rooms calling when the burn starts; a room still calling when the burn ends counts as arriving then; a burn where no room arrives is not scored. Weather normalisation is not done yet.
 
 ---
 
