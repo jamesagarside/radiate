@@ -19,7 +19,7 @@ Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchd
 Top remaining gaps, most important first:
 
 1. **Litres are an upper bound** until the burner-firing signal exists (section 5.6, open question 1).
-2. **Valve recalibration service** (section 7).
+2. **Valve recalibration service** (section 7): blocked, the TRVZB has no calibration command in Zigbee2MQTT (see the row below).
 3. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, recorder bootstrap (sections 4.1 to 4.3, 5.5).
 4. **TRV bias refinement** for internal-sensor rooms (section 4.6): tried and dropped, see the row below.
 
@@ -164,7 +164,7 @@ Top remaining gaps, most important first:
 | HA: stuck valve, short-cycling, alerts | done | `custom_components/radiate/binary_sensor.py`, `sensor.py` | Problem binary sensor per room from `valve.untrusted`; short-cycle extra off time; alert count with codes and messages from `alert_details`. No repairs issues |
 | HA services `boost_store`, `set_mode` | done | `custom_components/radiate/__init__.py` | |
 | HA services `set_override`, `clear_override` | done | `custom_components/radiate/climate.py` | Entity services on Radiate climate entities; `until` and `duration_min` as in `POST /rooms/{id}/setpoint` |
-| HA service `recalibrate_valve` | missing | | |
+| HA service `recalibrate_valve` | missing | | Blocked: no TRVZB calibration command to send (see "Manual recalibration service") |
 
 ## 9. Elastic export
 
@@ -207,7 +207,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 |---|---|---|---|
 | Pin closing = 100 minus opening | done (deliberately not) | `drivers/z2m.py` | Spec 4.5 chose governed mode instead; closing degree is 100 |
 | Valve feedback plausibility | partial | `core/health.py` `ValveCheck` | Command against TRV temperature response, both ways: cold when open (stuck), warming when shut (leaking) |
-| Manual recalibration service | missing | | |
+| Manual recalibration service | missing | | Blocked. The Zigbee2MQTT TRVZB definition (`zigbee-herdsman-converters` `src/devices/sonoff.ts`, commit `9836843`, checked 19 November 2026) has no calibration command. It exposes only `idle_steps` and `closing_steps`, both read-only diagnostics. The newer TRV-ZBT has a writable `valve_travel_calibration`; the TRVZB does not. Revisit if a firmware or converter update adds one |
 | External temperature keepalive under 2 h | done | `drivers/z2m.py` | 25 min default |
 | Seed write-only entities at start | done | `drivers/z2m.py` | Writers start empty, so the first tick sends everything |
 | PI fallback controller | missing | | Rooms use the TRV's own thermostat in governed mode; unsure whether a PI is still wanted |
@@ -238,7 +238,7 @@ Larger items left for later, each with a short design note.
 
 - **Check the TRV setpoint frame on the pilot valve.** Confirm the TRVZB opens when its reading is 0.5 K below the setpoint, and that a heat sink sent its reading + 1 K opens. If the toilet runs warm, set its `trv_bias_k` closer to 0, for example -1.0 K.
 - **Check the leak threshold on the pilot valve.** With the valve shut and the boiler firing for an hour, note how far the TRV's reading rises against the room sensor. The leak check flags 1 K; if heat conducted up the valve body alone comes close, raise `LEAK_RISE_K`.
-- **Recalibration.** Add a `recalibrate_valve` API call and HA service that sends the TRVZB calibration command (check the Zigbee2MQTT converter for the attribute first).
+- **Recalibration.** The TRVZB has no calibration command in Zigbee2MQTT, so there is nothing for a `recalibrate_valve` call to send. Until there is, the stuck and leaking valve alerts are the prompt to recalibrate the valve by hand as its manual describes. If a converter update adds a command, add `POST /api/v1/rooms/{id}/recalibrate` in `server/bridge.py` and `server/app.py`, turned into that write by the live driver and logged in dry run.
 
 - **Learn `κ` (supply sensitivity).** Fit one house-wide `κ` by regressing each room's observed warm-up rate against `Σ f(o_j)` at the time, using only burns that pass every learning gate. Low value in this house (see [simulation](simulation.md)); collect real data first.
 - **Learn `η` per room.** Needs burns with few and with many valves open for the same room. Store per-room pairs of (supply factor, fitted gain) per burn and fit the log-log slope after 10 qualifying burns. Feeds the allocator's emitter-limited rule and the "bigger radiator" advice.
