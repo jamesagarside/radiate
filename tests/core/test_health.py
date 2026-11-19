@@ -218,15 +218,23 @@ def test_guard_uses_the_raised_minimum_off():
 def test_burns_cut_short_by_something_else_for_two_hours():
     st = EngineState.new(CFG)
     relay = False
+    on_since = None
     raised_at = None
+    cuts = []
     for m in range(0, 150):
         cmd = step(st, m, cold, relay).heating_relay
-        # Radiate keeps calling, but the relay only stays in for 3 minutes in every 50.
-        relay = cmd and m % 50 < 3
         if raised_at is None and st.short_cycle.extra_off_s > 0:
             raised_at = m
-    # The relay drops out at minutes 4, 54 and 104: an hour apart only at the third.
-    assert raised_at == 104
+        # Radiate keeps calling, but the relay drops out 3 minutes into every burn.
+        on_since = (on_since if on_since is not None else m) if cmd else None
+        was = relay
+        relay = cmd and m - on_since < 3
+        if was and not relay:
+            cuts.append(m + 1)  # Radiate sees the drop on its next tick
+    # The guard takes each drop as a stop and rests for minimum off before firing again,
+    # so the cuts are about 15 min apart. Raised at the first cut an hour after the first.
+    assert all(b - a >= 10 for a, b in zip(cuts, cuts[1:], strict=False))
+    assert raised_at == next(c for c in cuts if c - cuts[0] >= 60)
 
 
 # --- stuck valves -----------------------------------------------------------------------

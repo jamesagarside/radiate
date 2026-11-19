@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from . import disturbance
 from .accounting import Ledger
 from .allocator import Allocation, AllocRoom, allocate
-from .boiler import BoilerGuard
+from .boiler import HIDDEN_RELAY_S, BoilerGuard
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator, local_slope
 from .health import MAX_TICK_S, NO_HEAT_MESSAGE, ROOM_RISE_KPH, NoHeat, ShortCycle, ValveCheck
@@ -117,6 +117,9 @@ class EngineState:
     no_heat: NoHeat = field(default_factory=NoHeat)  # out of oil or burner lockout
     short_cycle: ShortCycle = field(default_factory=ShortCycle)
     ledger: Ledger = field(default_factory=Ledger)  # oil, runtime and balance per day
+    # Set by a restore after downtime or on a first start: how long the relay went
+    # unobserved. Used once, on the next tick, by the boiler guard's hand-back.
+    relay_unseen_s: float = 0.0
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -381,6 +384,19 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
 
     # --- 5: boiler demand, pooling, open path ------------------------------------------
     guard = st.boiler
+    # Hand-back (spec 5.7): adopt a relay someone else switched (the Shelly watchdog
+    # while Radiate was away, a manual switch), before deciding anything with it.
+    if snap.relay_follows_commands:
+        unseen = max(snap.heating_relay_unseen_s, st.relay_unseen_s)
+        adopted = guard.adopt(
+            now,
+            relay_on=snap.heating_relay,
+            age_s=snap.heating_relay_age_s,
+            unseen_s=unseen,
+        )
+        if adopted is not None:
+            reasons.append(_adopt_reason(adopted, unseen))
+    st.relay_unseen_s = 0.0
     heating_allowed = snap.mode is not Mode.OFF or frost
     if guard.state in (BoilerState.IDLE, BoilerState.REST):
         for rs in st.rooms.values():
@@ -425,7 +441,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                             rc.id,
                         )
                     )
-    if guard.state in (BoilerState.LEAD, BoilerState.FIRING) and heating_allowed:
+    if guard.state in (BoilerState.LEAD, BoilerState.FIRING) and (
+        heating_allowed or guard.external
+    ):
         # Heat sinks while there is real demand, and during the minimum-burn tail.
         if (
             calling
@@ -467,14 +485,24 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         guard_cfg = dataclasses.replace(bcfg, min_off_s=sc.min_off_s(bcfg.min_off_s))
         alerts.append(Reason("boiler.short_cycle", sc.message(bcfg.min_off_s)))
     prev_state = guard.state
+    # In safe mode a burn Radiate has not commanded (the watchdog's) is left alone: the
+    # guard follows the relay until it is seen off.
+    own = guard.commanded
     relay = guard.step(
         guard_cfg,
         now,
         want_fire=want_fire,
-        want_stop=want_stop,
+        want_stop=want_stop and (own or not force_stop),
         hard_frost=hard_frost,
-        force_stop=force_stop,
+        force_stop=force_stop and own,
     )
+    # Hand the boiler to the watchdog in safe mode, unless Radiate is in a valve lead
+    # or finishing a burn it commanded (spec 7).
+    handover = force_stop and not (
+        guard.state is BoilerState.LEAD or (guard.state is BoilerState.FIRING and guard.commanded)
+    )
+    if guard.state is BoilerState.FIRING and not handover:
+        guard.commanded = True  # Radiate asserts the relay from this tick on
     sc.commanded = relay
 
     # Oil and runtime accounting, arrival spread for the balance score (spec 5.6, 9).
@@ -561,6 +589,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         reasons=reasons,
         alerts=alerts,
         safe_mode=force_stop,
+        watchdog_handover=handover,
         day_summary=day_summary,
     )
 
@@ -721,6 +750,30 @@ def _discipline(rs: RoomState, action: ValveAction, now: float) -> ValveAction:
         action.room_id, action.setpoint, action.opening, action.closing, action.external_temperature
     )
     return action
+
+
+def _adopt_reason(kind: str, unseen_s: float) -> Reason:
+    """Why the boiler guard took on a relay state it did not command (spec 5.7)."""
+    if unseen_s >= HIDDEN_RELAY_S:
+        what = "burn" if kind == "burn" else "off"
+        if math.isinf(unseen_s):
+            return Reason(
+                "boiler.relay_unseen",
+                f"Boiler relay history unknown at start: minimum {what} runs from now",
+            )
+        return Reason(
+            "boiler.relay_unseen",
+            f"Boiler relay not seen for {unseen_s / 60:.0f} min: minimum {what} runs from now",
+            values={"unseen_min": unseen_s / 60},
+        )
+    if kind == "burn":
+        return Reason(
+            "boiler.adopted",
+            "Burner already on, started outside Radiate: kept on for at least the minimum burn",
+        )
+    return Reason(
+        "boiler.external_stop", "Burner switched off outside Radiate: minimum off runs from now"
+    )
 
 
 def _boiler_reason(
