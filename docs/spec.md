@@ -389,7 +389,7 @@ One web UI, served by the server and embedded through HA ingress. It is a dashbo
 - **House view**: one card per room with temperature against setpoint, valve opening bar, arrival estimate, learning state ("Learning paused: fire lit"). Boiler strip with a burn timeline for the last 24 h and minimum burn/off countdowns.
 - **Motion**: only where it explains state. Valve bars and the burn timeline transition `transform`/`opacity` in 200 ms with a strong ease-out; no animation on keyboard actions; hover effects gated by `(hover: hover) and (pointer: fine)`; `prefers-reduced-motion` keeps fades and drops movement.
 - **Explainability**: every room shows its latest reason ("Opening 35 % so it arrives with Bedroom 3 at 07:10").
-- **Setup**: discover rooms from Zigbee2MQTT device names or HA areas; wizard marks bypass radiators, heat sources and the boiler relay.
+- **Setup**: discover rooms from Zigbee2MQTT device names or HA areas; wizard marks bypass radiators, heat sources and the boiler relay. The first step is `radiate discover` on the command line: it reads Zigbee2MQTT's retained `bridge/devices` and `bridge/groups` (read-only), matches TRVs, temperature sensors and contact sensors into rooms by description area, friendly name or group, and writes a commented YAML draft in dry run with one pilot valve. Rooms with a TRV and no sensor become `internal_sensor_only`; sensors with no TRV are commented `passive` candidates, because an unvalved radiator can't be detected. Rules are in [configuration](configuration.md#start-from-your-devices).
 
 ---
 

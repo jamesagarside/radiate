@@ -11,8 +11,8 @@ Last audit: November 2026, against `main` at `c4657fe`.
 | Status | At audit | Now |
 |---|---|---|
 | Done | 82 | 97 |
-| Partial | 26 | 26 |
-| Missing | 37 | 25 |
+| Partial | 26 | 28 |
+| Missing | 37 | 23 |
 
 Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score.
 
@@ -190,7 +190,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Why the burner is on | done | `web/app.js` `statusLine` | Names burn extensions ("Topping up") and heat sinks separately, from `rooms[].extend` |
 | Setpoint control and hold | done | `web/app.js`, `server/bridge.py` | Stepper per room, 0.5 °C steps, 5 to 28 °C; shows the hold and resumes the schedule. Server and demo |
 | Daily accounting and stuck valves in the UI | done | `web/app.js` | Burner hours and starts today, yesterday's balance score ("Not a full day of data" for a partial day), a line on a room whose valve may be stuck |
-| Setup wizard | missing | | |
+| Setup wizard | partial | `config/discover.py`, `drivers/mqtt.py` `read_retained`, `cli.py` | `radiate discover` drafts the YAML from Zigbee2MQTT device names, descriptions and groups, with TRVZB firmware warnings. No UI wizard yet; heat sources, bypass radiators and the boiler relay are still marked by hand. Untested against a real broker |
 
 ## 11. Simulator
 
@@ -227,7 +227,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Command safety clamp | done | `drivers/z2m.py` | |
 | Battery and availability alerts | partial | `drivers/live.py` | Availability only |
 | Diagnostics download, events | missing | | HA integration |
-| Discovery of TRVs and sensors by HA area | missing | | Rooms come from the YAML file |
+| Discovery of TRVs and sensors by HA area | partial | `config/discover.py` | `radiate discover` reads `area: NAME` from the Zigbee2MQTT device description, not from Home Assistant's area registry |
 | Options or reconfigure flow | missing | | |
 | House balancing dashboard card | done | `web/` | Web UI, not a Lovelace card |
 
@@ -244,6 +244,6 @@ Larger items left for later, each with a short design note.
 - **Learn the valve dead zone.** Per valve, the smallest commanded opening that produced a `T_trv` rise within the arrival lag plus 20 min. Needs deliberate low openings, so tie it to the summer valve exercise or a one-off calibration burn.
 - **Learn the store recovery time.** Median time from store relay on to `T_trv` rising again on any open radiator, over the last 15 recoveries. Replaces the fixed `recovery_s` in the store-recovery gate.
 - **Recorder bootstrap.** Replay up to 14 days of history (HA recorder through the integration, or the standalone database once it keeps raw readings) through `decide` with actuation ignored. Needs a history source first: the server does not store raw readings yet.
-- **Setup wizard.** Discover rooms from Zigbee2MQTT device names (or HA areas through the integration) and write the YAML file. UI work; wait for the web refactor.
+- **Setup wizard.** `radiate discover` drafts the YAML file from the command line. Still to do: a UI wizard on top of it (wait for the web refactor) and Home Assistant areas through the integration.
 - **Cloud edge.** Out of scope until the local editions are proven (ADR-0002).
 - **Burner firing from relay power.** Add `burner_firing` to the snapshot from the Shelly `apower` once the OFTEC engineer confirms the wiring (spec open question 1), and use firing time for accounting.

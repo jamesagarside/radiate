@@ -20,7 +20,7 @@ The demo needs nothing else. To run a real house you also need:
 - An MQTT broker, such as Mosquitto, and Zigbee2MQTT publishing to it, with availability turned on.
 - Sonoff TRVZB valves on firmware 1.2.1 or later, and room temperature sensors, paired in Zigbee2MQTT.
 - Optionally, a Shelly 2PM Gen4 at the boiler: switch 0 for central heating demand, switch 1 for the hot-water store. Have a qualified engineer (OFTEC, for oil) do the boiler wiring.
-- A configuration file describing your house. Start from [`examples/reference-house.yaml`](../examples/reference-house.yaml) and see [configuration](configuration.md).
+- A configuration file describing your house. Draft it from your Zigbee2MQTT devices with `radiate discover` (see [Start from your devices](configuration.md#start-from-your-devices)), or start from [`examples/reference-house.yaml`](../examples/reference-house.yaml).
 
 ## From source with uv
 
@@ -40,9 +40,10 @@ Run the demo, a simulated house at 60 times real time:
 .venv/bin/radiate serve --demo --speed 60
 ```
 
-Run your own house. Check the file first; the server starts in dry run unless the file sets `house.dry_run: false`:
+Run your own house. Draft the file from Zigbee2MQTT's device list, then check it; the server starts in dry run unless the file sets `house.dry_run: false`:
 
 ```bash
+.venv/bin/radiate discover --host 192.0.2.20 --username radiate --out radiate.yaml
 .venv/bin/radiate check-config radiate.yaml
 .venv/bin/radiate serve --config radiate.yaml
 ```
@@ -84,7 +85,13 @@ docker run --rm -p 8099:8099 radiate radiate serve --demo --speed 60
 
 ### Run your own house in Docker
 
-1. Put your configuration file in a folder on the host, for example `/srv/radiate/radiate.yaml`.
+1. Put your configuration file in a folder on the host, for example `/srv/radiate/radiate.yaml`. To draft it from your Zigbee2MQTT devices, run discover in the container with `RADIATE_MQTT_PASSWORD` set in your shell. It only reads from the broker, and the draft still needs the checks in [Start from your devices](configuration.md#start-from-your-devices):
+
+   ```bash
+   docker run --rm -v /srv/radiate:/out -e RADIATE_MQTT_PASSWORD \
+     radiate radiate discover --host 192.0.2.20 --username radiate --out /out/radiate.yaml
+   ```
+
 2. In the file, set `house.data_dir: /data` so state goes to a volume, and set `mqtt.host` to an address the container can reach. `localhost` inside the container is the container itself.
 3. Put secrets in an env file, for example `/srv/radiate/radiate.env`, and refer to them from the configuration file as `${NAME}`:
 

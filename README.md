@@ -25,9 +25,10 @@ Open http://localhost:8099 to watch a simulated 9-radiator house, 60 times faste
 .venv/bin/radiate sim --days 5
 ```
 
-To run against real devices, describe your house in a YAML file (start from [`examples/reference-house.yaml`](examples/reference-house.yaml)), check it, and start the server. It runs in dry run until the file says otherwise:
+To run against real devices, describe your house in a YAML file, check it, and start the server. `radiate discover` drafts the file from the devices Zigbee2MQTT already knows, and only reads from the broker. You can also start from [`examples/reference-house.yaml`](examples/reference-house.yaml). The server runs in dry run until the file says otherwise:
 
 ```bash
+.venv/bin/radiate discover --host 192.0.2.20 --username radiate --out radiate.yaml
 .venv/bin/radiate check-config radiate.yaml
 .venv/bin/radiate serve --config radiate.yaml
 ```
