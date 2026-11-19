@@ -101,6 +101,13 @@ async def test_snapshot_maps_devices_and_schedule():
     assert snap.rooms["bedroom_1"].temperature_age_s == pytest.approx(3700)
 
 
+def test_next_change_for_override_expiry():
+    drv, _, _ = make()
+    assert drv.next_change_s("bedroom_1") == 1800  # 06:00, next transition 06:30
+    assert drv.next_change_s("stairs") is None  # passive room, no schedule
+    assert drv.next_change_s("nope") is None
+
+
 async def test_window_contact():
     s = site()
     devices = dict(s.devices)

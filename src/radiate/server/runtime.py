@@ -37,6 +37,22 @@ class Driver(Protocol):
 
     def telemetry(self) -> dict: ...
 
+    # Optional: `next_change_s(room_id) -> float | None`, seconds until the room's
+    # schedule next changes its setpoint. Without it, overrides last until cleared.
+
+
+OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
+OVERRIDE_MAX_MIN = 7 * 24 * 60
+
+
+@dataclass
+class Override:
+    """A manual setpoint for one room and when it ends (driver clock seconds)."""
+
+    setpoint: float
+    until: str  # one of OVERRIDE_UNTIL
+    expires_at: float | None  # None: until cleared
+
 
 @dataclass
 class DecisionRecord:
@@ -54,7 +70,8 @@ class Runtime:
     tick_s: float = 60.0
     state: EngineState = field(init=False)
     mode: Mode = Mode.AUTO
-    overrides: dict[str, float] = field(default_factory=dict)
+    overrides: dict[str, float] = field(default_factory=dict)  # setpoints the driver applies
+    override_meta: dict[str, Override] = field(default_factory=dict)  # when each one ends
     fire: set[str] = field(default_factory=set)
     store_boost_until: float = 0.0
     last_actions: Actions | None = None
@@ -88,6 +105,7 @@ class Runtime:
         if saved_rt is not None and isinstance(saved_rt[0], dict):
             with contextlib.suppress(ValueError):
                 self.mode = Mode(saved_rt[0].get("mode", "auto"))
+            self._restore_overrides(saved_rt[0].get("overrides"), time.time() - saved_rt[1])
         saved = self.store.get("engine")
         if saved is None:
             return []
@@ -102,11 +120,108 @@ class Runtime:
             return
         now = self.driver.clock()
         self.store.put("engine", dump_state(self.state, now))
-        self.store.put("runtime", {"mode": self.mode.value})
+        self._save_runtime(now)
         self._saved_at = now
+
+    def _save_runtime(self, now: float) -> None:
+        if self.store is None:
+            return
+        overrides = {}
+        for rid, sp in self.overrides.items():
+            meta = self.override_meta.get(rid)
+            left = None if meta is None or meta.expires_at is None else meta.expires_at - now
+            # Stored as time left, like engine timers: the clock restarts with the process.
+            overrides[rid] = {
+                "setpoint": sp,
+                "until": meta.until if meta else "cleared",
+                "remaining_s": left,
+            }
+        self.store.put("runtime", {"mode": self.mode.value, "overrides": overrides})
+
+    def _restore_overrides(self, data: object, elapsed_s: float) -> None:
+        if not isinstance(data, dict):
+            return
+        now = self.driver.clock()
+        rooms = {r.id for r in self.cfg.rooms}
+        for rid, item in data.items():
+            if rid not in rooms or not isinstance(item, dict):
+                continue
+            sp, until, left = item.get("setpoint"), item.get("until"), item.get("remaining_s")
+            if not isinstance(sp, (int, float)) or until not in OVERRIDE_UNTIL:
+                continue
+            expires = None
+            if isinstance(left, (int, float)):
+                left -= max(0.0, elapsed_s)
+                if left <= 0:
+                    continue  # ended while Radiate was down
+                expires = now + left
+            self.overrides[rid] = float(sp)
+            self.override_meta[rid] = Override(float(sp), until, expires)
+
+    # --- setpoint overrides ----------------------------------------------------------
+
+    def set_override(
+        self, room_id: str, setpoint: float, until: str | None = None, minutes: float | None = None
+    ) -> Override:
+        """Hold a room at `setpoint` until its next schedule change (the default), for
+        `minutes`, or until cleared. Saved straight away, so a restart keeps it."""
+        now = self.driver.clock()
+        if minutes is not None:
+            if until not in (None, "duration"):
+                raise ValueError("give either until or a duration, not both")
+            until = "duration"
+        until = until or "next_change"
+        if until not in OVERRIDE_UNTIL:
+            raise ValueError(f"until must be one of {', '.join(OVERRIDE_UNTIL)}")
+        expires: float | None = None
+        if until == "duration":
+            if minutes is None or not 1 <= minutes <= OVERRIDE_MAX_MIN:
+                raise ValueError(f"duration_min must be 1 to {OVERRIDE_MAX_MIN}")
+            expires = now + minutes * 60
+        elif until == "next_change":
+            nxt = getattr(self.driver, "next_change_s", None)
+            left = nxt(room_id) if callable(nxt) else None
+            if left is None:
+                until = "cleared"  # no schedule to end it
+            else:
+                expires = now + left
+        override = Override(setpoint, until, expires)
+        self.overrides[room_id] = setpoint
+        self.override_meta[room_id] = override
+        self._save_runtime(now)
+        return override
+
+    def clear_override(self, room_id: str) -> None:
+        self.overrides.pop(room_id, None)
+        self.override_meta.pop(room_id, None)
+        self._save_runtime(self.driver.clock())
+
+    def _expire_overrides(self, now: float) -> None:
+        expired = [
+            rid
+            for rid, meta in self.override_meta.items()
+            if meta.expires_at is not None and now >= meta.expires_at
+        ]
+        for rid in expired:
+            self.overrides.pop(rid, None)
+            self.override_meta.pop(rid, None)
+        if expired:
+            self._save_runtime(now)
+
+    def override_view(self, room_id: str, now: float) -> dict | None:
+        if room_id not in self.overrides:
+            return None
+        meta = self.override_meta.get(room_id)
+        expires = meta.expires_at if meta else None
+        return {
+            "setpoint": self.overrides[room_id],
+            "until": meta.until if meta else "cleared",
+            "expires_in_min": None if expires is None else max(0, round((expires - now) / 60)),
+        }
 
     async def step(self) -> Actions:
         now = self.driver.clock()
+        self._expire_overrides(now)
         snap = await self.driver.snapshot(
             self.mode, self.overrides, now < self.store_boost_until, self.fire
         )
@@ -204,6 +319,7 @@ class Runtime:
                 "next_in_min": round(inp.next_setpoint_in_s / 60)
                 if inp and inp.next_setpoint_in_s is not None
                 else None,
+                "override": self.override_view(rc.id, now),
             }
             rs = st.rooms.get(rc.id)
             if rs is not None:

@@ -150,7 +150,7 @@ Top gaps, most important first:
 | Item | Status | Where | Note |
 |---|---|---|---|
 | `GET /api/v1/house`, `/state`, `/decisions?since=` | done | `server/app.py` | |
-| `POST /rooms/{id}/setpoint` | partial | `server/app.py` | Override held in memory until cleared; lost on restart; no expiry |
+| `POST /rooms/{id}/setpoint` | done | `server/app.py`, `server/runtime.py` `set_override` | Ends at the next schedule change by default, or after `duration_min`, or `until: cleared`; saved in SQLite; `override` in `describe()` |
 | `POST /rooms/{id}/fire`, `/store/boost`, `/mode` | done | `server/app.py` | Manual fire flag is not persisted |
 | `WS /api/v1/stream` | done | `server/app.py` | |
 | Local token auth, ingress auth | done | `server/app.py` | |

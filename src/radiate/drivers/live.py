@@ -89,6 +89,15 @@ class LiveDriver:
         t = self._local()
         return t.hour * 60 + t.minute
 
+    def next_change_s(self, room_id: str) -> float | None:
+        """Seconds until the room's schedule next changes its setpoint."""
+        rc = next((r for r in self.cfg.rooms if r.id == room_id), None)
+        if rc is None or not rc.controllable:
+            return None
+        t = self._local()
+        _, in_s = self.site.schedule_for(room_id).next_change(t.weekday(), t.hour * 60 + t.minute)
+        return in_s - t.second
+
     # --- inbound -----------------------------------------------------------------------
 
     def handle_message(self, topic: str, payload: bytes) -> None:

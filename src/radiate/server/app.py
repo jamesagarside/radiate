@@ -88,16 +88,31 @@ async def set_setpoint(request: web.Request) -> web.Response:
     body = await _json(request)
     value = body.get("setpoint")
     if value is None:
-        rt.overrides.pop(room.id, None)
-    else:
-        try:
-            value = float(value)
-        except (TypeError, ValueError) as err:
-            raise web.HTTPBadRequest(text="setpoint must be a number") from err
-        if not 5.0 <= value <= 28.0:
-            raise web.HTTPBadRequest(text="setpoint out of range 5 to 28")
-        rt.overrides[room.id] = value
-    return web.json_response({"ok": True})
+        rt.clear_override(room.id)
+        return web.json_response({"ok": True})
+    try:
+        value = float(value)
+    except (TypeError, ValueError) as err:
+        raise web.HTTPBadRequest(text="setpoint must be a number") from err
+    if not 5.0 <= value <= 28.0:
+        raise web.HTTPBadRequest(text="setpoint out of range 5 to 28")
+    # Optional: "until" (next_change, the default; duration; cleared) or "duration_min".
+    until = body.get("until")
+    minutes = body.get("duration_min")
+    if until is not None and not isinstance(until, str):
+        raise web.HTTPBadRequest(text="until must be next_change, duration or cleared")
+    if minutes is not None:
+        if isinstance(minutes, bool) or not isinstance(minutes, (int, float)):
+            raise web.HTTPBadRequest(text="duration_min must be a number")
+        minutes = float(minutes)
+    try:
+        override = rt.set_override(room.id, value, until=until, minutes=minutes)
+    except ValueError as err:
+        raise web.HTTPBadRequest(text=str(err)) from err
+    view = rt.override_view(room.id, rt.driver.clock())
+    return web.json_response(
+        {"ok": True, "until": override.until, "expires_in_min": view["expires_in_min"]}
+    )
 
 
 async def set_fire(request: web.Request) -> web.Response:

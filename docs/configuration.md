@@ -38,8 +38,7 @@ The server waits up to 40 seconds for MQTT and the first TRV readings, then runs
 - The house ID used in Elastic exports, so it stays the same across restarts.
 - The heating mode (`auto`, `off`, or `frost`).
 - The Elastic export queue, up to 7 days, so an outage or restart loses no metrics.
-
-Setpoint overrides from the UI or API are not saved yet; they clear on restart.
+- Setpoint overrides from the UI or API. An override ends at the room's next scheduled setpoint change unless it was set for a duration or until cleared, and one that ends while Radiate is stopped is dropped on restart.
 
 ## Secrets
 

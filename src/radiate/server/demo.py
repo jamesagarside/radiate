@@ -24,6 +24,13 @@ class DemoDriver:
     def wall_minutes(self) -> int:
         return int((self.house.now % 86400) // 60)
 
+    def next_change_s(self, room_id: str) -> float | None:
+        spec = next((s for s in ROOMS if s.id == room_id), None)
+        if spec is None or not spec.trv:
+            return None
+        _, in_s = next_change(spec, self.wall_minutes())
+        return in_s - self.house.now % 60
+
     def advance(self, seconds: float) -> None:
         h = self.house
         end = h.now + seconds

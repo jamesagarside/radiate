@@ -323,6 +323,7 @@ Order inside `decide`:
 - `GET /api/v1/house`: rooms, radiators, boiler, store, learned parameters, health.
 - `GET /api/v1/state`: live snapshot (temperatures, openings, demand, boiler state, reasons).
 - `POST /api/v1/rooms/{id}/setpoint`, `POST /api/v1/rooms/{id}/fire` (manual fire flag), `POST /api/v1/store/boost`, `POST /api/v1/mode` (`auto`, `off`, `frost`).
+- Setpoint overrides: `{"setpoint": 21}` holds the room at 21 °C until its next scheduled setpoint change. Optional `"duration_min": 90` holds it for that long instead (up to 7 days), and `"until": "cleared"` holds it until `{"setpoint": null}` clears it. Overrides are saved and survive a restart; `GET /api/v1/state` shows each room's `override` with `until` and `expires_in_min`.
 - `GET /api/v1/decisions?since=`: decision log.
 - `WS /api/v1/stream`: state and decision events.
 - Authentication: local token; ingress auth in the HA App.
