@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 import time
 import uuid
 from collections import deque
@@ -109,6 +110,9 @@ class Runtime:
             self._restore_overrides(saved_rt[0].get("overrides"), time.time() - saved_rt[1])
         saved = self.store.get("engine")
         if saved is None:
+            # First start: the boiler relay's history is unknown, so the guard's first
+            # tick takes its timers from the relay as observed (spec 5.7 hand-back).
+            self.state.relay_unseen_s = math.inf
             return []
         data, saved_wall = saved
         elapsed = max(0.0, time.time() - saved_wall)
@@ -384,6 +388,11 @@ class Runtime:
                 else 0,
                 "state_elapsed_s": now - guard.since,
                 "starts_last_hour": guard.starts_last_hour(now),
+                # Hand-back (spec 5.7): this burn was started outside Radiate (the Shelly
+                # watchdog, a manual switch) and adopted, so it gets a full minimum burn.
+                "adopted": guard.state is BoilerState.FIRING and guard.external,
+                # Safe mode: the relay is left to the Shelly watchdog.
+                "watchdog_handover": acts.watchdog_handover if acts else False,
                 "predicted_burn_min": round(st.allocation.t_star_h * 60) if st.allocation else 0,
                 "supply": round(st.supply, 3),
                 # Effective minimum off, raised while short-cycling was seen (spec 7).

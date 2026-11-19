@@ -7,6 +7,10 @@
 - Every minute Radiate writes its heartbeat to KVS key `radiate_hb` (unix seconds).
   The watchdog script (`shelly/radiate-watchdog.js`) takes over when it goes stale,
   using the fallback windows Radiate keeps in `radiate_heat` and `radiate_store`.
+- `Switch.GetStatus` does not say when the relay last changed. Its `timer_started_at`
+  is when the `toggle_after` timer was last armed, and both Radiate and the watchdog
+  re-arm it every minute while heating, so it says nothing about when a burn began.
+  On hand-back the core therefore takes a burn it did not start as starting now.
 
 HTTP digest authentication (SHA-256) when the device has a password; user `admin`.
 API reference: shelly-api-docs.shelly.cloud, gen2 Switch, KVS, Script, Authentication.
@@ -238,8 +242,14 @@ class ShellyBoiler:
         self.store = _switch(s)
         self.reachable = True
 
-    async def command(self, heating: bool, store: bool, unix_now: int) -> None:
-        """Assert both channels and the heartbeat. Called once per control tick."""
+    async def command(
+        self, heating: bool, store: bool, unix_now: int, heartbeat: bool = True
+    ) -> None:
+        """Assert both channels and the heartbeat. Called once per control tick.
+
+        `heartbeat=False` sets the channels only, for the last command before the
+        boiler is handed to the watchdog.
+        """
         try:
             params: dict[str, Any] = {"id": self.cfg.heating_switch, "on": heating}
             if heating:
@@ -247,7 +257,8 @@ class ShellyBoiler:
             await self._write("Switch.Set", params)
             if self.store is None or self.store.output != store:
                 await self._write("Switch.Set", {"id": self.cfg.store_switch, "on": store})
-            await self._write("KVS.Set", {"key": HEARTBEAT_KEY, "value": int(unix_now)})
+            if heartbeat:
+                await self._write("KVS.Set", {"key": HEARTBEAT_KEY, "value": int(unix_now)})
         except Exception as err:
             self.errors += 1
             LOG.warning("Shelly command failed: %s", err)
