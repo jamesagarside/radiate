@@ -65,14 +65,7 @@ def _sim(args: argparse.Namespace) -> None:
 
 
 def _check_config(args: argparse.Namespace) -> None:
-    from radiate.config import ConfigError, load_site
-
-    try:
-        site = load_site(args.path)
-    except ConfigError as err:
-        sys.exit(str(err))
-    except OSError as err:
-        sys.exit(f"cannot read {args.path}: {err.strerror}")
+    site = _load(args.path)
     print(f"{args.path}: OK")
     for r in site.house.rooms:
         dev = site.devices[r.id]
@@ -89,6 +82,55 @@ def _check_config(args: argparse.Namespace) -> None:
     print(f"  dry_run={site.dry_run}  shelly={'yes' if site.shelly else 'no'}")
     for note in site.notes:
         print(f"  note: {note}")
+
+
+def _load(path: str):
+    from radiate.config import ConfigError, load_site
+
+    try:
+        return load_site(path)
+    except ConfigError as err:
+        sys.exit(str(err))
+    except OSError as err:
+        sys.exit(f"cannot read {path}: {err.strerror}")
+
+
+def _shelly(args: argparse.Namespace) -> None:
+    import aiohttp
+
+    from radiate.drivers.shelly import ShellyBoiler, ShellyRpc, watchdog_code
+
+    site = _load(args.config)
+    if site.shelly is None:
+        sys.exit("the configuration has no shelly section")
+    if args.action == "install-watchdog" and not args.yes:
+        sys.exit(
+            "This writes and starts a script on the boiler relay. It switches the boiler "
+            "only when Radiate's heartbeat is missing for 10 minutes. Re-run with --yes."
+        )
+
+    async def main() -> None:
+        async with aiohttp.ClientSession() as session:
+            rpc = ShellyRpc(site.shelly.host, site.shelly.password, session)
+            boiler = ShellyBoiler(site.shelly, rpc, dry_run=True)
+            code = watchdog_code()
+            if args.action == "install-watchdog":
+                status = await boiler.install_watchdog(code)
+            else:
+                await boiler.refresh()
+                if not boiler.reachable:
+                    sys.exit(f"Shelly {site.shelly.host} is not reachable")
+                print(f"heating relay: {'on' if boiler.heating.output else 'off'}")
+                print(f"store relay:   {'on' if boiler.store.output else 'off'}")
+                status = await boiler.watchdog_status(code)
+            print(
+                f"watchdog: installed={status.installed} current={status.code_matches} "
+                f"enabled={status.enabled} running={status.running}"
+            )
+            if not status.ok:
+                sys.exit(1)
+
+    asyncio.run(main())
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -108,6 +150,11 @@ def main(argv: list[str] | None = None) -> None:
     c = sub.add_parser("check-config", help="validate a house configuration file")
     c.add_argument("path")
     c.set_defaults(func=_check_config)
+    sh = sub.add_parser("shelly", help="check the boiler relay or install its watchdog")
+    sh.add_argument("action", choices=["status", "install-watchdog"])
+    sh.add_argument("--config", required=True)
+    sh.add_argument("--yes", action="store_true", help="confirm writing to the Shelly")
+    sh.set_defaults(func=_shelly)
     args = p.parse_args(argv)
     args.func(args)
 
