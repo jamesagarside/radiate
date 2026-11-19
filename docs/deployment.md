@@ -9,7 +9,7 @@ This page covers every way to run Radiate today. Radiate is pre-alpha: the devic
 | [Raspberry Pi](#raspberry-pi) | A small dedicated box | Not tested on a Pi yet |
 | [Home Assistant App](#home-assistant-app) | Home Assistant OS and Supervised installs | Demo mode tested; real devices untested |
 | [HACS integration](#hacs-integration) | Entities and services in Home Assistant, for any of the above | Tested with the Home Assistant test harness |
-| [Online demo](#online-demo) | A first look | |
+| [Online demo](#online-demo) | A first look, nothing to install | Published to GitHub Pages from `main` |
 
 Whichever way you run it, the server listens on port 8099 and serves the web UI and the API there.
 
@@ -300,4 +300,23 @@ Use the name `radiate-watchdog` so `radiate shelly status` and the server's star
 
 ## Online demo
 
-The online demo runs Radiate's simulated house entirely in your browser.
+The online demo runs Radiate's simulated house entirely in your browser: [jamesagarside.github.io/radiate](https://jamesagarside.github.io/radiate/). It uses the real engine and simulator, compiled to WebAssembly with [Pyodide](https://pyodide.org/), so no server is involved and nothing you do leaves your browser. It never controls a real boiler.
+
+On the first visit your browser downloads about 5 MB of Python from jsDelivr, then simulates 36 hours of the house so the models have learned something and the burn timeline has history. After that, the house runs at 60 times real time. You can change the speed (1x, 60x or 300x), switch the heating mode, boost hot water and light the lounge fire. The simulation pauses while the tab is hidden.
+
+### How it is built and published
+
+`scripts/build_demo.py` (standard library only) writes a static site to `dist/demo/`: the same web UI as the server, a Web Worker that loads Pyodide, and a zip of the Python modules the worker imports. The page sets `data-transport="demo"`, so the UI talks to the worker instead of the HTTP API. Request validation lives in `src/radiate/server/bridge.py`, which the server also uses, so the demo and the server accept the same requests.
+
+The `Pages` workflow (`.github/workflows/pages.yml`) builds and deploys the site on every push to `main`, or when you run it by hand from the **Actions** tab. The repository's **Settings** > **Pages** > **Source** must be set to **GitHub Actions**.
+
+To try a build locally, serve it over HTTP (a Web Worker can't load from `file://`):
+
+```bash
+python scripts/build_demo.py
+python -m http.server -d dist
+```
+
+Then open `http://localhost:8000/demo/`. The browser console shows load timings in `window.radiateDemoTimings`.
+
+To update Python, change `PYODIDE_VERSION` in `web/demo-worker.js` to an exact Pyodide release that is at least two weeks old. A test checks the version format.

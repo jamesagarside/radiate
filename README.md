@@ -1,6 +1,6 @@
 # Radiate
 
-**Source-available, local-first hydronic balancing and boiler orchestration. Runs standalone, as a Home Assistant App, or with the Radiate cloud.**
+**Source-available, local-first hydronic balancing and boiler orchestration. Runs standalone or as a Home Assistant App. A cloud edition is planned.**
 
 Plumbers balance a heating system by hand, turning the lockshield valve on each radiator to throttle the ones nearest the boiler so the far ones get their share of hot water. Radiate does that job in software, continuously, using smart radiator valves you already own.
 
@@ -9,6 +9,10 @@ Plumbers balance a heating system by hand, turning the lockshield valve on each 
 ## Try it
 
 ![Radiate web UI running the simulated house: lounge fire detected and its radiator closed, boiler on one long burn](docs/images/ui-demo.png)
+
+Try the [online demo](https://jamesagarside.github.io/radiate/): a simulated 9-radiator house running the real engine in your browser. Nothing to install, and nothing leaves your browser.
+
+To run the demo locally instead:
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
