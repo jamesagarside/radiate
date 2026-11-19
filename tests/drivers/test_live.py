@@ -180,13 +180,32 @@ async def test_back_online_resends_settings():
 
 
 async def test_alerts():
-    drv, clock, _ = make()
+    drv, clock, _ = make(dry_run=False)
     feed(drv)
     assert drv.alerts() == []
     drv.handle_message("zigbee2mqtt/trv_dining/availability", b'{"state":"offline"}')
     drv.writers["bedroom_1"].failed.add("valve_opening_degree")
     codes = {(a.code, a.room_id) for a in drv.alerts()}
     assert codes == {("driver.trv_offline", "dining"), ("driver.write_failed", "bedroom_1")}
+
+
+async def test_rejected_settings_reach_the_core_except_in_dry_run():
+    drv, _, _ = make(dry_run=False)
+    feed(drv)
+    drv.writers["bedroom_1"].failed.update({"valve_opening_degree", "occupied_heating_setpoint"})
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.rooms["bedroom_1"].trv_rejected == (
+        "occupied_heating_setpoint",
+        "valve_opening_degree",
+    )
+    assert snap.rooms["dining"].trv_rejected == ()
+    # In dry run nothing is sent, so an echo that disagrees is not a rejection.
+    dry, _, _ = make(dry_run=True)
+    feed(dry)
+    dry.writers["bedroom_1"].failed.add("valve_opening_degree")
+    snap = await dry.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.rooms["bedroom_1"].trv_rejected == ()
+    assert not any(a.code == "driver.write_failed" for a in dry.alerts())
 
 
 @pytest.fixture

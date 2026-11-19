@@ -154,6 +154,7 @@ class LiveDriver:
                 inp.trv_heating = None if state is None else state == "heat"
                 opening = trv.number("valve_opening_degree")
                 inp.opening_echo = None if opening is None else round(opening)
+                inp.trv_rejected = self._rejected(rc.id)
             else:
                 inp.trv_available = False
             window = self.devices.get(dev.window)
@@ -277,6 +278,16 @@ class LiveDriver:
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
 
+    def _rejected(self, room_id: str) -> tuple[str, ...]:
+        """Settings the room's TRV did not take after the reconciler's retries.
+
+        None in dry run: nothing was sent, so an echo that disagrees proves nothing.
+        """
+        w = self.writers.get(room_id)
+        if w is None or self.dry_run:
+            return ()
+        return tuple(sorted(w.failed))
+
     def _zigbee_up(self) -> bool:
         return self._connected() and self.devices.bridge_online is not False
 
@@ -301,9 +312,9 @@ class LiveDriver:
             trv = self.devices.get(dev.trv)
             if dev.trv and not is_available(trv, now, self.site.sensor_max_silence_s):
                 out.append(Reason("driver.trv_offline", f"{rc.name}: TRV not reachable", rc.id))
-            w = self.writers.get(rc.id)
-            if w is not None and w.failed:
-                keys = ", ".join(sorted(w.failed))
+            rejected = self._rejected(rc.id)
+            if rejected:
+                keys = ", ".join(rejected)
                 out.append(
                     Reason("driver.write_failed", f"{rc.name}: TRV did not accept {keys}", rc.id)
                 )

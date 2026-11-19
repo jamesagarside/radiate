@@ -370,11 +370,13 @@ class Runtime:
                     # Valve checks (spec 7). `untrusted`: stuck or leaking. `misses`:
                     # burns in a row with no warming when open. `leak_burns`: of the
                     # last 5 judged burns, those in which it warmed while shut.
+                    # `rejected`: TRV settings the device would not take (reconciler).
                     valve={
                         "untrusted": rs.valve.untrusted or rs.valve.leaking,
                         "misses": rs.valve.misses,
                         "leaking": rs.valve.leaking,
                         "leak_burns": rs.valve.leak_burns,
+                        "rejected": list(rs.rejected),
                     },
                 )
             rooms.append(item)

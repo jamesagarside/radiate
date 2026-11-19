@@ -63,6 +63,7 @@ PREHEAT_MAX_S = 3 * 3600
 PREHEAT_MARGIN = 1.2
 INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
 LOCKSHIELD_DECAY = 0.9995  # per sample, roughly a 3 day half-life at one sample a minute
+REJECTED_HOLD_S = 3600.0  # learning stays paused this long after a TRV rejected a setting
 # Disturbances that can warm a TRV with its valve shut, so the leak check looks away.
 # Not `unexplained_heat`: the check compares the TRV with the room, which sun or guests
 # warm together, and a strong leak itself raises `unexplained_heat`.
@@ -94,7 +95,9 @@ class RoomState:
     closed_since: float | None = None  # radiator receiving no heat since
     slope: float | None = None
     residual: float | None = None
-    valve: ValveCheck = field(default_factory=ValveCheck)  # stuck-valve check
+    valve: ValveCheck = field(default_factory=ValveCheck)  # stuck and leaking valve checks
+    rejected: tuple[str, ...] = ()  # TRV settings the device did not accept (reconciler)
+    rejected_until: float = -1e12  # learning paused until then (spec 4.6 valve trusted)
 
     @property
     def arrival_lag_s(self) -> float:
@@ -215,6 +218,11 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         rs = st.rooms[rc.id]
         inp = snap.rooms.get(rc.id, RoomInput())
         any_trv = any_trv or inp.trv_available
+        # Valve trusted (spec 4.6): a setting the TRV would not take pauses learning
+        # while it lasts and for an hour after.
+        rs.rejected = inp.trv_rejected
+        if inp.trv_rejected:
+            rs.rejected_until = now + REJECTED_HOLD_S
         temp = _effective_temperature(rc, inp)
         rs.temperature = temp
         target = _target(cfg, snap, inp)
@@ -358,6 +366,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 gate = "valve_untrusted"
             elif rs.valve.leaking:
                 gate = "valve_leaking"
+            elif now < rs.rejected_until:
+                gate = "valve_rejected"
             elif temp is None or rs.slope is None or delta_out is None:
                 gate = "no_data"
             elif not inp.trv_available:

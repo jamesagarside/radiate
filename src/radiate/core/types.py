@@ -107,6 +107,9 @@ class RoomInput:
     next_setpoint_in_s: float | None = None
     window_open: bool | None = None
     fire_switch: bool | None = None
+    # TRV settings the device did not accept after the reconciler's retries (spec 4.5),
+    # for example ("valve_opening_degree",). Empty when every write landed.
+    trv_rejected: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
