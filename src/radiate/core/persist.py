@@ -9,7 +9,7 @@ take the relay, or without usable saved state, the boiler guard's timers restart
 the relay as observed on the first tick (spec 5.7 hand-back).
 
 Kept: learned room models, arrival lags, lockshield histograms, disturbance hold-offs,
-stuck-valve verdicts, the boiler guard, the short-cycle adaptation and the day's oil
+stuck and leaking valve verdicts, the boiler guard, the short-cycle adaptation and the day's oil
 and runtime totals with the last 7 days' summaries. The ledger's last tick is kept
 too, so the time Radiate was down counts as unseen and a long outage marks the day
 partial. Dropped: short-lived signals (reading windows, radiator drive, demand
@@ -29,6 +29,7 @@ from .boiler import HIDDEN_RELAY_S, BoilerGuard
 from .decide import EngineState, RoomState, new_estimator
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator
+from .health import LEAK_WINDOW
 from .types import BoilerState, HouseConfig
 
 VERSION = 1
@@ -67,7 +68,12 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
                 "spike_kind": d.spike_kind,
                 **{k: _age(getattr(d, k), now) for k in _DIST_TIMES},
             },
-            "valve": {"misses": rs.valve.misses, "untrusted": rs.valve.untrusted},
+            "valve": {
+                "misses": rs.valve.misses,
+                "untrusted": rs.valve.untrusted,
+                "leak_history": list(rs.valve.leak_history),
+                "leaking": rs.valve.leaking,
+            },
         }
     g = st.boiler
     sc = st.short_cycle
@@ -243,6 +249,10 @@ def load_state(
             if isinstance(misses, int) and not isinstance(misses, bool) and misses >= 0:
                 rs.valve.misses = misses
             rs.valve.untrusted = valve.get("untrusted") is True
+            history = valve.get("leak_history")
+            if isinstance(history, list) and all(isinstance(v, bool) for v in history):
+                rs.valve.leak_history = history[-LEAK_WINDOW:]
+            rs.valve.leaking = valve.get("leaking") is True
 
     g = data.get("boiler")
     if isinstance(g, dict):

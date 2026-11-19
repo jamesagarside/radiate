@@ -17,7 +17,15 @@ from .allocator import Allocation, AllocRoom, allocate
 from .boiler import HIDDEN_RELAY_S, BoilerGuard
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator, local_slope
-from .health import MAX_TICK_S, NO_HEAT_MESSAGE, ROOM_RISE_KPH, NoHeat, ShortCycle, ValveCheck
+from .health import (
+    LEAK_SETTLE_S,
+    MAX_TICK_S,
+    NO_HEAT_MESSAGE,
+    ROOM_RISE_KPH,
+    NoHeat,
+    ShortCycle,
+    ValveCheck,
+)
 from .types import (
     Actions,
     BoilerState,
@@ -55,6 +63,10 @@ PREHEAT_MAX_S = 3 * 3600
 PREHEAT_MARGIN = 1.2
 INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
 LOCKSHIELD_DECAY = 0.9995  # per sample, roughly a 3 day half-life at one sample a minute
+# Disturbances that can warm a TRV with its valve shut, so the leak check looks away.
+# Not `unexplained_heat`: the check compares the TRV with the room, which sun or guests
+# warm together, and a strong leak itself raises `unexplained_heat`.
+LEAK_BLIND_GATES = frozenset({"fire", "fire_holdoff", "window", "shower", "cooker_spike"})
 
 
 @dataclass(slots=True)
@@ -279,6 +291,25 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             and not rs.dist.fire,
             offset=trv_now.get(rc.id),
         )
+        # Leaking valve (spec 7, "rise with valve closed"): the radiator warms while the
+        # valve should be shut. Needs a fresh room sensor to tell the radiator from the
+        # room, and no heat source or disturbance that can warm the TRV on its own.
+        rs.valve.observe_shut(
+            min(dt, MAX_TICK_S),
+            flowing=flowing,
+            shut=rc.role is RoomRole.NORMAL
+            and inp.temperature is not None
+            and inp.temperature_age_s <= ROOM_SENSOR_STALE_S
+            and inp.trv_available
+            and inp.trv_heating is False
+            and not (rs.calling or rs.topup)
+            and rs.closed_since is not None
+            and st.flow_since is not None
+            and rs.closed_since <= st.flow_since  # shut since before this flow began
+            and now - rs.closed_since >= LEAK_SETTLE_S
+            and rs.dist.learning_blocked(now) not in LEAK_BLIND_GATES,
+            offset=trv_now.get(rc.id),
+        )
 
         delta_out = (temp - out) if (temp is not None and out is not None) else None
         rs.residual = (
@@ -325,6 +356,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 gate = "no_heat"  # the model would learn that radiators do nothing
             elif rs.valve.untrusted:
                 gate = "valve_untrusted"
+            elif rs.valve.leaking:
+                gate = "valve_leaking"
             elif temp is None or rs.slope is None or delta_out is None:
                 gate = "no_data"
             elif not inp.trv_available:
@@ -380,6 +413,14 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         if rs.valve.untrusted:
             alerts.append(
                 Reason("valve.stuck", f"{rc.name} radiator not warming: check the valve", rc.id)
+            )
+        if rs.valve.leaking:
+            alerts.append(
+                Reason(
+                    "valve.leaking",
+                    f"{rc.name} radiator warming with its valve shut: check the valve",
+                    rc.id,
+                )
             )
 
     # --- 5: boiler demand, pooling, open path ------------------------------------------

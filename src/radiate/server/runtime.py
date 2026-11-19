@@ -367,8 +367,15 @@ class Runtime:
                         "lockshield": rs.lockshield,
                     },
                     reason=reasons_by_room.get(rc.id),
-                    # Stuck-valve check (spec 7): burns in a row with no warming.
-                    valve={"untrusted": rs.valve.untrusted, "misses": rs.valve.misses},
+                    # Valve checks (spec 7). `untrusted`: stuck or leaking. `misses`:
+                    # burns in a row with no warming when open. `leak_burns`: of the
+                    # last 5 judged burns, those in which it warmed while shut.
+                    valve={
+                        "untrusted": rs.valve.untrusted or rs.valve.leaking,
+                        "misses": rs.valve.misses,
+                        "leaking": rs.valve.leaking,
+                        "leak_burns": rs.valve.leak_burns,
+                    },
                 )
             rooms.append(item)
 
