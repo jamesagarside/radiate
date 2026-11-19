@@ -1,4 +1,4 @@
-"""Command line: `radiate serve` and `radiate sim`."""
+"""Command line: `radiate serve`, `radiate sim` and `radiate check-config`."""
 
 from __future__ import annotations
 
@@ -64,6 +64,33 @@ def _sim(args: argparse.Namespace) -> None:
         print(f"{k:{width}}  {b[k]:>11}  {r[k]:>8}")
 
 
+def _check_config(args: argparse.Namespace) -> None:
+    from radiate.config import ConfigError, load_site
+
+    try:
+        site = load_site(args.path)
+    except ConfigError as err:
+        sys.exit(str(err))
+    except OSError as err:
+        sys.exit(f"cannot read {args.path}: {err.strerror}")
+    print(f"{args.path}: OK")
+    for r in site.house.rooms:
+        dev = site.devices[r.id]
+        parts = [f"role={r.role.value}"]
+        if dev.trv:
+            parts.append(f"trv={dev.trv}")
+        if dev.sensor:
+            parts.append(f"sensor={dev.sensor}")
+        if r.heat_source:
+            parts.append(f"heat_source={r.heat_source.value}")
+        if r.actuation_enabled:
+            parts.append("ACTUATED")
+        print(f"  {r.id:<12} {' '.join(parts)}")
+    print(f"  dry_run={site.dry_run}  shelly={'yes' if site.shelly else 'no'}")
+    for note in site.notes:
+        print(f"  note: {note}")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="radiate")
     sub = p.add_subparsers(required=True)
@@ -78,6 +105,9 @@ def main(argv: list[str] | None = None) -> None:
     m.add_argument("--warmup", type=int, default=2)
     m.add_argument("--seed", type=int, default=1)
     m.set_defaults(func=_sim)
+    c = sub.add_parser("check-config", help="validate a house configuration file")
+    c.add_argument("path")
+    c.set_defaults(func=_check_config)
     args = p.parse_args(argv)
     args.func(args)
 
