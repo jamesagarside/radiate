@@ -223,3 +223,6 @@ __marimo__/
 .venv-ha/
 *.sqlite
 .venv/
+
+# Radiate state from running the server in a source checkout (house.data_dir default)
+/data/
