@@ -1,5 +1,10 @@
 // Radiate UI: renders /api/v1/state, live over WebSocket with polling fallback.
 // Elements are created once and updated in place so transitions can retarget.
+//
+// All server traffic goes through a transport: { house(), state(), post(path, body),
+// subscribe(onState) }. The default talks HTTP and WebSocket to the Radiate server.
+// The static demo (<html data-transport="demo">) swaps in demo.js, which runs the
+// same engine in a Web Worker. Both share this one UI.
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -11,14 +16,42 @@ const cards = new Map();
 let last = null;
 let house = null;
 
-async function post(path, body) {
-  const res = await fetch(api(path), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(await res.text());
+function httpTransport() {
+  const getJson = async (path) => {
+    const res = await fetch(api(path));
+    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+    return res.json();
+  };
+  return {
+    house: () => getJson("house"),
+    state: () => getJson("state"),
+    async post(path, body) {
+      const res = await fetch(api(path), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+    subscribe(onState) {
+      const connect = () => {
+        const url = new URL(api("stream"));
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+        let ws;
+        try { ws = new WebSocket(url); } catch { setInterval(poll, 5000); return; }
+        ws.onmessage = (ev) => onState(JSON.parse(ev.data));
+        ws.onclose = () => setTimeout(connect, 2000);
+        ws.onerror = () => ws.close();
+      };
+      connect();
+    },
+  };
 }
+
+const transport = document.documentElement.dataset.transport === "demo"
+  ? (await import("./demo.js")).createDemoTransport()
+  : httpTransport();
+const post = (path, body) => transport.post(path, body);
 
 function badgeFor(r) {
   if (r.role === "passive") return ["Bypass, not controlled", ""];
@@ -158,7 +191,7 @@ function render(s) {
   const banner = $("banner");
   if (s.telemetry?.simulated) {
     banner.hidden = false;
-    banner.textContent = `Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time. Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
+    $("banner-text").textContent = `Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time. Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
   }
   for (const r of s.rooms) renderRoom(r);
   const alerts = $("alerts");
@@ -177,24 +210,12 @@ $("boost").addEventListener("click", async () => {
 
 async function poll() {
   try {
-    render(await (await fetch(api("state"))).json());
+    render(await transport.state());
   } catch {
     $("status").textContent = "Cannot reach Radiate. Retrying…";
   }
 }
 
-function connect() {
-  const url = new URL(api("stream"));
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  let ws;
-  try { ws = new WebSocket(url); } catch { setInterval(poll, 5000); return; }
-  ws.onmessage = (ev) => render(JSON.parse(ev.data));
-  ws.onclose = () => setTimeout(connect, 2000);
-  ws.onerror = () => ws.close();
-}
-
-(async () => {
-  try { house = await (await fetch(api("house"))).json(); } catch { /* render will retry */ }
-  await poll();
-  connect();
-})();
+try { house = await transport.house(); } catch { /* render will retry */ }
+await poll();
+transport.subscribe(render);

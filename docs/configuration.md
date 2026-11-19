@@ -39,7 +39,9 @@ The server waits up to 40 seconds for MQTT and the first TRV readings, then runs
 - The heating mode (`auto`, `off`, or `frost`).
 - The Elastic export queue, up to 7 days, so an outage or restart loses no metrics.
 
-Setpoint overrides from the UI or API are not saved yet; they clear on restart.
+Setpoint overrides, set through the API or the Home Assistant climate entity, are not saved yet; they clear on restart.
+
+For Docker, the Home Assistant App and the other ways to run the server, see [deployment](deployment.md).
 
 ## Secrets
 
@@ -106,17 +108,21 @@ schedules:
     weekend: "08:00/20 22:30/16"
 ```
 
+### balancing
+
+A top-level key, default `true`. Set `balancing: false` to open every heating valve fully instead of sharing flow between them. The boiler guards, optimum start and learning still run. It exists to compare against balancing, for example in the simulator.
+
 ### rooms
 
 | Key | Meaning |
 |---|---|
 | `id` | Lower case letters, digits, and `_` |
 | `name` | Display name |
-| `role` | `normal` (TRV and room sensor), `internal_sensor_only` (TRV only), or `passive` (no controllable valve, for example an unvalved bypass radiator) |
+| `role` | `normal` (TRV and room sensor), `internal_sensor_only` (TRV with no room sensor), or `passive` (no controllable valve, for example an unvalved bypass radiator) |
 | `trv` | Zigbee2MQTT name of the TRVZB |
 | `sensor` | Zigbee2MQTT name of the room temperature sensor |
 | `window` | Zigbee2MQTT name of a contact sensor. `contact: false` means open |
-| `schedule` | Name of a schedule; required for every room except `passive` |
+| `schedule` | Name of a schedule. Defaults to `default`, so every room except a `passive` one needs a schedule of that name or its own `schedule` key |
 | `heat_source` | `episodic` (open fire, wood burner) or `continuous` (range cooker) |
 | `humidity` | `true` to use the sensor's humidity for shower detection |
 | `actuate` | `true` to let Radiate write to this room's TRV |

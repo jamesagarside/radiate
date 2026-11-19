@@ -1,6 +1,6 @@
 # Radiate
 
-**Source-available, local-first hydronic balancing and boiler orchestration. Runs standalone, as a Home Assistant App, or with the Radiate cloud.**
+**Source-available, local-first hydronic balancing and boiler orchestration. Runs standalone or as a Home Assistant App. A cloud edition is planned.**
 
 Plumbers balance a heating system by hand, turning the lockshield valve on each radiator to throttle the ones nearest the boiler so the far ones get their share of hot water. Radiate does that job in software, continuously, using smart radiator valves you already own.
 
@@ -9,6 +9,10 @@ Plumbers balance a heating system by hand, turning the lockshield valve on each 
 ## Try it
 
 ![Radiate web UI running the simulated house: lounge fire detected and its radiator closed, boiler on one long burn](docs/images/ui-demo.png)
+
+Try the [online demo](https://jamesagarside.github.io/radiate/): a simulated 9-radiator house running the real engine in your browser. Nothing to install, and nothing leaves your browser.
+
+To run the demo locally instead:
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
@@ -28,7 +32,9 @@ To run against real devices, describe your house in a YAML file (start from [`ex
 .venv/bin/radiate serve --config radiate.yaml
 ```
 
-Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). Home Assistant integration tests need the HA harness: `uv pip install pytest-homeassistant-custom-component` in a separate venv, then `pytest tests/ha`.
+To run Radiate in Docker, on a Raspberry Pi, as a Home Assistant App or with the HACS integration, see [deployment](docs/deployment.md).
+
+Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). The Home Assistant integration tests run in a separate environment; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Why
 
@@ -74,9 +80,15 @@ Other TRVs that expose a writable valve position should follow.
 
 ## Documentation
 
-- [Prior art and gap analysis](docs/research/prior-art.md)
-- [Specification](docs/spec.md)
+The [documentation index](docs/README.md) lists everything. The main pages:
+
+- [Deployment](docs/deployment.md)
 - [Configuration](docs/configuration.md)
+- [Specification](docs/spec.md)
+- [Glossary](docs/GLOSSARY.md)
+- [Engineering standards](docs/standards/engineering.md) and [design standards](docs/standards/design.md)
+- [Contributing](CONTRIBUTING.md)
+- [Prior art and gap analysis](docs/research/prior-art.md)
 - [Simulation findings](docs/simulation.md)
 - [Feature coverage matrix](docs/research/coverage-matrix.md)
 - [ADR-0001: standalone, not a VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md)

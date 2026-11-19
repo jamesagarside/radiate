@@ -10,8 +10,7 @@ from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
-from radiate.core import Mode
-
+from . import bridge
 from .runtime import Runtime
 
 RUNTIME = web.AppKey("runtime", Runtime)
@@ -75,58 +74,38 @@ async def _json(request: web.Request) -> dict:
     return body
 
 
-def _room(rt: Runtime, room_id: str):
+def _http_error(err: bridge.RequestError) -> web.HTTPException:
+    if err.status == 404:
+        return web.HTTPNotFound(text=err.text)
+    return web.HTTPBadRequest(text=err.text)
+
+
+async def _post(request: web.Request, action, *args) -> web.Response:
+    """Run a shared `bridge` action so the server and the browser demo agree."""
+    rt = _rt(request)
     try:
-        return rt.cfg.room(room_id)
-    except KeyError as err:
-        raise web.HTTPNotFound(text="unknown room") from err
+        if args:
+            bridge.room(rt, args[0])  # unknown room is a 404 before the body is read
+        result = action(rt, *args, await _json(request))
+    except bridge.RequestError as err:
+        raise _http_error(err) from err
+    return web.json_response(result)
 
 
 async def set_setpoint(request: web.Request) -> web.Response:
-    rt = _rt(request)
-    room = _room(rt, request.match_info["room_id"])
-    body = await _json(request)
-    value = body.get("setpoint")
-    if value is None:
-        rt.overrides.pop(room.id, None)
-    else:
-        try:
-            value = float(value)
-        except (TypeError, ValueError) as err:
-            raise web.HTTPBadRequest(text="setpoint must be a number") from err
-        if not 5.0 <= value <= 28.0:
-            raise web.HTTPBadRequest(text="setpoint out of range 5 to 28")
-        rt.overrides[room.id] = value
-    return web.json_response({"ok": True})
+    return await _post(request, bridge.set_setpoint, request.match_info["room_id"])
 
 
 async def set_fire(request: web.Request) -> web.Response:
-    rt = _rt(request)
-    room = _room(rt, request.match_info["room_id"])
-    body = await _json(request)
-    if body.get("lit"):
-        rt.fire.add(room.id)
-    else:
-        rt.fire.discard(room.id)
-    return web.json_response({"ok": True})
+    return await _post(request, bridge.set_fire, request.match_info["room_id"])
 
 
 async def boost_store(request: web.Request) -> web.Response:
-    rt = _rt(request)
-    body = await _json(request)
-    minutes = max(0, min(180, int(body.get("minutes", 60))))
-    rt.store_boost_until = rt.driver.clock() + minutes * 60
-    return web.json_response({"ok": True})
+    return await _post(request, bridge.boost_store)
 
 
 async def set_mode(request: web.Request) -> web.Response:
-    rt = _rt(request)
-    body = await _json(request)
-    try:
-        rt.mode = Mode(body.get("mode"))
-    except ValueError as err:
-        raise web.HTTPBadRequest(text="mode must be auto, off or frost") from err
-    return web.json_response({"ok": True})
+    return await _post(request, bridge.set_mode)
 
 
 async def stream(request: web.Request) -> web.WebSocketResponse:

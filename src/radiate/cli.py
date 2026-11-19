@@ -233,13 +233,14 @@ def _shelly(args: argparse.Namespace) -> None:
     asyncio.run(main())
 
 
-def main(argv: list[str] | None = None) -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="radiate")
     sub = p.add_subparsers(required=True)
     s = sub.add_parser("serve", help="run the server and web UI")
     s.add_argument("--demo", action="store_true", help="drive the simulated reference house")
     s.add_argument("--config", help="house configuration file (real devices)")
     s.add_argument("--dry-run", action="store_true", help="force dry run whatever the file says")
+    s.add_argument("--data-dir", help="override house.data_dir")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8099)
     s.add_argument("--speed", type=float, default=60.0, help="demo speed-up factor")
@@ -257,7 +258,11 @@ def main(argv: list[str] | None = None) -> None:
     sh.add_argument("--config", required=True)
     sh.add_argument("--yes", action="store_true", help="confirm writing to the Shelly")
     sh.set_defaults(func=_shelly)
-    args = p.parse_args(argv)
+    return p
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
     args.func(args)
 
 

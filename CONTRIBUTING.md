@@ -1,0 +1,97 @@
+# Contributing to Radiate
+
+Thank you for helping. Radiate controls real boilers and radiator valves, so read the [engineering standards](docs/standards/engineering.md) before you change the core or a driver, and use the words in the [glossary](docs/GLOSSARY.md).
+
+By contributing, you agree that your contribution is licensed under the [Elastic License 2.0](LICENSE).
+
+## Set up
+
+You need Python 3.12 or later (CI uses 3.13) and [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone https://github.com/jamesagarside/radiate.git
+cd radiate
+uv venv && uv pip install -e ".[dev]"
+```
+
+Try the demo at http://localhost:8099:
+
+```bash
+.venv/bin/radiate serve --demo --speed 60
+```
+
+## Run the tests
+
+The main suite covers the core, configuration, drivers, server and simulator:
+
+```bash
+.venv/bin/pytest
+```
+
+The Home Assistant integration tests need `pytest-homeassistant-custom-component`, which pins its own Home Assistant version, so they run in a separate environment, `.venv-ha`:
+
+```bash
+uv venv .venv-ha --python 3.13
+uv pip install --python .venv-ha pytest-homeassistant-custom-component
+.venv-ha/bin/pytest tests/ha
+```
+
+CI also runs hassfest and HACS validation on the integration.
+
+## Lint and format
+
+CI fails on any ruff finding or unformatted file:
+
+```bash
+.venv/bin/ruff check src tests custom_components
+.venv/bin/ruff format --check src tests custom_components
+```
+
+Run `.venv/bin/ruff format src tests custom_components` to fix formatting.
+
+## Check the simulator
+
+If you change `src/radiate/core` or the simulator, compare the simulator's results before and after your change:
+
+```bash
+.venv/bin/radiate sim --days 5
+```
+
+`tests/sim` must pass; it checks that the boiler guards are never violated and that comfort and burn length stay better than plain smart TRVs. If the headline numbers move, update [docs/simulation.md](docs/simulation.md) and explain why in the pull request.
+
+## Work on a branch
+
+1. Create a branch from `main`, named `feature/<topic>` (or `fix/<topic>` for a bug fix).
+2. Write the test first, then the change.
+3. Commit in small steps. Write commit subjects in the imperative and sentence case, saying what changed, for example "Add Shelly Gen4 boiler driver and watchdog installer". Add a body when the reason isn't obvious.
+4. Don't add `Co-Authored-By` or any other attribution lines to commits.
+5. Open a pull request into `main` and fill in the checklist.
+
+Never run Radiate against a real boiler or real valves with dry run off, or install the Shelly watchdog on someone's relay, without the owner's agreement.
+
+## Pull request checklist
+
+- Tests added or updated, and `pytest` passes.
+- `tests/ha` passes, if you changed `custom_components/radiate`.
+- `ruff check` and `ruff format --check` pass.
+- Simulator compared before and after, if you changed the core.
+- Docs updated: the spec, configuration, deployment or glossary, as the change needs.
+- UK English, metric units, and no em or en dashes in prose.
+- No personal details: no house names, locations, real IP addresses or real device names.
+- No code copied from Better Thermostat (AGPL-3.0). Anything ported from Versatile Thermostat (MIT) keeps its notice.
+
+## Where docs live
+
+| Doc | What it's for |
+|---|---|
+| [docs/README.md](docs/README.md) | Index of every doc |
+| [docs/GLOSSARY.md](docs/GLOSSARY.md) | Domain language and the code identifiers each term maps to |
+| [docs/spec.md](docs/spec.md) | What Radiate does and why: model, allocation, boiler, failure modes, API |
+| [docs/configuration.md](docs/configuration.md) | The YAML configuration file |
+| [docs/deployment.md](docs/deployment.md) | Running from source, Docker, Raspberry Pi, the App and the integration |
+| [docs/standards/engineering.md](docs/standards/engineering.md) | Architecture, code, safety, testing and licensing rules |
+| [docs/standards/design.md](docs/standards/design.md) | Web UI design, motion, accessibility and copy |
+| [docs/adr/](docs/adr/) | Architecture decision records; copy [the template](docs/adr/template.md) for a new one |
+| [docs/research/](docs/research/) | Prior art, source analyses and the clean-room policy |
+
+Write docs in UK English, in the second person, with sentence-case headings. When code and a doc disagree, fix the doc in the same pull request, or open an issue if the code is wrong.

@@ -13,7 +13,7 @@
 // Radiate re-arms `toggle_after` on every heating command, and so does this script
 // when it turns heating on, so the relay can never latch on indefinitely.
 //
-// Install: `radiate shelly install-watchdog --config radiate.yaml`, or Shelly web
+// Install: `radiate shelly install-watchdog --config radiate.yaml --yes`, or Shelly web
 // UI > Scripts > Add script, paste, enable "Run on startup".
 
 let STALE_S = 600;
