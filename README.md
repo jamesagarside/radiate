@@ -4,7 +4,7 @@
 
 Plumbers balance a heating system by hand, turning the lockshield valve on each radiator to throttle the ones nearest the boiler so the far ones get their share of hot water. Radiate does that job in software, continuously, using smart radiator valves you already own.
 
-> **Status:** pre-alpha. The control core, simulator, web UI, Home Assistant integration and App are in place and tested against a simulated house. Real device drivers (Zigbee2MQTT, Shelly) are next. Do not connect it to a real boiler yet.
+> **Status:** pre-alpha. The control core, simulator, web UI, Home Assistant integration and App are tested against a simulated house. Zigbee2MQTT and Shelly drivers, the configuration file and SQLite persistence are in place but untested on real devices. Run real installs in dry run first; see [configuration](docs/configuration.md).
 
 ## Try it
 
@@ -21,7 +21,14 @@ Open http://localhost:8099 to watch a simulated 9-radiator house, 60 times faste
 .venv/bin/radiate sim --days 5
 ```
 
-Tests: `.venv/bin/pytest` (core, simulator, server). Home Assistant integration tests need the HA harness: `uv pip install pytest-homeassistant-custom-component` in a separate venv, then `pytest tests/ha`.
+To run against real devices, describe your house in a YAML file (start from [`examples/reference-house.yaml`](examples/reference-house.yaml)), check it, and start the server. It runs in dry run until the file says otherwise:
+
+```bash
+.venv/bin/radiate check-config radiate.yaml
+.venv/bin/radiate serve --config radiate.yaml
+```
+
+Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). Home Assistant integration tests need the HA harness: `uv pip install pytest-homeassistant-custom-component` in a separate venv, then `pytest tests/ha`.
 
 ## Why
 
@@ -69,6 +76,7 @@ Other TRVs that expose a writable valve position should follow.
 
 - [Prior art and gap analysis](docs/research/prior-art.md)
 - [Specification](docs/spec.md)
+- [Configuration](docs/configuration.md)
 - [Simulation findings](docs/simulation.md)
 - [Feature coverage matrix](docs/research/coverage-matrix.md)
 - [ADR-0001: standalone, not a VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md)

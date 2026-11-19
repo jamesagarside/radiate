@@ -1,7 +1,10 @@
 configuration:
   demo:
     name: Demo mode
-    description: Run the simulated reference house instead of real devices. Real device drivers are in development.
+    description: Run the simulated reference house instead of your devices.
+  config_file:
+    name: Config file
+    description: House configuration in the App's config folder, used when demo mode is off.
   token:
     name: API token
     description: Optional. Required by clients outside Home Assistant (the sidebar panel does not need it).

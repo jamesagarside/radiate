@@ -177,3 +177,11 @@ def test_yaml_round_trip(tmp_path):
     path.write_text("rooms: [")
     with pytest.raises(ConfigError, match="not valid YAML"):
         load_site(path)
+
+
+def test_numbers_from_environment():
+    data = minimal(mqtt={"host": "b", "port": "${PORT}"})
+    assert parse_site(data, env={"PORT": "1884"}).mqtt.port == 1884
+    data = minimal(mqtt={"host": "b", "port": "${PORT}"})
+    with pytest.raises(ConfigError, match="mqtt.port"):
+        parse_site(data, env={"PORT": "abc"})

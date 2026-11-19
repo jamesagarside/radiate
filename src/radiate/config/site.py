@@ -68,7 +68,6 @@ class ShellyConfig:
     heating_switch: int = 0
     store_switch: int = 1
     auto_off_s: float = 120 * 60  # spec 5.7: the relay can never latch on indefinitely
-    poll_s: float = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +124,12 @@ class _Ctx:
         val = data[key]
         if kind is float and isinstance(val, int) and not isinstance(val, bool):
             return float(val)
+        if kind is float and isinstance(val, str):
+            # Numbers substituted from the environment arrive as strings.
+            try:
+                return float(val)
+            except ValueError:
+                pass
         if isinstance(val, bool) and kind in (int, float):
             self.err(f"{path}{key}", "expected a number")
             return default
@@ -261,7 +266,7 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
         return None
     p = "shelly."
     ctx.unknown(
-        raw, {"host", "password", "heating_switch", "store_switch", "auto_off_min", "poll_s"}, p
+        raw, {"host", "password", "heating_switch", "store_switch", "auto_off_min"}, p
     )
     host = ctx.get(raw, "host", str, "", p)
     if not host:
@@ -276,7 +281,6 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
         heating_switch=heating,
         store_switch=store,
         auto_off_s=ctx.number(raw, "auto_off_min", 120, 15, 240, p) * 60,
-        poll_s=ctx.number(raw, "poll_s", 15, 2, 120, p),
     )
 
 
