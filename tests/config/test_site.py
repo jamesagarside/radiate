@@ -161,6 +161,14 @@ def test_store_windows_and_boiler_units():
     assert site.house.boiler.min_burn_s == 600
 
 
+def test_history_days_default_range_and_off():
+    assert parse_site(minimal()).history_days == 14
+    assert parse_site(minimal(house={"history_days": 0})).history_days == 0
+    assert parse_site(minimal(house={"history_days": 3.5})).history_days == 3.5
+    with pytest.raises(ConfigError, match="house.history_days: must be 0 to 90"):
+        parse_site(minimal(house={"history_days": 120}))
+
+
 def test_unknown_schedule_and_timezone():
     data = minimal(house={"timezone": "Mars/Base"})
     data["rooms"][0]["schedule"] = "nope"
