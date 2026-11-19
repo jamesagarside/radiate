@@ -1,4 +1,4 @@
-"""Command line: `radiate serve`, `radiate sim` and `radiate check-config`."""
+"""Command line: `radiate serve`, `radiate sim`, `radiate check-config` and friends."""
 
 from __future__ import annotations
 
@@ -233,6 +233,84 @@ def _shelly(args: argparse.Namespace) -> None:
     asyncio.run(main())
 
 
+def _history_store(args: argparse.Namespace):
+    """The configuration and the state database's history, read from an existing file."""
+    from pathlib import Path
+
+    from radiate.server.history import History
+    from radiate.server.store import Store
+
+    site = _load(args.config)
+    path = Path(args.data_dir or site.data_dir) / "radiate.db"
+    if not path.exists():
+        sys.exit(f"no state database at {path}: check house.data_dir or use --data-dir")
+    store = Store(path)
+    return site, store, History(store, site.history_days)
+
+
+def _when(text: str | None, tz) -> float | None:
+    from datetime import datetime
+
+    if text is None:
+        return None
+    try:
+        t = datetime.fromisoformat(text)
+    except ValueError:
+        sys.exit(f"{text!r} is not an ISO date or time, for example 2026-11-18T06:00")
+    return (t if t.tzinfo else t.replace(tzinfo=tz)).timestamp()
+
+
+def _replay(args: argparse.Namespace) -> None:
+    import json
+    from zoneinfo import ZoneInfo
+
+    from radiate.server.replay import format_report, run_replay
+
+    site, store, history = _history_store(args)
+    tz = ZoneInfo(site.timezone)
+    report = run_replay(
+        site.house,
+        history,
+        tz,
+        start=_when(args.start, tz),
+        end=_when(args.end, tz),
+        fresh=args.state == "fresh",
+        limit=args.limit,
+    )
+    store.close()
+    print(json.dumps(report, indent=2) if args.json else format_report(report))
+
+
+def _bootstrap(args: argparse.Namespace) -> None:
+    import time
+
+    from radiate.core.bootstrap import bootstrap
+    from radiate.core.persist import load_state
+
+    site, store, history = _history_store(args)
+    saved = store.get("engine")
+    if saved is not None and not args.force and time.time() - saved[1] < 15 * 60:
+        sys.exit(
+            "Radiate saved its state in the last 15 minutes and may be running. Stop it "
+            "first, as its next save would undo this, or re-run with --force."
+        )
+    data, saved_wall = saved if saved is not None else (None, time.time())
+    merged, ticks = bootstrap(site.house, history.recent(time.time()), data)
+    if merged is None:
+        sys.exit("no recorded ticks to learn from")
+    # Timers in the saved state are ages at the time it was saved, so keep that time.
+    store.put("engine", merged, wall=saved_wall)
+    store.close()
+    state, _ = load_state(site.house, merged, 0.0)
+    print(f"Learned from {ticks} recorded ticks; boiler guard and timers kept as saved.")
+    for rid, rs in state.rooms.items():
+        e = rs.est
+        print(
+            f"  {rid:<12} a={e.a:.2f} K/h  b={e.b:.3f} /h  d={e.d:.2f} K/h  "
+            f"confidence={e.confidence:.2f}  samples={e.samples}"
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="radiate")
     sub = p.add_subparsers(required=True)
@@ -258,6 +336,25 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--config", required=True)
     sh.add_argument("--yes", action="store_true", help="confirm writing to the Shelly")
     sh.set_defaults(func=_shelly)
+    r = sub.add_parser("replay", help="re-run recorded ticks and compare the actions")
+    r.add_argument("--config", required=True)
+    r.add_argument("--data-dir", help="override house.data_dir")
+    r.add_argument("--from", dest="start", help="ISO date or time (house time zone)")
+    r.add_argument("--to", dest="end", help="ISO date or time (house time zone)")
+    r.add_argument(
+        "--state",
+        choices=["saved", "fresh"],
+        default="saved",
+        help="start from the state Radiate had (saved) or from priors (fresh)",
+    )
+    r.add_argument("--json", action="store_true", help="print the report as JSON")
+    r.add_argument("--limit", type=int, default=50, help="differences to list, 0 for all")
+    r.set_defaults(func=_replay)
+    b = sub.add_parser("bootstrap", help="learn room models from the recorded history")
+    b.add_argument("--config", required=True)
+    b.add_argument("--data-dir", help="override house.data_dir")
+    b.add_argument("--force", action="store_true", help="even if Radiate may be running")
+    b.set_defaults(func=_bootstrap)
     return p
 
 
