@@ -28,7 +28,9 @@ To run against real devices, describe your house in a YAML file (start from [`ex
 .venv/bin/radiate serve --config radiate.yaml
 ```
 
-Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). Home Assistant integration tests need the HA harness: `uv pip install pytest-homeassistant-custom-component` in a separate venv, then `pytest tests/ha`.
+To run Radiate in Docker, on a Raspberry Pi, as a Home Assistant App or with the HACS integration, see [deployment](docs/deployment.md).
+
+Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). The Home Assistant integration tests run in a separate environment; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Why
 
@@ -74,9 +76,15 @@ Other TRVs that expose a writable valve position should follow.
 
 ## Documentation
 
-- [Prior art and gap analysis](docs/research/prior-art.md)
-- [Specification](docs/spec.md)
+The [documentation index](docs/README.md) lists everything. The main pages:
+
+- [Deployment](docs/deployment.md)
 - [Configuration](docs/configuration.md)
+- [Specification](docs/spec.md)
+- [Glossary](docs/GLOSSARY.md)
+- [Engineering standards](docs/standards/engineering.md) and [design standards](docs/standards/design.md)
+- [Contributing](CONTRIBUTING.md)
+- [Prior art and gap analysis](docs/research/prior-art.md)
 - [Simulation findings](docs/simulation.md)
 - [Feature coverage matrix](docs/research/coverage-matrix.md)
 - [ADR-0001: standalone, not a VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md)
