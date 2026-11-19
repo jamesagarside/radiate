@@ -138,3 +138,84 @@ def test_day_from_minute_of_day_when_no_label():
         60 * MIN, None, relay_on=False, firing=False, calling=set(), below={}, minute=10
     )
     assert closed is not None and ledger.summary(None)["day"] == closed["day"] + 1
+
+
+def ticks(ledger, minutes, day, *, start, offset=0.0, relay=lambda m: False, calling=None):
+    """One tick a minute from minute `start`, with the local minute of day."""
+    out = None
+    for m in range(start, start + minutes):
+        closed = ledger.update(
+            offset + m * MIN,
+            day,
+            relay_on=relay(m),
+            firing=relay(m),
+            calling=(calling or (lambda m: set()))(m),
+            below={},
+            minute=m % 1440,
+        )
+        out = closed or out
+    return out
+
+
+def burn_at_13(m):
+    return 780 <= m < 840
+
+
+def two_rooms_at_13(m):
+    # Two rooms call at the start of the 13:00 burn; the second arrives 20 min later.
+    return {r for r, t in (("bed", 800), ("dining", 820)) if 780 <= m < t}
+
+
+def test_a_whole_day_is_scored():
+    ledger = Ledger()
+    ticks(ledger, 1440, 0, start=0, relay=burn_at_13, calling=two_rooms_at_13)
+    closed = ticks(ledger, 1, 1, start=1440)
+    assert closed["partial"] is False
+    assert closed["balance"]["score"] == pytest.approx(100 * (1 - 20 / 120), abs=0.1)
+    assert ledger.summary(None)["partial"] is False  # day 1 started at midnight
+
+
+def test_a_day_started_after_midnight_is_partial_and_not_scored():
+    # Radiate's first day began at 12:00 with untrained models: a balance score would
+    # describe the cold start, not the house.
+    ledger = Ledger()
+    ticks(ledger, 720, 0, start=720, relay=burn_at_13, calling=two_rooms_at_13)
+    closed = ticks(ledger, 1, 1, start=1440)
+    assert closed["partial"] is True
+    assert closed["balance"]["starts_measured"] == 1
+    assert closed["balance"]["score"] is None
+    assert closed["burner_hours"] == pytest.approx(1.0)  # what was seen still counts
+
+
+def test_a_start_a_few_minutes_after_midnight_still_counts_as_whole():
+    ledger = Ledger()
+    ticks(ledger, 1430, 0, start=10)
+    assert ticks(ledger, 1, 1, start=1440)["partial"] is False
+
+
+def test_a_long_gap_makes_the_day_partial():
+    ledger = Ledger()
+    ticks(ledger, 600, 0, start=0)  # 00:00 to 10:00
+    ticks(ledger, 720, 0, start=720, offset=0.0)  # nothing seen from 10:00 to 12:00
+    assert ledger.summary(None)["partial"] is True
+
+
+def test_a_short_gap_does_not():
+    ledger = Ledger()
+    ticks(ledger, 600, 0, start=0)
+    ticks(ledger, 830, 0, start=610)  # 10 min unseen
+    assert ledger.summary(None)["partial"] is False
+
+
+def test_a_gap_across_midnight_marks_both_days():
+    ledger = Ledger()
+    ticks(ledger, 1380, 0, start=0)  # to 23:00
+    closed = ticks(ledger, 60, 1, start=1440 + 120)  # nothing seen until 02:00
+    assert closed["day"] == 0 and closed["partial"] is True
+    assert ledger.summary(None)["partial"] is True
+
+
+def test_minute_unknown_assumes_the_whole_day_was_seen():
+    ledger = Ledger()
+    feed(ledger, 60, day=0, start=720)
+    assert ledger.summary(None)["partial"] is False
