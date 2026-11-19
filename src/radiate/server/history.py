@@ -3,7 +3,7 @@
 The `history` table in `radiate.db` holds one row per entry (`radiate.core.history`):
 a start entry when the runtime starts, one tick entry a minute, and a checkpoint every
 6 hours. Each row's data is compact JSON with a schema version, compressed with zlib:
-about 0.5 kB a tick, 0.75 MB a day for the 9-room reference house. Rows older than
+about 0.7 kB a tick and 1.2 MB a day on disk for the 9-room reference house. Rows older than
 `house.history_days` are pruned at start and then hourly.
 
 Recording never stops the control loop: the `Recorder` logs an error, at most once
