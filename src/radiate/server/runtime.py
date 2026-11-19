@@ -126,6 +126,8 @@ class Runtime:
             if r.code.startswith(("boiler.", "disturbance.", "safe_mode.")):
                 self._log(now, r)
                 logged.append((r.code, r.message, r.room_id))
+        if self.exporter is None and not self.listeners:
+            return actions  # nobody to tell; the browser demo warms up much faster
         payload = self.describe()
         if self.exporter is not None:
             self.exporter.record(payload, logged)
