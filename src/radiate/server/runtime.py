@@ -335,6 +335,8 @@ class Runtime:
                 if inp and inp.next_setpoint_in_s is not None
                 else None,
                 "override": self.override_view(rc.id, now),
+                # The manual fire flag set through the API, as opposed to `fire` (detected).
+                "fire_switch": rc.id in self.fire,
             }
             rs = st.rooms.get(rc.id)
             if rs is not None:
@@ -405,6 +407,12 @@ class Runtime:
             },
             "timeline": {"burns": burns, "store": stores, "window_s": 86400},
             "alerts": [a.message for a in acts.alerts] if acts else [],
+            # The same alerts with their codes, for clients that act on them.
+            "alert_details": [
+                {"code": a.code, "message": a.message, "room_id": a.room_id} for a in acts.alerts
+            ]
+            if acts
+            else [],
             "telemetry": self.driver.telemetry(),
         }
 

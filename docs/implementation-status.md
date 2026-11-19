@@ -10,19 +10,18 @@ Last audit: November 2026, against `main` at `c4657fe`.
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 88 |
-| Partial | 26 | 29 |
-| Missing | 37 | 28 |
+| Done | 82 | 94 |
+| Partial | 26 | 27 |
+| Missing | 37 | 26 |
 
-Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection. Two rows moved from done to partial when simulation showed the problem described under next steps.
+Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed the problem described under next steps.
 
 Top remaining gaps, most important first:
 
 1. **Valves Radiate counts as open can stay shut** (sections 4.6, 5.4): internal-sensor rooms and dump rooms. See next steps.
 2. **Litres are an upper bound** until the burner-firing signal exists (section 5.6, open question 1).
 3. **Stuck valve, second half:** "rise with valve closed" and the recalibration service (section 7).
-4. **Home Assistant entities** for burner hours, litres, balance score and learning state (section 8.2): the server provides the data.
-5. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, recorder bootstrap (sections 4.1 to 4.3, 5.5).
+4. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, recorder bootstrap (sections 4.1 to 4.3, 5.5).
 
 ## 2. House model
 
@@ -151,16 +150,18 @@ Top remaining gaps, most important first:
 |---|---|---|---|
 | `GET /api/v1/house`, `/state`, `/decisions?since=` | done | `server/app.py` | |
 | `POST /rooms/{id}/setpoint` | done | `server/app.py`, `server/runtime.py` `set_override` | Ends at the next schedule change by default, or after `duration_min`, or `until: cleared`; saved in SQLite; `override` in `describe()` |
-| `POST /rooms/{id}/fire`, `/store/boost`, `/mode` | done | `server/app.py` | Manual fire flag is not persisted |
+| `POST /rooms/{id}/fire`, `/store/boost`, `/mode` | done | `server/app.py` | Manual fire flag is not persisted; `fire_switch` in `describe()` |
 | `WS /api/v1/stream` | done | `server/app.py` | |
 | Local token auth, ingress auth | done | `server/app.py` | |
-| HA: climate per room | done | `custom_components/radiate/climate.py` | |
+| HA: climate per room | done | `custom_components/radiate/climate.py` | Setting the target creates an override; override setpoint, `until` and minutes left as attributes |
 | HA: room sensors (opening, gain, loss, lag, confidence) | done | `custom_components/radiate/sensor.py` | |
-| HA: learning state sensor | missing | | |
-| HA: "fire lit" switch | partial | `custom_components/radiate/binary_sensor.py` | Read-only binary sensor |
-| HA: boiler state, starts | partial | `custom_components/radiate/sensor.py` | Starts in the last hour, not today |
-| HA: burner hours, litres today, balance score | missing | | The server now reports them under `accounting.today`; the integration does not read them yet |
+| HA: learning state sensor | done | `custom_components/radiate/sensor.py` | Plain text, not an enum, because the set of gates can grow |
+| HA: "fire lit" switch | done | `custom_components/radiate/switch.py` | Posts `rooms/{id}/fire`, shows `fire_switch`; the "Fire detected" binary sensor stays |
+| HA: boiler state, starts | done | `custom_components/radiate/sensor.py` | Starts today and in the last hour; relay starts, not physical burner starts |
+| HA: burner hours, litres today, balance score | done | `custom_components/radiate/sensor.py` | Burner hours, starts, litres and kWh today (`total_increasing`, reset at local midnight; litres and kWh only with a nozzle rating) and yesterday's balance score |
+| HA: stuck valve, short-cycling, alerts | done | `custom_components/radiate/binary_sensor.py`, `sensor.py` | Problem binary sensor per room from `valve.untrusted`; short-cycle extra off time; alert count with codes and messages from `alert_details`. No repairs issues |
 | HA services `boost_store`, `set_mode` | done | `custom_components/radiate/__init__.py` | |
+| HA services `set_override`, `clear_override` | done | `custom_components/radiate/climate.py` | Entity services on Radiate climate entities; `until` and `duration_min` as in `POST /rooms/{id}/setpoint` |
 | HA service `recalibrate_valve` | missing | | |
 
 ## 9. Elastic export
