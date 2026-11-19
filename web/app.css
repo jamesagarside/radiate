@@ -86,7 +86,7 @@ h2, h3, p { margin: 0; }
   display: grid; gap: 6px;
 }
 .notice-copy { display: grid; gap: 2px; }
-.notice-tag {
+.notice-tag, .tag {
   display: inline-block; margin-right: 6px; padding: 1px 8px; border-radius: 999px;
   font-size: 0.78rem; font-weight: 600; background: var(--warn-soft); color: var(--warn);
 }
@@ -136,6 +136,8 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
   .btn-primary:hover { border-color: var(--text); }
   .notice-more summary:hover { color: var(--text); }
   .seg button:hover { color: var(--text); }
+  .step:not(:disabled):hover { background: var(--surface); }
+  .link:hover { color: var(--text); }
 }
 :focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
 
@@ -159,6 +161,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
   transition: transform 240ms var(--ease-out), background-color 150ms ease;
 }
 .guard[data-kind="rest"] .guard-fill { background: var(--cool); }
+.boiler-note { font-size: 0.85rem; color: var(--muted); }
 
 .timeline { position: relative; display: grid; gap: 4px; }
 .lane { position: relative; height: 14px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
@@ -171,6 +174,8 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 0; }
 .stats dt { font-size: 0.78rem; color: var(--muted); }
 .stats dd { margin: 2px 0 0; font-size: 1.15rem; font-variant-numeric: tabular-nums; font-weight: 600; }
+.stats .sub { display: block; font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+.stats .sub:empty { display: none; }
 
 /* Rooms */
 .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
@@ -186,11 +191,46 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .badge[data-kind="preheat"] { background: var(--warn-soft); color: var(--warn); }
 .badge[data-kind="fire"] { background: var(--heat-soft); color: var(--ember); }
 .badge[data-kind="ok"] { background: var(--ok-soft); color: var(--ok); }
+.badge[data-kind="extend"] { background: var(--heat-soft); color: var(--ember); }
 .badge[data-kind="sink"] { background: var(--cool-soft); color: var(--cool); }
 
 .temp { display: flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; }
 .temp .now { font-size: 2rem; font-weight: 650; letter-spacing: -0.02em; }
 .temp .target { color: var(--muted); }
+
+/* Setpoint: label or hold on the left, stepper on the right. Quiet until it holds a
+   value other than the schedule, then cool like other calm, user-made states. */
+.sp { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
+.sp-copy { display: grid; justify-items: start; min-width: 0; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sp[data-held="true"] .sp-label { color: var(--cool); font-weight: 600; }
+.sp[data-error="true"] .sp-label { color: var(--warn); }
+.stepper {
+  flex: none; display: inline-flex; align-items: center;
+  padding: 2px; border-radius: 10px; background: var(--surface-2);
+  transition: background-color 150ms ease;
+}
+.sp[data-held="true"] .stepper { background: var(--cool-soft); }
+.step {
+  width: 30px; height: 28px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: var(--text); cursor: pointer;
+  transition: transform 160ms var(--ease-out), background-color 150ms ease, opacity 150ms ease;
+}
+.step svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.step:active { transform: scale(0.95); }
+.step:disabled { opacity: 0.35; cursor: default; transform: none; }
+.sp-val { min-width: 3.4em; text-align: center; font-size: 0.9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sp[data-held="true"] .sp-val { color: var(--cool); }
+.link {
+  font: inherit; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+  transition: transform 160ms var(--ease-out), color 150ms ease;
+}
+.link:active { transform: scale(0.97); }
+
+.flag {
+  justify-self: start; padding: 3px 9px; border-radius: 8px; font-size: 0.78rem;
+  background: var(--warn-soft); color: var(--warn);
+}
 
 .valve-label { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; margin-bottom: 4px; }
 .bar { height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
@@ -221,8 +261,8 @@ body[data-link="stale"] :is(main, .banner, .notice) { opacity: 0.55; }
 body[data-link="stale"] .status { color: var(--warn); }
 
 @media (prefers-reduced-motion: reduce) {
-  .fill, .guard-fill, .btn, .seg button { transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease; }
-  .btn:active, .seg button:active { transform: none; }
+  .fill, .guard-fill, .btn, .seg button, .step, .link { transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease; }
+  .btn:active, .seg button:active, .step:active, .link:active { transform: none; }
   .signin { transition: opacity 150ms ease; }
   @starting-style { .signin { transform: none; } }
 }
@@ -232,6 +272,8 @@ body[data-link="stale"] .status { color: var(--warn); }
   .btn, .seg button, .signin-row input { min-height: 44px; }
   .seg button { min-width: 44px; }
   .notice-more summary { padding-block: 12px; }
+  .step { width: 44px; height: 44px; }
+  .link { padding-block: 13px; margin-block: -13px; }
 }
 
 @media (max-width: 560px) {
