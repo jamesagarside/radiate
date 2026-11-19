@@ -3,14 +3,21 @@
 Baseline ("smart TRVs, no balancing"): every TRV fully open on its own schedule and
 internal sensor, boiler called whenever any TRV is heating, no minimum burn or off
 time. That is what per-room integrations (VTherm, Better Thermostat) give today.
+
+Radiate runs are wired like the live driver: Radiate commands the relay and writes a
+heartbeat each tick, except while it hands the boiler to the Shelly watchdog in safe
+mode. The watchdog (`Watchdog`, after `shelly/radiate-watchdog.js`) takes over when
+the heartbeat is 10 min old.
 """
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 
 from radiate.core import EngineState, HouseConfig, RoomInput, Snapshot, decide
+from radiate.core.persist import dump_state, load_state
 from radiate.core.types import Actions, RoomRole
 
 from .house import SimHouse
@@ -22,6 +29,41 @@ DAY = 86400.0
 REPORT_HEARTBEAT_S = 600.0
 # Shelly watchdog fallback schedule (spec 5.7): occupied windows with an hour's lead.
 WATCHDOG_SCHEDULE = ((5 * 60 + 30, 8 * 60 + 30), (16 * 60, 22 * 60 + 30))
+WATCHDOG_STORE = ((6 * 60, 7 * 60 + 30), (17 * 60, 21 * 60))
+
+
+@dataclass
+class Watchdog:
+    """The Shelly script: with no heartbeat for 10 min it runs the relay on a fallback
+    schedule with its own minimum burn and off times (spec 5.7)."""
+
+    windows: tuple[tuple[int, int], ...] = WATCHDOG_SCHEDULE
+    stale_s: float = 600.0
+    min_burn_s: float = 480.0
+    min_off_s: float = 600.0
+    heartbeat: float = 0.0
+    in_control: bool = False
+    heat_on: bool = False
+    changed_at: float = 0.0
+
+    def tick(self, house: SimHouse, minute: int) -> None:
+        now = house.now
+        if now - self.heartbeat <= self.stale_s:
+            self.in_control = False
+            return
+        if not self.in_control:
+            self.in_control = True
+            self.heat_on = house.heating_relay
+            self.changed_at = now
+        want = any(a <= minute < b for a, b in self.windows)
+        held = now - self.changed_at
+        if want != self.heat_on and (
+            (self.heat_on and held >= self.min_burn_s)
+            or (not self.heat_on and held >= self.min_off_s)
+        ):
+            self.heat_on, self.changed_at = want, now
+        house.heating_relay = self.heat_on
+        house.store_relay = any(a <= minute < b for a, b in WATCHDOG_STORE)
 
 
 @dataclass
@@ -131,17 +173,34 @@ def run(
     optimum_start: bool = True,
     oil_out_at_s: float | None = None,
     seized_valves: frozenset[str] = frozenset(),
+    outage: tuple[float, float] | None = None,
+    zigbee_outage: tuple[float, float] | None = None,
+    watchdog_windows: tuple[tuple[int, int], ...] = WATCHDOG_SCHEDULE,
+    leaking_valves: dict[str, float] | None = None,
 ) -> Result:
+    """One closed-loop run.
+
+    `crash_at_s`: Radiate stops for good. `outage`: Radiate is down from the first time
+    to the second, then restarts from its saved state (as `radiate serve` would).
+    `zigbee_outage`: no TRV reachable for that span, so Radiate enters safe mode.
+    `seized_valves`: no flow at any opening. `leaking_valves`: room id to the share of
+    full flow that still passes when the valve is shut (lost calibration).
+    """
     d = disturbances or Disturbances()
     cfg = cfg or house_config()
     house = build_house(seed)
     house.outdoor_mean = outdoor_mean
     for rid in seized_valves:
         house.rooms[rid].radiator.pipe_k = 0.0  # pin seized shut: the head moves, no flow
+    for rid, share in (leaking_valves or {}).items():
+        house.rooms[rid].radiator.leak = share
     if pump_qmax is not None:
         house.pump_qmax = pump_qmax
     st = engine or EngineState.new(cfg)
     res = Result(controller, days - warmup_days, engine=st)
+    watchdog = Watchdog(windows=watchdog_windows)
+    saved: tuple[dict, float] | None = None  # engine state saved when Radiate went down
+    handover = False
     reports = {rid: (house.rooms[rid].reported_t, 0.0) for rid in house.rooms}
     dist_state: dict = {}
 
@@ -173,10 +232,31 @@ def run(
         if house.now >= t_next_control:
             t_next_control += CONTROL_S
             alive = crash_at_s is None or house.now < crash_at_s
+            if outage is not None and outage[0] <= house.now < outage[1]:
+                alive = False
+                if saved is None:
+                    saved = (json.loads(json.dumps(dump_state(st, house.now))), house.now)
+            elif saved is not None:
+                # Back from the outage: restore, with the time spent down.
+                st, _ = load_state(cfg, saved[0], house.now, house.now - saved[1])
+                res.engine, saved = st, None
+            zigbee_down = (
+                zigbee_outage is not None and zigbee_outage[0] <= house.now < zigbee_outage[1]
+            )
             if controller == "radiate" and alive:
                 snap = _snapshot(house, reports, minute, optimum_start)
+                if zigbee_down:
+                    for inp in snap.rooms.values():
+                        inp.trv_available = False
                 actions = decide(cfg, snap, st)
-                _apply(house, actions)
+                if zigbee_down:
+                    actions.valves = {}  # unreachable: the TRVs keep their last settings
+                if not actions.watchdog_handover:
+                    _apply(house, actions)
+                    watchdog.heartbeat = house.now
+                elif not handover and not actions.heating_relay:
+                    house.heating_relay = False  # the driver's last command before handing over
+                handover = actions.watchdog_handover
                 res.last_actions = actions
                 if st.rooms["lounge"].dist.fire and house.now >= measure_from:
                     res.fire_flagged_minutes += 1
@@ -188,10 +268,10 @@ def run(
                         res.alert_minutes[code] = res.alert_minutes.get(code, 0) + 1
             elif controller == "baseline":
                 _baseline(house, minute)
-            # A crashed Radiate does nothing: TRVs keep governed settings, relay frozen
-            # until the Shelly watchdog (spec 5.7) takes over after 10 min.
-            elif crash_at_s is not None and house.now >= crash_at_s + 600:
-                house.heating_relay = any(a <= minute < b for a, b in WATCHDOG_SCHEDULE)
+            # A crashed or handed-over Radiate leaves the relay alone: TRVs keep their
+            # governed settings and the Shelly watchdog takes over after 10 min.
+            if controller == "radiate":
+                watchdog.tick(house, minute)
 
         house.step(STEP_S, draw)
 

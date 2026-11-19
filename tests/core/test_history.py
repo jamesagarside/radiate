@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from radiate.core import EngineState, decide
+from radiate.core import decide
 from radiate.core.history import (
     CHECKPOINT,
     START,
@@ -20,7 +20,7 @@ from radiate.core.history import (
     start_data,
     tick_data,
 )
-from radiate.core.persist import dump_state, load_state
+from radiate.core.persist import dump_state, first_start_state, load_state
 from radiate.core.types import Actions, BoilerState, Mode, Reason, RoomInput, Snapshot, ValveAction
 from radiate.sim.reference import build_house, house_config
 from radiate.sim.runner import STEP_S, Disturbances, _apply, _apply_disturbances, _snapshot
@@ -39,7 +39,7 @@ def sim_entries(
     house.now = 5.5 * 3600
     dist, dstate = Disturbances(fire_days=frozenset(range(365))), {}
     reports = {rid: (r.reported_t, house.now) for rid, r in house.rooms.items()}
-    st = EngineState.new(cfg)
+    st = first_start_state(cfg)  # what Runtime.restore builds on a first start
     entries = [Entry(START, wall0, segment, start_data(house.now + offset, None, 0.0))]
     for i in range(minutes):
         for _ in range(int(60 / STEP_S)):
@@ -219,3 +219,29 @@ def test_tally_counts_burns_relay_hours_alerts_and_comfort():
     assert s["heating_relay_h"] == round(10 / 60, 2)
     assert s["alerts"] == {"boiler.no_heat": {"onsets": 1, "minutes": 3}}
     assert s["below_setpoint_h"] == {"dining": 0.5}
+
+
+def test_handback_fields_round_trip_through_json():
+    """Fields added for the watchdog hand-back and rejected writes survive recording."""
+    import json
+    import math
+
+    from radiate.core.history import decode_snapshot, encode_snapshot
+    from radiate.core.types import RoomInput, Snapshot
+
+    snap = Snapshot(
+        now=10.0,
+        minute_of_day=600,
+        outdoor=4.0,
+        rooms={"a": RoomInput(temperature=19.0, trv_rejected=("valve_opening_degree",))},
+        heating_relay=True,
+        store_relay=False,
+        relay_follows_commands=False,
+        heating_relay_age_s=120.0,
+        heating_relay_unseen_s=math.inf,
+    )
+    back = decode_snapshot(json.loads(json.dumps(encode_snapshot(snap))))
+    assert back.relay_follows_commands is False
+    assert back.heating_relay_age_s == 120.0
+    assert back.heating_relay_unseen_s == math.inf
+    assert tuple(back.rooms["a"].trv_rejected) == ("valve_opening_degree",)

@@ -103,6 +103,22 @@ Every variant left the toilet short of heat and raised the house comfort deficit
 
 - **Crash:** Radiate stops at midday during setback. TRVs pick up their mirrored on-device schedules and the Shelly watchdog runs the boiler. Comfort degrades to about the smart-TRV level (within 10 %), with no guard violations.
 - **Fire:** five fire evenings in a row leave the lounge's learned heating gain within 35 % and loss rate within 0.03 /h of a no-fire run. With no fires, fewer than 2 hours are falsely flagged over 3 days.
+- **Watchdog hand-back:** the simulated watchdog follows the Shelly script (takes over 10 minutes after the last heartbeat, with its own minimum burn and off). Radiate comes back from a crash 3 minutes into a watchdog burn, or 3 minutes after one ended, or from a Zigbee outage in safe mode, morning and evening. No guard violations over seeds 1 to 3. Without adoption, the same runs cut a burn to 3 minutes or restarted the burner 2 to 3 minutes after it stopped.
+- **Leaking valve:** the dining valve lets 20 % of its full flow past when shut (`run(leaking_valves=...)`). Radiate flags it within two days on seeds 1 to 3.
+
+### Tuning the leak check
+
+The simulated TRV reads the room plus 5 % of the radiator water's lead over it, so a warm radiator lifts it by about 2.5 K. The largest rise of a shut valve's TRV against the room in any one burn:
+
+| Case | Largest rise in a burn |
+|---|---|
+| Healthy valves, seeds 1 to 3 and the cold scenario | 0.3 K |
+| Dining valve passing 5 % | 0.9 K |
+| Dining valve passing 10 % | 1.2 K |
+| Dining valve passing 20 % | 1.8 K |
+| Bedroom 2 valve passing 20 % | 0.3 K |
+
+The check flags 1 K. A leak does not show in every burn: in the morning many valves share the flow and the leak passes less, so the check counts 2 burns out of the last 5 rather than 2 in a row, and clears only after 5 cool burns. The far bedrooms are on long pipe runs, so their leaks pass too little water to detect. A strong leak also raises `unexplained_heat`; the check still runs then, because it compares the TRV with the room and sun or guests warm both. The real TRVZB also picks up heat conducted up the valve body, which the simulator does not model: check the threshold on the pilot valve.
 
 ## Bugs the simulator caught
 

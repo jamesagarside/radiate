@@ -155,6 +155,25 @@ def test_stuck_valve_verdicts_survive_a_restart():
     assert not restored.rooms["bedroom_1"].valve.untrusted
 
 
+def test_leaking_valve_verdicts_survive_a_restart():
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    st.rooms["dining"].valve.leak_history = [True, False, True]
+    st.rooms["dining"].valve.leaking = True
+    data = json.loads(json.dumps(dump_state(st, 100.0)))
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == []
+    assert restored.rooms["dining"].valve.leaking
+    assert restored.rooms["dining"].valve.leak_history == [True, False, True]
+    assert not restored.rooms["lounge"].valve.leaking
+    # Saves from before the leak check, or with junk in it, load with no verdicts.
+    del data["rooms"]["dining"]["valve"]["leak_history"]
+    data["rooms"]["lounge"]["valve"]["leak_history"] = [1, "x"]
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == [] and restored.rooms["dining"].valve.leak_history == []
+    assert restored.rooms["lounge"].valve.leak_history == []
+
+
 def test_state_saved_before_health_data_still_loads():
     cfg, st = learned()
     data = dump_state(st, st.last_now)

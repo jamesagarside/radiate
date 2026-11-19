@@ -38,7 +38,7 @@ from enum import Enum
 from typing import Any
 
 from .decide import EngineState, decide
-from .persist import dump_state, load_state
+from .persist import dump_state, first_start_state, load_state
 from .types import Actions, HouseConfig, Mode, Reason, RoomInput, RoomRole, Snapshot
 
 SCHEMA_VERSION = 1
@@ -149,7 +149,7 @@ def tick_data(snap: Snapshot, actions: dict[str, Any]) -> dict[str, Any]:
 
 def start_data(now: float, engine: Any, elapsed_s: float) -> dict[str, Any]:
     """How the live state was built: `load_state(cfg, engine, now, elapsed_s)`, or
-    `EngineState.new(cfg)` when `engine` is None."""
+    `first_start_state(cfg)` when `engine` is None."""
     return {"v": SCHEMA_VERSION, "now": now, "engine": engine, "elapsed_s": elapsed_s}
 
 
@@ -160,7 +160,7 @@ def checkpoint_data(state: EngineState, now: float) -> dict[str, Any]:
 def start_state(cfg: HouseConfig, data: dict[str, Any]) -> EngineState:
     engine = data.get("engine")
     if engine is None:
-        return EngineState.new(cfg)
+        return first_start_state(cfg)
     state, _ = load_state(cfg, engine, float(data["now"]), float(data.get("elapsed_s", 0.0)))
     return state
 
@@ -326,7 +326,7 @@ class Replayer:
                 return None
             if self.start is not None and e.wall < self.start:
                 return None
-            self.state = EngineState.new(self.cfg)
+            self.state = first_start_state(self.cfg)
             self.began = "priors"
         actions = decide(self.cfg, snap, self.state)
         self.last_now, self._last_wall = snap.now, e.wall

@@ -19,7 +19,7 @@ from typing import Protocol
 from radiate import __version__
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
-from radiate.core.persist import dump_state, load_state
+from radiate.core.persist import dump_state, first_start_state, load_state
 from radiate.core.types import BoilerState, RoomRole
 
 LOG = logging.getLogger(__name__)
@@ -135,6 +135,8 @@ class Runtime:
         if data is not None:
             self.state, problems = load_state(self.cfg, data, now, elapsed)
             self._saved_at = now
+        else:
+            self.state = first_start_state(self.cfg)
         if history is not None:
             from radiate.server.history import Recorder
 
@@ -416,8 +418,17 @@ class Runtime:
                         "lockshield": rs.lockshield,
                     },
                     reason=reasons_by_room.get(rc.id),
-                    # Stuck-valve check (spec 7): burns in a row with no warming.
-                    valve={"untrusted": rs.valve.untrusted, "misses": rs.valve.misses},
+                    # Valve checks (spec 7). `untrusted`: stuck or leaking. `misses`:
+                    # burns in a row with no warming when open. `leak_burns`: of the
+                    # last 5 judged burns, those in which it warmed while shut.
+                    # `rejected`: TRV settings the device would not take (reconciler).
+                    valve={
+                        "untrusted": rs.valve.untrusted or rs.valve.leaking,
+                        "misses": rs.valve.misses,
+                        "leaking": rs.valve.leaking,
+                        "leak_burns": rs.valve.leak_burns,
+                        "rejected": list(rs.rejected),
+                    },
                 )
             rooms.append(item)
 
@@ -437,6 +448,11 @@ class Runtime:
                 else 0,
                 "state_elapsed_s": now - guard.since,
                 "starts_last_hour": guard.starts_last_hour(now),
+                # Hand-back (spec 5.7): this burn was started outside Radiate (the Shelly
+                # watchdog, a manual switch) and adopted, so it gets a full minimum burn.
+                "adopted": guard.state is BoilerState.FIRING and guard.external,
+                # Safe mode: the relay is left to the Shelly watchdog.
+                "watchdog_handover": acts.watchdog_handover if acts else False,
                 "predicted_burn_min": round(st.allocation.t_star_h * 60) if st.allocation else 0,
                 "supply": round(st.supply, 3),
                 # Effective minimum off, raised while short-cycling was seen (spec 7).

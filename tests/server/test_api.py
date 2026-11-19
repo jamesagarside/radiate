@@ -42,7 +42,13 @@ async def test_house_and_state(client):
     assert state["boiler"]["state"] in {"idle", "lead", "firing", "rest"}
     lounge = next(r for r in state["rooms"] if r["id"] == "lounge")
     assert "model" in lounge and "opening" in lounge
-    assert lounge["valve"] == {"untrusted": False, "misses": 0}
+    assert lounge["valve"] == {
+        "untrusted": False,
+        "misses": 0,
+        "leaking": False,
+        "leak_burns": 0,
+        "rejected": [],
+    }
 
 
 async def test_setpoint_override_and_validation(client):
