@@ -269,7 +269,7 @@ async function refresh() {
 }
 
 function holdText(o) {
-  if (o.until === "cleared") return "Held until you clear it";
+  if (o.until === "cleared") return "Held until cleared";
   if (o.expires_in_min == null) return "Held until the next change";
   if (o.until === "duration") return `Held for ${span(o.expires_in_min)}`;
   return last ? `Held until ${clock((last.minute_of_day + o.expires_in_min) % 1440)}` : "Held until the next change";

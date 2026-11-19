@@ -201,7 +201,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 /* Setpoint: label or hold on the left, stepper on the right. Quiet until it holds a
    value other than the schedule, then cool like other calm, user-made states. */
 .sp { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
-.sp-copy { display: grid; justify-items: start; min-width: 0; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sp-copy { display: grid; justify-items: start; min-width: 0; font-size: 0.78rem; line-height: 1.25; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sp[data-held="true"] .sp-label { color: var(--cool); font-weight: 600; }
 .sp[data-error="true"] .sp-label { color: var(--warn); }
 .stepper {
