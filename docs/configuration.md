@@ -215,8 +215,8 @@ A top-level key, default `true`. Set `balancing: false` to open every heating va
 | `schedule` | Name of a schedule. Defaults to `default`, so every room except a `passive` one needs a schedule of that name or its own `schedule` key |
 | `heat_source` | `episodic` (open fire, wood burner) or `continuous` (range cooker) |
 | `humidity` | `true` to use the sensor's humidity for shower detection |
-| `actuate` | `true` to let Radiate write to this room's TRV |
-| `trv_bias_k` | Offset from the TRV's internal reading to room temperature, default -1.5 |
+| `actuate` | `true` to let Radiate write to this room's TRV (`RoomConfig.actuation_enabled` in code). Without any `actuate` keys, only the pilot valve is actuated |
+| `trv_bias_k` | Offset from the TRV's internal reading to room temperature, default -1.5. Used in an `internal_sensor_only` room, and in a `normal` room while its sensor is stale |
 
 ## Zigbee2MQTT notes
 
