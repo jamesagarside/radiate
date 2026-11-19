@@ -17,21 +17,22 @@ The simulator is a plausible model of the reference house, not a measurement of 
 
 | Metric | Smart TRVs | Radiate |
 |---|---|---|
-| Comfort deficit (K·h below setpoint − 0.5 K, occupied) | 314.9 | 17.9 |
+| Comfort deficit (K·h below setpoint − 0.5 K, occupied) | 314.9 | 19.6 |
 | Worst arrival after occupancy starts (min) | 330 (never) | 120 |
-| Relay starts | 71 | 14 |
-| Mean relay burn (min) | 28 | 174 |
+| Relay starts | 71 | 11 |
+| Mean relay burn (min) | 28 | 196 |
 | Minimum burn violations | 15 | 0 |
 | Minimum off violations | 37 | 0 |
-| Physical burner starts | 117 | 114 |
-| Burner hours | 22.9 | 25.8 |
+| Physical burner starts | 117 | 100 |
+| Burner hours | 22.9 | 24.7 |
+| Relay time with no TRV open | 0 % | 0 % |
 
 Notes on reading this table:
 
 - **Comfort is the big win, mostly from optimum start.** Smart TRVs start heating at the scheduled time and the slow rooms never catch up. Radiate starts each room early, from its learned warm-up rate.
-- **Radiate burns more oil here (+13 %),** because it actually heats the house to setpoint. This is a comfort result, not a saving. Savings claims need the real house.
-- **Relay starts fall by 80 % and burns are six times longer,** and the oil-burner guards are never violated.
-- **Physical burner starts are about the same.** The oversized boiler's own thermostat still cycles the burner inside long heating calls. Cutting real burner cycling needs a burner-firing signal (spec open question 1) so Radiate can keep enough radiators open during a burn. This is the next optimisation target.
+- **Radiate burns more oil here (+8 %),** because it actually heats the house to setpoint. This is a comfort result, not a saving. Savings claims need the real house.
+- **Relay starts fall by 84 % and burns are seven times longer,** and the oil-burner guards are never violated.
+- **Physical burner starts fall by 15 %.** The oversized boiler's own thermostat still cycles the burner inside long heating calls. Cutting real burner cycling needs a burner-firing signal (spec open question 1) so Radiate can keep enough radiators open during a burn. This is the next optimisation target.
 - The smart-TRV baseline's arrival spread is not meaningful: its rooms mostly never reach setpoint within the window, so every room scores the same.
 
 ## What flow balancing adds on its own
@@ -40,8 +41,8 @@ Radiate with balancing on against the same Radiate with every heating valve full
 
 | Scenario | Arrival spread (min) | Comfort deficit (K·h) | Bedroom 3 deficit (K·h) |
 |---|---|---|---|
-| Mild, normal pump, optimum start | 65 → 35 | 16 → 18 | 5 → 5 |
-| Cold, small pump, everyone calls at once | 135 → 110 | 301 → 291 | 67 → 66 |
+| Mild, normal pump, optimum start | 47 → 38 | 19 → 20 | 7 → 6 |
+| Cold, small pump, everyone calls at once | 127 → 97 | 288 → 285 | 66 → 65 |
 
 **Finding:** balancing makes rooms arrive together but barely speeds up the slowest room in this house. With a TRV on every radiator, near rooms satisfy quickly and close, handing their flow to the far rooms anyway, so the house partly balances itself over time. Throttling mainly delays the fast rooms. By hand, throttling the four near radiators raises flow to the far bedroom by about 40 %, but in practice the rooms overlap for too short a time to matter.
 
@@ -50,6 +51,53 @@ Consequences:
 1. The headline value for this house is optimum start, oil-safe boiler pooling and disturbance-aware learning. Flow balancing is a secondary feature, which also lowers the patent exposure noted in `docs/research/provenance.md`.
 2. Balancing should matter more on cold days with an undersized system, with lower flow temperatures, and in houses without a TRV on every radiator. Collect real data before investing more in it.
 3. The allocator is deadline-aware (spec 4.4): preheating rooms are throttled only as far as still gets them there on time.
+
+## Valves that stay shut
+
+`radiate sim` reports relay time with no TRV open, when only the stairs bypass takes the burner's heat, and `tests/sim` checks it stays under 1 %. Simulation showed two causes, both fixed in November 2026:
+
+- **The toilet's TRV setpoint was in the wrong frame.** Radiate judged the toilet as its TRV reading − 1.5 K and called, but sent the TRV the target + 0.6 K, which it compared with its own raw reading, so it stayed shut. About a third of burns started for the toilet alone. The setpoint now goes out as target − bias (spec 4.5).
+- **Heat sinks and top-ups sat inside the TRV's hysteresis.** A heat sink is often already above its top-up target, so its TRV saw no reason to open. The setpoint is now at least the reading + 1 K, rounded up.
+
+Before and after, mean of seeds 1 to 3:
+
+| Metric | Mild, before | Mild, after | Cold, small pump, before | Cold, small pump, after |
+|---|---|---|---|---|
+| Relay time with no TRV open | 4.2 % (105 min) | 0 % | 0.4 % (13 min) | 0 % |
+| Comfort deficit (K·h) | 18.8 | 19.6 | 292.9 | 285.1 |
+| Toilet comfort deficit (K·h) | 2.3 | 0.0 | 19.4 | 6.0 |
+| Overheat (K·h above setpoint + 1.5 K, occupied) | 0.0 | 0.0 | 0.0 | 0.0 |
+| Relay starts | 14.0 | 11.3 | 13.3 | 19.3 |
+| Mean relay burn (min) | 178 | 196 | 258 | 159 |
+| Physical burner starts | 114 | 100 | 165 | 150 |
+| Burner hours | 25.9 | 24.7 | 32.6 | 32.3 |
+
+The mild comfort deficit rises by 0.8 K·h (4 %), mostly in the bedrooms. The likely cause is that the toilet's false calls used to keep the burner on longer, and some of that heat reached the bedrooms. The guards hold in every run.
+
+With the fix, the no-heat check stopped counting a top-up room (a heat sink or burn extension) as an open valve. It is opened briefly, often at the 20 % floor, and may warm too little to show heat. Without that change, a run with a seized valve raised a false no-heat alert at night.
+
+### Internal-sensor rooms and the TRV bias
+
+The toilet now gets warmer than before, because its TRV really opens. Mean toilet temperature against its setpoint:
+
+| Period | Before | After |
+|---|---|---|
+| Occupied (18 °C) | −0.2 K | +0.5 K |
+| Setback (16 °C) | +0.6 K | +1.2 K |
+
+Some of the setback figure is the warm kitchen next door: the toilet sat above setback before Radiate ever opened its valve. It never goes more than 1.5 K above its setpoint while occupied.
+
+Spec 4.6 planned to refine the −1.5 K bias once the radiator has been off for 2 hours, so the room does not overheat by the bias. With a cold radiator the TRV reads the room, so the observed offset is about 0 K; a warm radiator lifts the reading by 2 to 3 K in simulation. One bias cannot match both. Variants tried:
+
+| Bias in use | Toilet, occupied | Toilet deficit (K·h) | House comfort deficit (K·h) |
+|---|---|---|---|
+| −1.5 K, fixed (kept) | +0.5 K | 0.0 | 19.6 |
+| 0 K (refined to the cold offset) | −0.8 K | 7.9 | 29.3 |
+| −1.5 K, released as soon as the radiator closes | +0.2 K | 1.6 | 23.7 |
+| −1.5 K, fading over 30 min after the radiator closes | 0.0 K | 2.8 | 23.0 |
+| −1.5 K, fading over 60 min | −0.1 K | 2.7 | 28.5 |
+
+Every variant left the toilet short of heat and raised the house comfort deficit, so the bias stays fixed. Learning it properly needs a reference reading, such as a temporary room sensor in the toilet.
 
 ## Failure tests
 
