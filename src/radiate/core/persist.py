@@ -4,10 +4,12 @@ Pure: no I/O. Times in `EngineState` are on the caller's monotonic clock, which
 restarts with the process, so they are stored as ages relative to `now` and restored
 against the new clock, with the wall time spent down added on top. A restart in the
 middle of a burn therefore still honours minimum burn, and a restart during REST
-still honours minimum off.
+still honours minimum off. After downtime long enough for the Shelly watchdog to
+take the relay, or without usable saved state, the boiler guard's timers restart from
+the relay as observed on the first tick (spec 5.7 hand-back).
 
 Kept: learned room models, arrival lags, lockshield histograms, disturbance hold-offs,
-stuck-valve verdicts, the boiler guard, the short-cycle adaptation and the day's oil
+stuck and leaking valve verdicts, the boiler guard, the short-cycle adaptation and the day's oil
 and runtime totals with the last 7 days' summaries. The ledger's last tick is kept
 too, so the time Radiate was down counts as unseen and a long outage marks the day
 partial. Dropped: short-lived signals (reading windows, radiator drive, demand
@@ -23,10 +25,11 @@ import math
 from typing import Any
 
 from .accounting import HISTORY_DAYS
-from .boiler import BoilerGuard
+from .boiler import HIDDEN_RELAY_S, BoilerGuard
 from .decide import EngineState, RoomState, new_estimator
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator
+from .health import LEAK_WINDOW
 from .types import BoilerState, HouseConfig
 
 VERSION = 1
@@ -65,7 +68,12 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
                 "spike_kind": d.spike_kind,
                 **{k: _age(getattr(d, k), now) for k in _DIST_TIMES},
             },
-            "valve": {"misses": rs.valve.misses, "untrusted": rs.valve.untrusted},
+            "valve": {
+                "misses": rs.valve.misses,
+                "untrusted": rs.valve.untrusted,
+                "leak_history": list(rs.valve.leak_history),
+                "leaking": rs.valve.leaking,
+            },
         }
     g = st.boiler
     sc = st.short_cycle
@@ -77,6 +85,7 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
             "since": _age(g.since, now),
             "starts": [_age(t, now) for t in g.starts],
             "burn_started_at": _age(g.burn_started_at, now),
+            "external": g.external,
         },
         "health": {
             "short_cycle": {
@@ -186,6 +195,15 @@ def _valid_estimator(data: Any, est: RoomEstimator) -> bool:
     return all(p[i][i] >= 0 for i in range(3))
 
 
+def first_start_state(cfg: HouseConfig) -> EngineState:
+    """Engine state for a first start, with nothing saved: priors, and the boiler
+    relay's history unknown, so the guard's first tick takes its timers from the relay
+    as observed (spec 5.7 hand-back). The runtime and replay both start from this."""
+    st = EngineState.new(cfg)
+    st.relay_unseen_s = math.inf
+    return st
+
+
 def load_state(
     cfg: HouseConfig, data: Any, now: float, elapsed_s: float = 0.0
 ) -> tuple[EngineState, list[str]]:
@@ -193,6 +211,7 @@ def load_state(
     st = EngineState.new(cfg)
     problems: list[str] = []
     if not isinstance(data, dict) or data.get("version") != VERSION:
+        st.relay_unseen_s = math.inf  # no saved guard: the relay's history is unknown
         return st, ["saved state missing or from another version: starting from priors"]
     elapsed = max(0.0, float(elapsed_s))
     rooms = data.get("rooms") if isinstance(data.get("rooms"), dict) else {}
@@ -239,6 +258,10 @@ def load_state(
             if isinstance(misses, int) and not isinstance(misses, bool) and misses >= 0:
                 rs.valve.misses = misses
             rs.valve.untrusted = valve.get("untrusted") is True
+            history = valve.get("leak_history")
+            if isinstance(history, list) and all(isinstance(v, bool) for v in history):
+                rs.valve.leak_history = history[-LEAK_WINDOW:]
+            rs.valve.leaking = valve.get("leaking") is True
 
     g = data.get("boiler")
     if isinstance(g, dict):
@@ -259,7 +282,15 @@ def load_state(
         if guard.state is BoilerState.LEAD:
             # Valves were opening when Radiate stopped; start the lead again.
             guard.state, guard.since = BoilerState.IDLE, now
+        guard.external = guard.state is BoilerState.FIRING and g.get("external") is True
         st.boiler = guard
+        if elapsed >= HIDDEN_RELAY_S:
+            # Down long enough for the Shelly watchdog to take the relay (spec 5.7): the
+            # saved timers may no longer describe it. The first tick restarts them from
+            # the relay as observed (BoilerGuard.adopt).
+            st.relay_unseen_s = elapsed
+    else:
+        st.relay_unseen_s = math.inf
     _load_health(st, data.get("health"), now, elapsed)
     _load_ledger(st, data.get("accounting"), now, elapsed)
     return st, problems

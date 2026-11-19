@@ -117,6 +117,25 @@ def test_seized_valve_is_flagged():
     assert "boiler.no_heat" not in r.first_alert_s
 
 
+@pytest.mark.parametrize("seed", SEEDS)
+def test_leaking_valve_is_flagged(seed):
+    # The dining valve lets a fifth of its full flow past when shut.
+    r = run("radiate", 5, 2, seed, leaking_valves={"dining": 0.2})
+    assert [rid for rid, rs in r.engine.rooms.items() if rs.valve.leaking] == ["dining"]
+    assert r.first_alert_s["valve.leaking"] < 2 * 86400  # within the first two days
+    assert r.engine.rooms["dining"].learning_gate == "valve_leaking"
+    assert "valve.stuck" not in r.first_alert_s and "boiler.no_heat" not in r.first_alert_s
+    assert r.min_burn_violations == 0 and r.min_off_violations == 0
+
+
+def test_no_false_leak_flags_on_a_cold_day():
+    # Seeds 1 to 3 in the mild scenario are covered by test_no_false_failure_alerts.
+    for seed in SEEDS:
+        r = run("radiate", 5, 2, seed, outdoor_mean=-2.0, pump_qmax=0.15, optimum_start=False)
+        assert "valve.leaking" not in r.first_alert_s, seed
+        assert not any(rs.valve.leak_burns for rs in r.engine.rooms.values()), seed
+
+
 def test_crash_falls_back_safely(runs):
     # Radiate dies at midday on day 2 (setback). TRVs follow their mirrored on-device
     # schedules and the Shelly watchdog runs the boiler: no worse than smart TRVs.

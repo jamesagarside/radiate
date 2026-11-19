@@ -1,0 +1,38 @@
+[
+ {
+  "id": 1,
+  "friendly_name": "Study heating",
+  "description": null,
+  "scenes": [],
+  "members": [
+   {
+    "ieee_address": "0x00124b0029aa1111",
+    "endpoint": 1
+   }
+  ]
+ },
+ {
+  "id": 2,
+  "friendly_name": "All radiators",
+  "description": null,
+  "scenes": [],
+  "members": [
+   {
+    "ieee_address": "0x00124b0000002002",
+    "endpoint": 1
+   },
+   {
+    "ieee_address": "0x00124b0000002005",
+    "endpoint": 1
+   },
+   {
+    "ieee_address": "0x00124b0029aa1111",
+    "endpoint": 1
+   },
+   {
+    "ieee_address": "0x00124b0000002009",
+    "endpoint": 1
+   }
+  ]
+ }
+]

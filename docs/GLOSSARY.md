@@ -134,8 +134,8 @@ The rules that hold back valve writes to protect batteries and calibration: skip
 Code: `_discipline` in `radiate.core.decide`, `MIN_OPENING_STEP`, `OPENING_WRITE_INTERVAL_S`, `BIG_OPENING_STEP`.
 
 **Reconciler**:
-The part of the TRV writer that resends a setting when the TRV's reported value disagrees with what was sent for more than 5 minutes (2 minutes for the setpoint). After three attempts it marks the setting failed and raises an alert.
-Code: `TrvWriter.plan`, `TrvWriter.failed`, `RECONCILE_GRACE_S`, `MAX_ATTEMPTS`, alert `driver.write_failed`.
+The part of the TRV writer that resends a setting when the TRV's reported value disagrees with what was sent for more than 5 minutes (2 minutes for the setpoint). After three attempts it marks the setting failed (rejected) and raises an alert. A rejected setting pauses learning for the room while it lasts and for an hour after. Not reported in dry run, where nothing is sent.
+Code: `TrvWriter.plan`, `TrvWriter.failed`, `RECONCILE_GRACE_S`, `MAX_ATTEMPTS`, alert `driver.write_failed`, `RoomInput.trv_rejected`, learning gate `valve_rejected`, API `rooms[].valve.rejected`.
 
 **Schedule mirror**:
 Radiate writes each room's weekly schedule into its TRVZB and runs the valve in `auto` mode, so the valve follows the schedule if Radiate stops.
@@ -327,6 +327,10 @@ Code: `HouseConfig.sink_min`, `_ensure_sink`.
 A radiator that stays cold for several burns in a row while its valve should be open and other radiators warm. Radiate alerts and stops trusting that valve until it warms again.
 Code: `ValveCheck` in `radiate.core.health`, reason `valve.stuck`, API `rooms[].valve` (`untrusted`, `misses`), UI line "Valve may be stuck".
 
+**Leaking valve**:
+A radiator that warms during a burn while its valve should be shut: the TRV's reading rises at least 1 K against the room sensor in 2 of the last 5 judged burns. Usually lost calibration or a worn seat. Radiate alerts, stops trusting the valve and pauses learning for the room until 5 judged burns in a row stay cool. The spec calls this "rise with valve closed".
+Code: `ValveCheck.observe_shut`, `LEAK_RISE_K`, reason `valve.leaking`, learning gate `valve_leaking`, API `rooms[].valve` (`leaking`, `leak_burns`, and `untrusted`, which covers both checks), UI line "Valve may not be closing".
+
 **Boiler guard**:
 The state machine that alone decides the heating relay and enforces minimum burn, minimum off and starts per hour, whatever demand asks for.
 Code: `BoilerGuard` in `radiate.core.boiler`.
@@ -407,8 +411,25 @@ _Avoid_: DHW priority.
 ## Safety and fallback
 
 **Safe mode**:
-What Radiate does when it cannot reach any TRV: it stops the burner after minimum burn and raises the `safe_mode.no_trvs` alert. The spec describes a wider safe mode; see the ambiguities.
-Code: `force_stop` in `decide`, alert `safe_mode.no_trvs`.
+What Radiate does when it cannot reach any TRV: it stops the burner after minimum burn, switches the relay off, stops sending the heartbeat so the watchdog takes over, and raises the `safe_mode.no_trvs` alert.
+Code: `force_stop` in `decide`, `Actions.watchdog_handover`, alerts `safe_mode.no_trvs` and `driver.watchdog_handover`, API `boiler.watchdog_handover`.
+
+**Hand-back**:
+Radiate taking the relay back from the watchdog, after safe mode, an outage, a crash or a restart. The boiler guard adopts the relay as it finds it, so it neither cuts a burn it did not start short of minimum burn nor starts a new one inside minimum off.
+Code: `BoilerGuard.adopt`, `Snapshot.heating_relay_unseen_s`, `Snapshot.heating_relay_age_s`, `EngineState.relay_unseen_s`.
+
+**Adopted burn**:
+A burn Radiate did not start (the watchdog's, or a manual switch) that the boiler guard has taken on. Its start time is unknown, so it gets a full minimum burn from when Radiate first sees it. In safe mode Radiate leaves it to the watchdog.
+Code: `BoilerGuard.external`, reason `boiler.adopted`, API `boiler.adopted`.
+_Avoid_: external burn in UI text.
+
+**External stop**:
+The heating relay switching off while Radiate had it on, for example by the watchdog, a manual switch or the Shelly restarting. Minimum off runs from when Radiate sees it.
+Code: reason `boiler.external_stop`.
+
+**Unseen relay**:
+A relay Radiate could not read for 5 minutes or more (Shelly unreachable, Radiate down, or a first start). The watchdog might have switched it meanwhile, so the guard restarts its timers from the relay as observed.
+Code: `HIDDEN_RELAY_S`, reason `boiler.relay_unseen`.
 
 **Watchdog**:
 A script that runs on the Shelly relay and takes over the boiler and store channels when Radiate's heartbeat is more than 10 minutes old.
@@ -460,6 +481,19 @@ Code: `Reason` (`code`, `message`, `room_id`, `values`).
 A reason that needs a person's attention, for example an offline TRV or an unreachable relay.
 Code: `Actions.alerts`, `LiveDriver.alerts`.
 
+**Tick history**:
+Every live tick's snapshot and compact actions (valve settings, relays, boiler state, reason and alert codes), kept in the state database for `house.history_days` days. A start entry records how the engine state was built at each start; a checkpoint copies the engine state every 6 hours.
+Code: `radiate.core.history`, `radiate.server.history.History`, `Recorder`, table `history`, config key `house.history_days`.
+_Avoid_: "recorder" for this, which means the Home Assistant recorder.
+
+**Replay**:
+Running recorded snapshots through `decide` again, in order, and comparing the result with the recorded actions. With saved state it reproduces the recorded actions exactly; with fresh state it starts from priors. Replay is open loop: the recorded temperatures don't respond to the replayed decisions.
+Code: `Replayer`, `radiate replay`.
+
+**Bootstrap**:
+Learning room models from the tick history by replaying it from priors with a throwaway state, then keeping only the learned parts (models, arrival lags, lockshield histograms). The boiler guard and timers come from the saved state.
+Code: `radiate.core.bootstrap`, `Runtime.restore`, `radiate bootstrap`.
+
 **Decision log**:
 The last 500 boiler, disturbance and safe mode reasons, with the time they happened.
 Code: `Runtime.decisions`, `DecisionRecord`, API `GET /api/v1/decisions`.
@@ -481,7 +515,7 @@ The server object that owns configuration, engine state and a driver, runs ticks
 Code: `Runtime` in `radiate.server.runtime`.
 
 **State database**:
-The SQLite file that holds engine state, the house ID, the mode and the Elastic export queue.
+The SQLite file that holds engine state, the house ID, the mode, the Elastic export queue and the tick history.
 Code: `radiate.server.store.Store`, file `<data_dir>/radiate.db`.
 _Avoid_: "store" on its own, which means the hot-water store.
 
@@ -507,7 +541,7 @@ For the lead. Each item names the conflict and a suggested resolution.
 1. **Opening, opening limit, cap.** The spec says "opening" and "cap", the UI and HA say "opening limit", Elastic says `valve.opening_pct`, ADR-0001 says "cap". The TRV decides the actual valve position; Radiate only sets a limit. Suggest "opening limit" everywhere for `valve_opening_degree`, "allocated opening" for the allocator's output, and "lockshield cap" only for `L_r`.
 2. **Comfort limit means two things.** Spec 4.4 step 6 uses "comfort limit" for 150 minutes of arrival time; spec 5.1 uses it for 0.5 K of pooling. The code separates them (`comfort_horizon_s`, `comfort_limit_k`). Suggest "comfort horizon" for the time and "comfort limit" for the temperature, and update spec 4.4.
 3. **Store means two things.** The hot-water store, and `radiate.server.store.Store` (the SQLite state database). Suggest renaming the class or module, for example `StateDb`, when that code is next touched.
-4. **Safe mode.** Spec section 7 says safe mode starts when the coordinator or MQTT is down, stops the heartbeat so the watchdog takes over, and writes lockshield caps. The code enters it only when no TRV is reachable, keeps sending the heartbeat, and only forces the burner off after minimum burn. Lockshield caps are written whenever a room is not allocated, not as a safe mode step.
+4. **Safe mode.** Spec section 7 says safe mode starts when the coordinator or MQTT is down, stops the heartbeat so the watchdog takes over, and writes lockshield caps. The code enters it when no TRV is reachable, which a broker or Zigbee2MQTT outage causes, and hands the relay to the watchdog once its own burn is over. Lockshield caps are written whenever a room is not allocated, not as a safe mode step.
 5. **Supply factor formula and kappa.** Spec 4.1: `S = 1 / (1 + κ·Σf + κ_bypass)`, with `κ` learned. Code: `S = 1 / (1 + κ·(Σf + bypass_equivalent))`, with `κ` a fixed 0.15 and the bypass in radiator equivalents. Suggest the spec follow the code and say `κ` is not learned yet.
 6. **Flow sensitivity is not learned.** Spec 4.2 estimates `η` per room; the code always uses the default 0.7, so no room is treated as emitter-limited.
 7. **Heat availability.** Spec 4.1 has `φ` rising with a 6-minute time constant after the lag. The code treats it as on or off after the arrival lag and smooths the whole drive with a 15-minute time constant.
@@ -520,7 +554,7 @@ For the lead. Each item names the conflict and a suggested resolution.
 14. **Calling.** Used both for a TRV whose thermostat is open and for a room in Radiate's demand latch. Suggest "calling" for Radiate's latch only.
 15. **Relay start and burner start.** `docs/simulation.md` separates them; the spec's "starts per hour" and the UI's "Starts, last hour" mean relay starts. Suggest always qualifying.
 16. **Dump room and heat sink.** The spec says dump room, the code reason is `boiler.dump_room`, and the UI says "Heat sink". Suggest "heat sink" in prose and UI.
-17. **Valve trusted and valve exercise.** Spec 4.6 has a "valve trusted" learning gate and spec 4.5 a weekly valve exercise. Neither exists in code. `unexplained_heat` exists in code but not in the spec.
+17. **Valve trusted and valve exercise.** Spec 4.6 has a "valve trusted" learning gate and spec 4.5 a weekly valve exercise. The gate exists in code as three gates (`valve_untrusted` for a stuck valve, `valve_leaking`, `valve_rejected` for a reconciler failure); the exercise does not. `unexplained_heat` exists in code but not in the spec.
 18. **`actuation_enabled` and `actuate`.** The spec names the flag `actuation_enabled`; the configuration key is `actuate`. Both are fine but should be introduced together.
 19. **Internal sensor only and "TRV only".** `docs/configuration.md` describes the role as "TRV only"; the value is `internal_sensor_only`.
 20. **Preheat and optimum start.** The spec says "optimum start"; the code and UI say "preheating". Suggest "optimum start" for the feature and "preheating" for the room state.

@@ -93,6 +93,9 @@ class SiteConfig:
     # Battery sensors report on change; between reports their last value stands for up
     # to this long (their maximum reporting interval) before it counts as stale.
     sensor_max_silence_s: float = 3600.0
+    # Days of recorded ticks (snapshots and actions) kept in radiate.db for replay and
+    # bootstrap (spec 4.3, 6). 0 turns recording off.
+    history_days: float = 14.0
     notes: tuple[str, ...] = ()  # non-fatal remarks for the operator
 
     def schedule_for(self, room_id: str) -> WeekSchedule:
@@ -445,7 +448,14 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     house = ctx.section(data, "house")
     ctx.unknown(
         house,
-        {"timezone", "dry_run", "outdoor_sensor", "data_dir", "sensor_max_silence_min"},
+        {
+            "timezone",
+            "dry_run",
+            "outdoor_sensor",
+            "data_dir",
+            "sensor_max_silence_min",
+            "history_days",
+        },
         "house.",
     )
     tz = ctx.get(house, "timezone", str, "Europe/London", "house.")
@@ -489,6 +499,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
 
     data_dir = ctx.get(house, "data_dir", str, "./data", "house.")
     silence_min = ctx.number(house, "sensor_max_silence_min", 60, 10, 180, "house.")
+    history_days = ctx.number(house, "history_days", 14, 0, 90, "house.")
 
     if ctx.problems:
         raise ConfigError(ctx.problems)
@@ -504,6 +515,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         trv=trv,
         data_dir=data_dir,
         sensor_max_silence_s=silence_min * 60,
+        history_days=history_days,
         notes=tuple(notes),
     )
 

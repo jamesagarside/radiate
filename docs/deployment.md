@@ -20,7 +20,7 @@ The demo needs nothing else. To run a real house you also need:
 - An MQTT broker, such as Mosquitto, and Zigbee2MQTT publishing to it, with availability turned on.
 - Sonoff TRVZB valves on firmware 1.2.1 or later, and room temperature sensors, paired in Zigbee2MQTT.
 - Optionally, a Shelly 2PM Gen4 at the boiler: switch 0 for central heating demand, switch 1 for the hot-water store. Have a qualified engineer (OFTEC, for oil) do the boiler wiring.
-- A configuration file describing your house. Start from [`examples/reference-house.yaml`](../examples/reference-house.yaml) and see [configuration](configuration.md).
+- A configuration file describing your house. Draft it from your Zigbee2MQTT devices with `radiate discover` (see [Start from your devices](configuration.md#start-from-your-devices)), or start from [`examples/reference-house.yaml`](../examples/reference-house.yaml).
 
 ## From source with uv
 
@@ -40,9 +40,10 @@ Run the demo, a simulated house at 60 times real time:
 .venv/bin/radiate serve --demo --speed 60
 ```
 
-Run your own house. Check the file first; the server starts in dry run unless the file sets `house.dry_run: false`:
+Run your own house. Draft the file from Zigbee2MQTT's device list, then check it; the server starts in dry run unless the file sets `house.dry_run: false`:
 
 ```bash
+.venv/bin/radiate discover --host 192.0.2.20 --username radiate --out radiate.yaml
 .venv/bin/radiate check-config radiate.yaml
 .venv/bin/radiate serve --config radiate.yaml
 ```
@@ -84,7 +85,13 @@ docker run --rm -p 8099:8099 radiate radiate serve --demo --speed 60
 
 ### Run your own house in Docker
 
-1. Put your configuration file in a folder on the host, for example `/srv/radiate/radiate.yaml`.
+1. Put your configuration file in a folder on the host, for example `/srv/radiate/radiate.yaml`. To draft it from your Zigbee2MQTT devices, run discover in the container with `RADIATE_MQTT_PASSWORD` set in your shell. It only reads from the broker, and the draft still needs the checks in [Start from your devices](configuration.md#start-from-your-devices):
+
+   ```bash
+   docker run --rm -v /srv/radiate:/out -e RADIATE_MQTT_PASSWORD \
+     radiate radiate discover --host 192.0.2.20 --username radiate --out /out/radiate.yaml
+   ```
+
 2. In the file, set `house.data_dir: /data` so state goes to a volume, and set `mqtt.host` to an address the container can reach. `localhost` inside the container is the container itself.
 3. Put secrets in an env file, for example `/srv/radiate/radiate.env`, and refer to them from the configuration file as `${NAME}`:
 
@@ -273,6 +280,7 @@ done
 - The house ID used by Elastic and the Home Assistant integration.
 - The heating mode.
 - The Elastic export queue.
+- The tick history: each tick's snapshot and decisions for the last `house.history_days` days (14 by default), about 1.2 MB a day for a 9-room house. See [configuration](configuration.md#tick-history-and-replay).
 
 Radiate saves engine state every 5 minutes and when it stops cleanly. Setpoint overrides are not saved.
 
@@ -280,9 +288,40 @@ If the database is lost or unreadable, Radiate starts from its priors and learns
 
 ### Backups
 
-- Back up your configuration file and the data folder.
+- Back up your configuration file and the data folder. The backup includes the tick history, so you can replay those days elsewhere.
 - For a consistent copy while the server runs, use `sqlite3 radiate.db ".backup radiate-backup.db"`. Otherwise stop the server and copy all three files.
 - Home Assistant backups include the App's `/data` and config folders.
+
+### Replay and bootstrap
+
+`radiate replay` runs the recorded ticks through the current code and configuration, and lists the ticks where the result differs from what Radiate decided at the time. Use it to see what Radiate would have done during a dry run, or to check a change before you use it. It reads `radiate.db` and changes nothing, so you can run it while the server runs.
+
+```bash
+radiate replay --config radiate.yaml
+radiate replay --config radiate.yaml --from 2026-11-18T06:00 --to 2026-11-18T09:00
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--from`, `--to` | the whole history | ISO date or time. Without a time zone, the house time zone applies |
+| `--state` | `saved` | `saved` starts from the engine state Radiate had, and takes it again at each restart. `fresh` starts from priors at `--from`, as a new install would |
+| `--limit N` | 50 | Differences to list; 0 lists all of them. The count always covers every tick |
+| `--json` | off | Print the report as JSON, for scripts |
+| `--data-dir DIR` | `house.data_dir` | Where `radiate.db` is |
+
+The report lists each differing tick with its changes (`recorded -> replayed`), then compares relay starts, burns, relay hours and alerts for the recorded and replayed decisions, and gives the room-hours spent below setpoint by more than the comfort limit.
+
+With the same code and configuration, a saved-state replay gives no differences. If the start entry of the period has been deleted by the retention, the replay begins from the nearest engine state copy instead, and differences in the first few minutes can come from that.
+
+Replay is open loop: the recorded temperatures are what happened under the recorded decisions. A replay with another configuration shows what Radiate would have decided. It can't show how warm the rooms would have been.
+
+If Radiate starts with no saved engine state, or with one from a format it can't read, it replays the history first to learn its room models again. This adds a few seconds to the start. To relearn the room models from the history on purpose, stop the server and run:
+
+```bash
+radiate bootstrap --config radiate.yaml
+```
+
+The command replaces each room's model, arrival lags and lockshield cap with the ones learned from the history, and keeps the boiler guard and every timer as saved. It refuses to run if Radiate saved its state in the last 15 minutes, because a running server would overwrite the result. Add `--force` to run it anyway.
 
 ### Upgrades
 

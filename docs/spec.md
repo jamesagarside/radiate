@@ -112,7 +112,7 @@ Online recursive least squares (RLS) per room, parameters `θ_r = [a_r, b_r, d_r
 - **Forgetting factor** λ chosen for a memory of about 3 days of heating, so seasonal drift is tracked but a single odd day is not.
 - **Priors:** `a = 1.5 K/h`, `b = 0.08 /h`, `d = 0`, with prior strength equal to 6 hours of data. `d` keeps a strong prior towards 0 except in rooms with a continuous heat source.
 - **Bounds:** `0.1 ≤ a ≤ 12 K/h`, `0.005 ≤ b ≤ 0.6 /h`, `−0.5 ≤ d ≤ 3 K/h`. Values that hit a bound for 24 h raise a diagnostic.
-- **Bootstrap:** on first start, replay up to 14 days of history (Home Assistant recorder or the standalone database) through the same estimator, so day one is not a cold start.
+- **Bootstrap:** on first start, replay up to 14 days of history (Home Assistant recorder or the standalone database) through the same estimator, so day one is not a cold start. As built: the standalone database's tick history is replayed through `decide` from priors with a throwaway state, whenever there is no usable saved state, and with `radiate bootstrap`. Only the room models, arrival lags and lockshield histograms are kept; the boiler guard and timers come from the saved state. The Home Assistant recorder is not a source yet.
 - **Outlier rejection:** samples with a residual beyond 4 σ (rolling) are dropped and counted.
 - **Confidence:** parameter covariance gives a per-room confidence (0 to 1), shown in the UI and exported.
 
@@ -274,7 +274,7 @@ A small Shelly Gen4 script runs on the relay itself:
 
 - Radiate sends a heartbeat every 60 s.
 - No heartbeat for 10 min: the script takes over. Channel 1 follows a local fallback schedule (the windows Radiate last pushed; 05:30 to 08:30 and 16:00 to 22:30 until it has pushed any) with its own minimum burn (8 min) and off (10 min) times; channel 2 follows the store schedule last pushed by Radiate.
-- Heartbeat returns: control goes back to Radiate.
+- Heartbeat returns: control goes back to Radiate. The boiler guard first adopts the relay as Radiate finds it (**hand-back**). A burn Radiate did not start gets a full minimum burn from when Radiate first sees it, because the Shelly does not report when the relay changed. A relay seen switching off, or not seen for 5 min or more (Radiate down, Shelly unreachable, a first start), restarts minimum off from then. While in safe mode Radiate follows the watchdog's burns without stopping them, so it knows their start when it takes over.
 - A hard auto-off of 120 min on channel 1 means the relay can never latch on indefinitely.
 
 The script is published in the repository and installed by the user, or with `radiate shelly install-watchdog --config radiate.yaml --yes` over the Shelly local API. Radiate keeps the fallback windows in KVS keys `radiate_heat` (derived from the room schedules, started an hour early) and `radiate_store`.
@@ -292,6 +292,8 @@ every 60 s and on significant input change (debounced 5 s):
 ```
 
 `decide` is pure: no clock, no I/O, deterministic. It returns actions (valve settings, relay states, alerts) and a list of **reasons** (`reason_code`, room, values) used by the UI and exported to Elastic.
+
+`record` keeps each tick's snapshot and a compact form of its actions (valve settings, relays, boiler state, reason and alert codes) in the state database for `house.history_days` days, 14 by default, with a start entry that describes how the engine state was built at each start. Recording errors are logged and never stop the loop. `radiate replay` runs the recorded snapshots through `decide` again and reports where the actions differ; with the same code and configuration there are none.
 
 Order inside `decide`:
 
@@ -312,18 +314,18 @@ Order inside `decide`:
 |---|---|---|
 | Room sensor stale (> 20 min) | timestamp | Use `T_trv` minus learned bias; learning off for that room; after 2 h, stop sending external temperature so the TRV reverts to its own sensor |
 | TRV offline (> 30 min) | Z2M availability | Treated as possibly open at its last opening; excluded from allocation and learning; alert |
-| Coordinator or MQTT down | all TRVs or the broker unavailable | Enter **safe mode**: heating relay off after the current minimum burn; heartbeat stops so the Shelly schedule takes over; TRVs keep their last setpoint and cap |
+| Coordinator or MQTT down | all TRVs or the broker unavailable | Enter **safe mode**: heating relay off after the current minimum burn; heartbeat stops so the Shelly schedule takes over; TRVs keep their last setpoint and cap. Radiate keeps reading the relay and follows the watchdog's burns, then hands back as in section 5.7 |
 | Radiate process dies | (no detection needed) | TRVs keep governed settings and run their own thermostats; Shelly watchdog takes over after 10 min |
-| Radiate restarts | saved state in SQLite | Learned models, lockshield caps and the boiler guard are restored, with timers moved on by the downtime, so minimum burn and minimum off still hold. TRV settings are re-sent |
+| Radiate restarts | saved state in SQLite | Learned models, lockshield caps and the boiler guard are restored, with timers moved on by the downtime, so minimum burn and minimum off still hold. After 5 min or more down, or with no saved state, the watchdog might have switched the relay, so the guard restarts its timers from the relay as found (section 5.7). TRV settings are re-sent |
 | Home Assistant restarts or is down | | No effect on control (MQTT drivers); the HA integration shows unavailable |
 | Internet down | | No effect on control; cloud telemetry buffered on disk (up to 7 days) |
 | Boiler lockout or out of oil | heating relay on for 30 min with at least one valve open (store recovery and time with every valve shut do not count), and no sign of heat: no TRV reading rising 0.6 K above its room, no ordinary calling room warming by 0.3 K/h, no 0.3 K stairs rise | Alert "No heat: check oil and boiler lockout"; keep calling (the boiler may recover) but stop learning. Clears when heat is seen again |
-| Valve stuck or calibration lost | commanded open, room calling, boiler firing, no `T_trv` rise for 3 burns; or rise with valve closed. As built: 40 min of flow per burn with the room calling, opening at least the floor and the TRV reporting heat, while another radiator warmed; the "rise with valve closed" case is not checked yet | Alert; offer recalibration; room flagged untrusted (learning paused, not counted as an open valve) until its radiator warms again. No recalibration service yet |
+| Valve stuck or calibration lost | commanded open, room calling, boiler firing, no `T_trv` rise for 3 burns; or rise with valve closed. As built: 40 min of flow per burn with the room calling, opening at least the floor and the TRV reporting heat, while another radiator warmed. Rise with valve closed, as built: during flow, with the room not calling, its TRV not heating and its valve shut since before the flow began (radiator off 20 min), the TRV reading rises at least 1 K against the room sensor, in 2 of the last 5 judged burns. Rooms without a room sensor, and rooms flagged for fire, window, shower or a cooker spike, are not judged | Alert (`valve.stuck` or `valve.leaking`); offer recalibration; room flagged untrusted (learning paused). A stuck valve is not counted as an open valve and clears when its radiator warms again; a leaking one clears after 5 judged burns in a row that stay cool. No recalibration service: the TRVZB has no calibration command in Zigbee2MQTT |
 | Short-cycling | > 4 starts per hour, or external stops (section 5.6) | Raise minimum off by 5 min (up to 30) for 24 h, at most once an hour; alert. Kept across restarts |
 | Overheating | room > setpoint + 2 K with valve closed | Flag episodic heat (section 4.6); if a valve, not external heat, is to blame, close it and alert |
 | Frost | any room < 7 °C | Frost override (section 5.2) |
 | Clock jump or DST | monotonic clock in the server | Timers use monotonic time; schedules use local time |
-| Corrupt learned state | non-finite or out-of-bounds parameters | Reset that room to priors and replay recent history; alert |
+| Corrupt learned state | non-finite or out-of-bounds parameters | Reset that room to priors and replay recent history; alert. As built: a whole saved state that can't be read is relearned from the history; a single room is reset to priors |
 
 **Safe mode** writes each valve's lockshield cap `L_r`, its schedule setpoint and closing degree 100, so every radiator is balanced and thermostatic without Radiate.
 
@@ -339,7 +341,7 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 |---|---|---|
 | `GET /api/v1/health` | | `{"ok": true}`; never needs a token |
 | `GET /api/v1/house` | | House ID, version, driver name, rooms (id, name, role, heat source, controllable) and boiler guard settings |
-| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler (with short-cycle state), store, per-room temperatures, opening limits, demand flags (`calling`, `topup`, and `extend` for a burn extension rather than a heat sink), learning gate, learned model, latest reason, override, detected fire, manual fire flag (`fire_switch`) and stuck-valve check, daily accounting, 24 h relay timeline, alerts (`alerts` as messages, `alert_details` with `code`, `message` and `room_id`) and driver telemetry |
+| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler (with short-cycle state, `adopted` for a burn Radiate did not start, and `watchdog_handover` while the watchdog has the relay), store, per-room temperatures, opening limits, demand flags (`calling`, `topup`, and `extend` for a burn extension rather than a heat sink), learning gate, learned model, latest reason, override, detected fire, manual fire flag (`fire_switch`), valve checks (`valve`: `untrusted`, `misses`, `leaking`, `leak_burns`, and `rejected` for settings the TRV would not take), daily accounting, 24 h relay timeline, alerts (`alerts` as messages, `alert_details` with `code`, `message` and `room_id`) and driver telemetry |
 | `GET /api/v1/decisions?since=T` | | Decision log entries (`at`, `code`, `message`, `room_id`) after `T`, in the server's monotonic seconds |
 | `POST /api/v1/rooms/{id}/setpoint` | `{"setpoint": 21.0}` | Override the schedule, 5 to 28 °C, until the room's next scheduled change. Optional `"duration_min": 90` holds it for that long instead (up to 7 days); `"until": "cleared"` holds it until `{"setpoint": null}` clears it. Saved across restarts; the response and each room's `override` in `state` give `until` and `expires_in_min` |
 | `POST /api/v1/rooms/{id}/fire` | `{"lit": true}` | Manual fire flag |
@@ -389,7 +391,7 @@ One web UI, served by the server and embedded through HA ingress. It is a dashbo
 - **House view**: one card per room with temperature against setpoint, valve opening bar, arrival estimate, learning state ("Learning paused: fire lit"). Boiler strip with a burn timeline for the last 24 h and minimum burn/off countdowns.
 - **Motion**: only where it explains state. Valve bars and the burn timeline transition `transform`/`opacity` in 200 ms with a strong ease-out; no animation on keyboard actions; hover effects gated by `(hover: hover) and (pointer: fine)`; `prefers-reduced-motion` keeps fades and drops movement.
 - **Explainability**: every room shows its latest reason ("Opening 35 % so it arrives with Bedroom 3 at 07:10").
-- **Setup**: discover rooms from Zigbee2MQTT device names or HA areas; wizard marks bypass radiators, heat sources and the boiler relay.
+- **Setup**: discover rooms from Zigbee2MQTT device names or HA areas; wizard marks bypass radiators, heat sources and the boiler relay. The first step is `radiate discover` on the command line: it reads Zigbee2MQTT's retained `bridge/devices` and `bridge/groups` (read-only), matches TRVs, temperature sensors and contact sensors into rooms by description area, friendly name or group, and writes a commented YAML draft in dry run with one pilot valve. Rooms with a TRV and no sensor become `internal_sensor_only`; sensors with no TRV are commented `passive` candidates, because an unvalved radiator can't be detected. Rules are in [configuration](configuration.md#start-from-your-devices).
 
 ---
 

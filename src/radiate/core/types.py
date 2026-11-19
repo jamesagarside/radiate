@@ -107,6 +107,9 @@ class RoomInput:
     next_setpoint_in_s: float | None = None
     window_open: bool | None = None
     fire_switch: bool | None = None
+    # TRV settings the device did not accept after the reconciler's retries (spec 4.5),
+    # for example ("valve_opening_degree",). Empty when every write landed.
+    trv_rejected: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -122,6 +125,15 @@ class Snapshot:
     # Local calendar day (any integer that changes at local midnight, for example
     # `date.toordinal()`), for daily accounting. None: inferred from `minute_of_day`.
     day: int | None = None
+    # Hand-back (spec 5.7). False when relay commands are not sent (dry run): the
+    # observed relay is then someone else's and the boiler guard keeps its own state.
+    relay_follows_commands: bool = True
+    # How long the heating relay has been in its observed state, if the driver knows.
+    # None: unknown, so a change Radiate did not make is taken as happening now.
+    heating_relay_age_s: float | None = None
+    # How long the driver went without reading the heating relay before this snapshot
+    # (Shelly unreachable). After a few minutes the watchdog may have switched it.
+    heating_relay_unseen_s: float = 0.0
 
 
 @dataclass(slots=True)
@@ -153,6 +165,9 @@ class Actions:
     # No TRV reachable (spec 7). Once the relay is off, drivers stop commanding the
     # boiler and stop the heartbeat, so the Shelly watchdog's schedule takes over.
     safe_mode: bool = False
+    # Safe mode with no burn of Radiate's own running: drivers send no relay commands
+    # and no heartbeat, so the Shelly watchdog runs the boiler (spec 5.7, 7).
+    watchdog_handover: bool = False
     # Set on the first tick of a new local day: the summary of the day that closed
     # (burner hours, starts, burns, litres, balance score; `core.accounting`).
     day_summary: dict | None = None

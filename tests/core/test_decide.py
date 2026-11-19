@@ -88,6 +88,27 @@ def test_internal_sensor_room_uses_trv_reading_with_bias():
     )
 
 
+def test_setting_the_trv_rejected_pauses_learning_for_an_hour():
+    st = EngineState.new(CFG)
+    temps = {"bed": 20.5, "lounge": 21.0, "loo": 19.0, "stairs": 20.0}
+    rejected = {"trv_rejected": ("valve_opening_degree",)}
+    acts = None
+    for m in range(5):
+        acts = decide(CFG, snap(m * 60.0, temps, bed=dict(rejected)), st)
+    assert st.rooms["bed"].learning_gate == "valve_rejected"
+    assert st.rooms["bed"].rejected == ("valve_opening_degree",)
+    assert st.rooms["lounge"].learning_gate != "valve_rejected"
+    # The setting lands at minute 5: still paused for an hour after the last rejection.
+    for m in range(5, 64):
+        acts = decide(CFG, snap(m * 60.0, temps), st)
+    assert st.rooms["bed"].rejected == ()
+    assert 63 * 60 < st.rooms["bed"].rejected_until == 4 * 60 + 3600
+    for m in range(64, 66):
+        acts = decide(CFG, snap(m * 60.0, temps), st)
+    assert st.rooms["bed"].learning_gate != "valve_rejected"
+    assert acts is not None
+
+
 def test_stale_room_sensor_falls_back_to_trv():
     st = EngineState.new(CFG)
     temps = {"bed": 18.0, "lounge": 21.0, "loo": 19.0, "stairs": 20.0}

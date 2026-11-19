@@ -319,7 +319,7 @@ function renderRoom(r) {
   const flag = n.querySelector(".flag");
   flag.hidden = !r.valve?.untrusted;
   if (r.valve?.untrusted) {
-    flag.textContent = r.valve.misses
+    flag.textContent = r.valve.leaking ? "Valve may not be closing: radiator warmed while shut." : r.valve.misses
       ? `Valve may be stuck: radiator stayed cold for ${plural(r.valve.misses, "burn", "burns")}.`
       : "Valve may be stuck: radiator not warming.";
   }
