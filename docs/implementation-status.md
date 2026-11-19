@@ -14,12 +14,12 @@ Last audit: November 2026, against `main` at `c4657fe`.
 | Partial | 26 | 26 |
 | Missing | 37 | 25 |
 
-Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score.
+Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score.
 
 Top remaining gaps, most important first:
 
 1. **Litres are an upper bound** until the burner-firing signal exists (section 5.6, open question 1).
-2. **Stuck valve, second half:** "rise with valve closed" and the recalibration service (section 7).
+2. **Valve recalibration service** (section 7).
 3. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, recorder bootstrap (sections 4.1 to 4.3, 5.5).
 4. **TRV bias refinement** for internal-sensor rooms (section 4.6): tried and dropped, see the row below.
 
@@ -139,7 +139,7 @@ Top remaining gaps, most important first:
 | Home Assistant down | done | | Control does not depend on HA |
 | Internet down, telemetry buffered 7 days | done | `server/store.py` `SqliteQueue` | |
 | Boiler lockout or out of oil | done | `core/health.py` `NoHeat`, `core/decide.py` | Simulated empty tank caught within 3 h; no false alarms over 3 seeds and the cold scenario. Thresholds are simulator-tuned: check on the real house |
-| Valve stuck or calibration lost | partial | `core/health.py` `ValveCheck`, `core/decide.py` | "No warming in 3 burns" done and saved across restarts; simulated seized valve flagged within a day, no false flags over 3 seeds and the cold scenario. "Rise with valve closed" and the recalibration offer missing |
+| Valve stuck or calibration lost | partial | `core/health.py` `ValveCheck`, `core/decide.py` | "No warming in 3 burns" done and saved across restarts; simulated seized valve flagged within a day, no false flags over 3 seeds and the cold scenario. "Rise with valve closed" done (`valve.leaking`, 1 K TRV rise against the room in 2 of 5 burns, saved across restarts): a 20 % leak on the dining radiator is flagged within two days on seeds 1 to 3, with no false flags over 3 seeds and the cold scenario. Leaks on the far bedrooms and the bathroom pass too little water to show. The 1 K threshold is simulator-tuned and the simulator has no heat conducted up the valve body: check on the real house. Recalibration offer missing |
 | Short-cycling: raise minimum off for 24 h | done | `core/health.py`, `core/decide.py`, `core/persist.py` | Effective minimum off and the adaptation in `describe()` (`boiler.min_off_s`, `boiler.short_cycle`) |
 | Overheating with the valve closed | partial | `core/disturbance.py` | Gates learning (`unexplained_heat`); no alert, no valve check |
 | Frost | done | `core/decide.py` | |
@@ -206,7 +206,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Feature | Status | Where | Note |
 |---|---|---|---|
 | Pin closing = 100 minus opening | done (deliberately not) | `drivers/z2m.py` | Spec 4.5 chose governed mode instead; closing degree is 100 |
-| Valve feedback plausibility | partial | `core/health.py` `ValveCheck` | Command against TRV temperature response, see stuck valves |
+| Valve feedback plausibility | partial | `core/health.py` `ValveCheck` | Command against TRV temperature response, both ways: cold when open (stuck), warming when shut (leaking) |
 | Manual recalibration service | missing | | |
 | External temperature keepalive under 2 h | done | `drivers/z2m.py` | 25 min default |
 | Seed write-only entities at start | done | `drivers/z2m.py` | Writers start empty, so the first tick sends everything |
@@ -237,7 +237,8 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 Larger items left for later, each with a short design note.
 
 - **Check the TRV setpoint frame on the pilot valve.** Confirm the TRVZB opens when its reading is 0.5 K below the setpoint, and that a heat sink sent its reading + 1 K opens. If the toilet runs warm, set its `trv_bias_k` closer to 0, for example -1.0 K.
-- **"Rise with valve closed" and recalibration.** Flag a room whose TRV warms while its valve is commanded shut and no external heat source is flagged; add a `recalibrate_valve` API call and HA service that sends the TRVZB calibration command (check the Zigbee2MQTT converter for the attribute first).
+- **Check the leak threshold on the pilot valve.** With the valve shut and the boiler firing for an hour, note how far the TRV's reading rises against the room sensor. The leak check flags 1 K; if heat conducted up the valve body alone comes close, raise `LEAK_RISE_K`.
+- **Recalibration.** Add a `recalibrate_valve` API call and HA service that sends the TRVZB calibration command (check the Zigbee2MQTT converter for the attribute first).
 - **Reconciler failures into the core.** Pass the writer's failed settings in `RoomInput` so the "valve trusted" learning gate covers them.
 
 - **Learn `κ` (supply sensitivity).** Fit one house-wide `κ` by regressing each room's observed warm-up rate against `Σ f(o_j)` at the time, using only burns that pass every learning gate. Low value in this house (see [simulation](simulation.md)); collect real data first.

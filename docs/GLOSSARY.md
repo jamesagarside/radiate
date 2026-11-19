@@ -327,6 +327,10 @@ Code: `HouseConfig.sink_min`, `_ensure_sink`.
 A radiator that stays cold for several burns in a row while its valve should be open and other radiators warm. Radiate alerts and stops trusting that valve until it warms again.
 Code: `ValveCheck` in `radiate.core.health`, reason `valve.stuck`, API `rooms[].valve` (`untrusted`, `misses`), UI line "Valve may be stuck".
 
+**Leaking valve**:
+A radiator that warms during a burn while its valve should be shut: the TRV's reading rises at least 1 K against the room sensor in 2 of the last 5 judged burns. Usually lost calibration or a worn seat. Radiate alerts, stops trusting the valve and pauses learning for the room until 5 judged burns in a row stay cool. The spec calls this "rise with valve closed".
+Code: `ValveCheck.observe_shut`, `LEAK_RISE_K`, reason `valve.leaking`, learning gate `valve_leaking`, API `rooms[].valve` (`leaking`, `leak_burns`, and `untrusted`, which covers both checks), UI line "Valve may not be closing".
+
 **Boiler guard**:
 The state machine that alone decides the heating relay and enforces minimum burn, minimum off and starts per hour, whatever demand asks for.
 Code: `BoilerGuard` in `radiate.core.boiler`.
