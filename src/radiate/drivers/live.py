@@ -200,7 +200,7 @@ class LiveDriver:
             if writer is None:
                 continue
             echo = self.devices.get(writer.device)
-            mirror = self.site.schedule_for(rid).trvzb_payload()
+            mirror = self._mirror(rid)
             for write in writer.plan(action, echo, now, mirror):
                 self._send(write)
         self._last_heating, self._last_store = actions.heating_relay, actions.store_relay
@@ -222,6 +222,15 @@ class LiveDriver:
                 weekday,
             )
             await self.boiler.push_fallback(heat, self.cfg.store.windows)
+
+    def _mirror(self, room_id: str) -> dict[str, str]:
+        """The room's schedule in the frame its TRV compares setpoints with."""
+        week = self.site.schedule_for(room_id)
+        rc = self.cfg.room(room_id)
+        if rc.role is RoomRole.INTERNAL_SENSOR_ONLY:
+            # The TRV reads about room - bias; spec 4.6 and decide._trv_setpoint.
+            week = week.shifted(-rc.trv_bias_k)
+        return week.trvzb_payload()
 
     def _send(self, write: Write) -> None:
         if write.delay_s > 0:

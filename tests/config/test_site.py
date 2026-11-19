@@ -185,3 +185,11 @@ def test_numbers_from_environment():
     data = minimal(mqtt={"host": "b", "port": "${PORT}"})
     with pytest.raises(ConfigError, match="mqtt.port"):
         parse_site(data, env={"PORT": "abc"})
+
+
+def test_shifted_schedule_stays_in_trvzb_steps():
+    week = parse_week("00:00/16 06:30/18 22:30/16")
+    assert week.shifted(0) is week
+    up = week.shifted(1.5)
+    assert up.days[0].trvzb() == "00:00/17.5 06:30/19.5 22:30/17.5"
+    assert parse_week("00:00/34").shifted(3).days[0].trvzb() == "00:00/35"

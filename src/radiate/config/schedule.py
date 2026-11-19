@@ -77,6 +77,22 @@ class WeekSchedule:
                 return sp, ahead * 60.0
         return current, 7 * 86400.0
 
+    def shifted(self, offset_k: float) -> WeekSchedule:
+        """The same week with every setpoint moved by `offset_k`, in TRVZB steps.
+
+        For a TRV that compares its setpoint with its own reading rather than the
+        room's (an internal-sensor room), the mirrored schedule must be in that frame.
+        """
+        if offset_k == 0:
+            return self
+
+        def move(sp: float) -> float:
+            return max(MIN_C, min(MAX_C, round((sp + offset_k) * 2) / 2))
+
+        return WeekSchedule(
+            tuple(DaySchedule(tuple((m, move(sp)) for m, sp in d.transitions)) for d in self.days)
+        )
+
     def trvzb_payload(self) -> dict[str, str]:
         """Zigbee2MQTT `/set` payload that writes the whole week to a TRVZB."""
         return {f"weekly_schedule_{name}": self.days[i].trvzb() for i, name in enumerate(DAYS)}
