@@ -137,7 +137,7 @@ Top gaps, most important first:
 | Radiate restarts | done | `core/persist.py`, `server/store.py` | Timers moved on by the downtime |
 | Home Assistant down | done | | Control does not depend on HA |
 | Internet down, telemetry buffered 7 days | done | `server/store.py` `SqliteQueue` | |
-| Boiler lockout or out of oil | missing | | |
+| Boiler lockout or out of oil | done | `core/health.py` `NoHeat`, `core/decide.py` | Simulated empty tank caught within 3 h; no false alarms over 3 seeds and the cold scenario. Thresholds are simulator-tuned: check on the real house |
 | Valve stuck or calibration lost | missing | | |
 | Short-cycling: raise minimum off for 24 h | missing | | |
 | Overheating with the valve closed | partial | `core/disturbance.py` | Gates learning (`unexplained_heat`); no alert, no valve check |

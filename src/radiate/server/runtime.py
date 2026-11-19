@@ -85,6 +85,7 @@ class Runtime:
     store: object | None = None  # radiate.server.store.Store; None keeps state in memory
     save_every_s: float = 300.0
     _saved_at: float | None = None
+    _alert_keys: set[tuple[str, str | None]] = field(default_factory=set)
     _task: asyncio.Task | None = None
 
     def __post_init__(self) -> None:
@@ -237,10 +238,19 @@ class Runtime:
         self.last_actions, self.last_snapshot = actions, snap
         self.relay_history.append((now, actions.heating_relay, actions.store_relay))
         logged = []
-        for r in [*actions.reasons, *actions.alerts]:
+        for r in actions.reasons:
             if r.code.startswith(("boiler.", "disturbance.", "safe_mode.")):
                 self._log(now, r)
                 logged.append((r.code, r.message, r.room_id))
+        # Alerts repeat every tick while they hold; log each one when it first appears.
+        keys = set()
+        for r in actions.alerts:
+            key = (r.code, r.room_id)
+            keys.add(key)
+            if key not in self._alert_keys:
+                self._log(now, r)
+                logged.append((r.code, r.message, r.room_id))
+        self._alert_keys = keys
         payload = self.describe()
         if self.exporter is not None:
             self.exporter.record(payload, logged)

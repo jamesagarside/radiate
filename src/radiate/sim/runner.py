@@ -55,6 +55,8 @@ class Result:
     engine: EngineState | None = None
     fire_flagged_minutes: int = 0
     last_actions: Actions | None = None
+    alert_minutes: dict[str, int] = field(default_factory=dict)  # measured period, by code
+    first_alert_s: dict[str, float] = field(default_factory=dict)  # whole run, by code
 
     @property
     def median_spread(self) -> float:
@@ -119,6 +121,7 @@ def run(
     outdoor_mean: float = 4.0,
     pump_qmax: float | None = None,
     optimum_start: bool = True,
+    oil_out_at_s: float | None = None,
 ) -> Result:
     d = disturbances or Disturbances()
     cfg = cfg or house_config()
@@ -148,6 +151,8 @@ def run(
             burner_s_before = house.boiler.burner_on_s or -1.0
 
         draw = _apply_disturbances(house, d, day, minute, dist_state)
+        if oil_out_at_s is not None and house.now >= oil_out_at_s:
+            house.boiler.output_w = 0.0  # tank empty: the burner runs but makes no heat
 
         for rid, room in house.rooms.items():
             val, at = reports[rid]
@@ -164,6 +169,10 @@ def run(
                 res.last_actions = actions
                 if st.rooms["lounge"].dist.fire and house.now >= measure_from:
                     res.fire_flagged_minutes += 1
+                for code in {a.code for a in actions.alerts}:
+                    res.first_alert_s.setdefault(code, house.now)
+                    if house.now >= measure_from:
+                        res.alert_minutes[code] = res.alert_minutes.get(code, 0) + 1
             elif controller == "baseline":
                 _baseline(house, minute)
             # A crashed Radiate does nothing: TRVs keep governed settings, relay frozen

@@ -71,6 +71,18 @@ async def test_mode_and_boost(client):
     assert state["store"]["boost"]
 
 
+async def test_alerts_are_logged_once_when_they_appear():
+    driver = DemoDriver()
+    for room in driver.house.rooms.values():
+        if room.radiator.trv is not None:
+            room.radiator.trv.available = False  # every TRV unreachable: safe mode
+    rt = Runtime(house_config(), driver)
+    for _ in range(5):
+        await rt.step()
+    assert any(a.code == "safe_mode.no_trvs" for a in rt.last_actions.alerts)
+    assert [d.code for d in rt.decisions].count("safe_mode.no_trvs") == 1
+
+
 async def test_ingress_header_alone_does_not_bypass_token(client):
     r = await client.get("/api/v1/state", headers={"X-Ingress-Path": "/api/hassio_ingress/abc"})
     assert r.status == 401

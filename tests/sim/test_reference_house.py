@@ -67,6 +67,21 @@ def test_balancing_cuts_arrival_spread_when_everyone_calls_at_once():
     assert spread_on < 0.9 * spread_off
 
 
+def test_no_false_failure_alerts(runs):
+    for _, radiate in runs.values():
+        assert radiate.alert_minutes == {}, radiate.alert_minutes
+
+
+def test_out_of_oil_is_detected_and_the_boiler_keeps_calling():
+    out_at = 2.5 * 86400  # tank runs dry at midday on day 2
+    r = run("radiate", 4, 2, 1, oil_out_at_s=out_at)
+    assert "boiler.no_heat" not in {k for k, t in r.first_alert_s.items() if t < out_at}
+    detected = r.first_alert_s["boiler.no_heat"]
+    assert detected - out_at < 3 * 3600
+    assert r.last_actions.heating_relay  # still calling in case the boiler recovers
+    assert all(rs.learning_gate == "no_heat" for rs in r.engine.rooms.values())
+
+
 def test_crash_falls_back_safely(runs):
     # Radiate dies at midday on day 2 (setback). TRVs follow their mirrored on-device
     # schedules and the Shelly watchdog runs the boiler: no worse than smart TRVs.

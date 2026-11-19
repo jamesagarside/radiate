@@ -15,6 +15,7 @@ from .allocator import Allocation, AllocRoom, allocate
 from .boiler import BoilerGuard
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator, local_slope
+from .health import NO_HEAT_MESSAGE, ROOM_RISE_KPH, NoHeat
 from .types import (
     Actions,
     BoilerState,
@@ -106,6 +107,7 @@ class EngineState:
     supply: float = 1.0
     allocation: Allocation | None = None
     topup_burn: float | None = None  # burn start time for which top-up was used
+    no_heat: NoHeat = field(default_factory=NoHeat)  # out of oil or burner lockout
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -165,10 +167,21 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         out = 5.0  # conservative default when no outdoor reading
     any_trv = False
     frost = hard_frost = False
+    trv_now: dict[str, float] = {}  # fresh TRV readings, for the no-heat check
+    passive_now: dict[str, float] = {}
+    rooms_warming = False
+    any_open = False  # some TRV is open and asking for heat
 
     # --- 1-4: per-room sensing, disturbances, learning, demand -------------------------
     for rc in cfg.rooms:
         if not rc.controllable:
+            inp = snap.rooms.get(rc.id)
+            if (
+                inp is not None
+                and inp.temperature is not None
+                and inp.temperature_age_s <= ROOM_SENSOR_STALE_S
+            ):
+                passive_now[rc.id] = inp.temperature
             continue
         rs = st.rooms[rc.id]
         inp = snap.rooms.get(rc.id, RoomInput())
@@ -198,6 +211,19 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             if temp < bcfg.hard_frost_c:
                 hard_frost = True
         rs.slope = local_slope(rs.readings) if temp is not None else None
+        if inp.trv_available and inp.trv_temperature is not None and inp.trv_age_s <= TRV_STALE_S:
+            # Radiator warmth seen by the TRV: its reading above the room's, if known.
+            room_t = inp.temperature if rc.role is RoomRole.NORMAL else None
+            fresh = room_t is not None and inp.temperature_age_s <= ROOM_SENSOR_STALE_S
+            trv_now[rc.id] = inp.trv_temperature - (room_t if fresh else 0.0)
+        if (
+            (rs.calling or rs.topup)
+            and rc.heat_source is None
+            and rs.dist.learning_blocked(now) is None
+            and rs.slope is not None
+            and rs.slope >= ROOM_RISE_KPH
+        ):
+            rooms_warming = True
 
         # Radiator drive: low-pass of supply x flow fraction x availability.
         opening = rs.written.opening if rs.written else (inp.opening_echo or 0)
@@ -208,6 +234,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         u = flow_fraction(opening) if heating and avail else 0.0
         # "Could this radiator be getting heat?" ignores the learned arrival lag: a
         # radiator can warm the room before Radiate's lag estimate says it should.
+        if inp.trv_available and heating and opening > 0:
+            any_open = True
         if flowing and heating and opening > 0:
             rs.closed_since = None
         elif rs.closed_since is None:
@@ -256,7 +284,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         # Learning gates (spec 4.6).
         gate = rs.dist.learning_blocked(now)
         if gate is None:
-            if temp is None or rs.slope is None or delta_out is None:
+            if st.no_heat.active:
+                gate = "no_heat"  # the model would learn that radiators do nothing
+            elif temp is None or rs.slope is None or delta_out is None:
                 gate = "no_data"
             elif not inp.trv_available:
                 gate = "trv_offline"
@@ -286,6 +316,19 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 rs.calling = False
             if rs.topup and temp >= _topup_target(target, rs.topup_base or temp):
                 rs.topup = rs.extend = False
+
+    # Out of oil or burner lockout (spec 7): alert, keep calling, stop learning.
+    st.no_heat.update(
+        now,
+        relay_on=snap.heating_relay,
+        flowing=flowing,
+        any_open=any_open,
+        trv_readings=trv_now,
+        passive_readings=passive_now,
+        rooms_warming=rooms_warming,
+    )
+    if st.no_heat.active:
+        alerts.append(Reason("boiler.no_heat", NO_HEAT_MESSAGE))
 
     # --- 5: boiler demand, pooling, open path ------------------------------------------
     guard = st.boiler
