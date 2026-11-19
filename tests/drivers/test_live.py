@@ -221,3 +221,57 @@ async def test_runtime_end_to_end(fake_shelly, dry_run):
         assert fake_shelly.kvs[HEARTBEAT_KEY] == int(WALL)
         assert "radiate_heat" in fake_shelly.kvs and "radiate_store" in fake_shelly.kvs
         assert any(m == "Switch.Set" and p["id"] == 0 for m, p in fake_shelly.calls)
+
+
+async def test_trvs_unavailable_when_mqtt_or_zigbee2mqtt_is_down():
+    connected = [True]
+    clock, bus = Clock(), Bus()
+    drv = LiveDriver(
+        site(), bus.publish, clock=clock, wall=lambda: WALL, connected=lambda: connected[0]
+    )
+    feed(drv)
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.rooms["bedroom_1"].trv_available
+    # The broker connection drops: the last availability messages can no longer be trusted.
+    connected[0] = False
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert not any(r.trv_available for r in snap.rooms.values())
+    # Zigbee2MQTT itself goes offline (its last will), broker still up.
+    connected[0] = True
+    drv.handle_message("zigbee2mqtt/bridge/state", b'{"state":"offline"}')
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert not any(r.trv_available for r in snap.rooms.values())
+    assert any(a.code == "driver.zigbee2mqtt" for a in drv.alerts())
+    drv.handle_message("zigbee2mqtt/bridge/state", b'{"state":"online"}')
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.rooms["bedroom_1"].trv_available
+
+
+async def test_safe_mode_hands_the_boiler_to_the_watchdog(fake_shelly):
+    s = site(dry_run=False)
+    s = dataclasses.replace(s, shelly=dataclasses.replace(s.shelly, host=fake_shelly.host))
+    rpc = ShellyRpc(fake_shelly.host, "pw", fake_shelly.session)
+    boiler = ShellyBoiler(s.shelly, rpc, dry_run=False)
+    clock, bus = Clock(), Bus()
+    drv = LiveDriver(s, bus.publish, boiler, clock=clock, wall=lambda: WALL)
+
+    def safe(heating):
+        a = actions(heating=heating)
+        a.valves = {}
+        a.safe_mode = True
+        return a
+
+    # Still inside minimum burn: Radiate keeps the relay on and the heartbeat going.
+    await drv.apply(safe(True))
+    assert fake_shelly.kvs[HEARTBEAT_KEY] == int(WALL)
+    fake_shelly.calls.clear()
+    fake_shelly.kvs.pop(HEARTBEAT_KEY)
+    # Burn over: no relay commands and no heartbeat, so the watchdog takes over.
+    await drv.apply(safe(False))
+    assert HEARTBEAT_KEY not in fake_shelly.kvs
+    assert not any(m == "Switch.Set" for m, _ in fake_shelly.calls)
+    assert any(a.code == "driver.watchdog_handover" for a in drv.alerts())
+    # Back to normal: Radiate commands the relay again.
+    await drv.apply(actions())
+    assert fake_shelly.kvs[HEARTBEAT_KEY] == int(WALL)
+    assert not any(a.code == "driver.watchdog_handover" for a in drv.alerts())

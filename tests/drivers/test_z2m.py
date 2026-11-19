@@ -42,7 +42,11 @@ def test_store_routes_known_devices_only():
     store = DeviceStore("zigbee2mqtt", {"trv_a", "upstairs/temp"})
     assert store.handle("zigbee2mqtt/trv_a", json.dumps(TRV_STATE), 10.0) == "trv_a"
     assert store.handle("zigbee2mqtt/other", b"{}", 10.0) is None
+    assert store.bridge_online is None
     assert store.handle("zigbee2mqtt/bridge/state", b'{"state":"online"}', 10.0) is None
+    assert store.bridge_online is True
+    store.handle("zigbee2mqtt/bridge/state", b"offline", 10.0)
+    assert store.bridge_online is False
     assert store.handle("zigbee2mqtt/trv_a/availability", b'{"state":"offline"}', 11.0)
     # Friendly names may contain slashes.
     assert store.handle("zigbee2mqtt/upstairs/temp", b'{"temperature":18.2}', 12.0)

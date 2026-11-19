@@ -132,7 +132,7 @@ Top gaps, most important first:
 |---|---|---|---|
 | Room sensor stale | partial | `core/decide.py` | Falls back to the TRV reading and stops sending external temperature; learning is not switched off |
 | TRV offline | partial | `core/decide.py`, `drivers/live.py` | Excluded from demand and learning, alert raised; not counted as possibly open in the supply factor |
-| Coordinator or MQTT down: safe mode | partial | `core/decide.py` `force_stop` | Relay off after minimum burn, but the heartbeat keeps going so the watchdog never takes over; a dropped broker connection still reports TRVs as available |
+| Coordinator or MQTT down: safe mode | done | `core/decide.py` `force_stop`, `drivers/live.py` | Broker disconnected or Zigbee2MQTT offline marks every TRV unreachable; relay off after minimum burn, then no relay commands and no heartbeat, so the watchdog takes over. On hand-back, a burn the watchdog started is not adopted by the guard (unsure how short it can be cut) |
 | Radiate process dies | done | `shelly/radiate-watchdog.js`, schedule mirror | Simulated in `tests/sim` |
 | Radiate restarts | done | `core/persist.py`, `server/store.py` | Timers moved on by the downtime |
 | Home Assistant down | done | | Control does not depend on HA |

@@ -444,6 +444,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         boiler_state=guard.state,
         reasons=reasons,
         alerts=alerts,
+        safe_mode=force_stop,
     )
 
 
