@@ -265,9 +265,7 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
     if not raw:
         return None
     p = "shelly."
-    ctx.unknown(
-        raw, {"host", "password", "heating_switch", "store_switch", "auto_off_min"}, p
-    )
+    ctx.unknown(raw, {"host", "password", "heating_switch", "store_switch", "auto_off_min"}, p)
     host = ctx.get(raw, "host", str, "", p)
     if not host:
         ctx.err(f"{p}host", "required")
