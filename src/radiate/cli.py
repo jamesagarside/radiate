@@ -1,4 +1,4 @@
-"""Command line: `radiate serve`, `radiate sim` and `radiate check-config`."""
+"""Command line: `radiate serve`, `radiate sim`, `radiate check-config` and `radiate discover`."""
 
 from __future__ import annotations
 
@@ -233,6 +233,86 @@ def _shelly(args: argparse.Namespace) -> None:
     asyncio.run(main())
 
 
+def _discover(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from radiate.config import MqttConfig
+    from radiate.config.discover import (
+        DiscoveryError,
+        RenderOptions,
+        discover,
+        parse_payload,
+        render_yaml,
+    )
+
+    if args.out and Path(args.out).exists() and not args.force:
+        sys.exit(f"{args.out} already exists; use --force to overwrite it")
+    base = args.base_topic.rstrip("/")
+    password = args.password or os.environ.get("RADIATE_MQTT_PASSWORD") or None
+    mqtt = MqttConfig(
+        host=args.host,
+        port=args.port,
+        username=args.username or None,
+        password=password,
+        base_topic=base,
+        client_id="radiate-discover",  # never the server's ID, which would cut it off
+        tls=args.tls,
+    )
+    try:
+        if args.from_file:
+            devices_raw = Path(args.from_file).read_bytes()
+            groups_raw = Path(args.groups_file).read_bytes() if args.groups_file else None
+            source = Path(args.from_file).name
+        else:
+            from radiate.drivers.mqtt import read_retained
+
+            devices_topic, groups_topic = f"{base}/bridge/devices", f"{base}/bridge/groups"
+            try:
+                got = asyncio.run(
+                    read_retained(
+                        mqtt,
+                        [devices_topic, groups_topic],
+                        args.timeout,
+                        required={devices_topic},
+                    )
+                )
+            except Exception as err:  # aiomqtt.MqttError and socket errors
+                sys.exit(f"cannot read from the MQTT broker at {args.host}:{args.port}: {err}")
+            if devices_topic not in got:
+                sys.exit(
+                    f"no retained message on {devices_topic} within {args.timeout:g} s. "
+                    "Is Zigbee2MQTT running, and is --base-topic right?"
+                )
+            devices_raw, groups_raw = got[devices_topic], got.get(groups_topic)
+            source = f"the MQTT broker at {args.host}:{args.port}"
+        found = discover(
+            parse_payload(devices_raw), parse_payload(groups_raw) if groups_raw else None
+        )
+    except DiscoveryError as err:
+        sys.exit(f"cannot read the Zigbee2MQTT device list: {err}")
+    except OSError as err:
+        sys.exit(f"cannot read {err.filename}: {err.strerror}")
+    text = render_yaml(
+        found, RenderOptions(mqtt=mqtt, source=source, with_password=password is not None)
+    )
+    if args.out:
+        try:
+            with open(args.out, "w" if args.force else "x", encoding="utf-8") as fh:
+                fh.write(text)
+        except FileExistsError:
+            sys.exit(f"{args.out} already exists; use --force to overwrite it")
+    else:
+        sys.stdout.write(text)
+    heated = len(found.heated_rooms)
+    print(
+        f"discover: {heated} heated room{'s' if heated != 1 else ''}, "
+        f"{len(found.passive_rooms)} passive candidate(s), {len(found.unplaced)} unplaced "
+        f"device(s), {len(found.warnings)} warning(s)"
+        + (f"; wrote {args.out}" if args.out else ""),
+        file=sys.stderr,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="radiate")
     sub = p.add_subparsers(required=True)
@@ -258,6 +338,21 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--config", required=True)
     sh.add_argument("--yes", action="store_true", help="confirm writing to the Shelly")
     sh.set_defaults(func=_shelly)
+    d = sub.add_parser(
+        "discover", help="draft a configuration from Zigbee2MQTT's device list (read-only)"
+    )
+    d.add_argument("--host", default="localhost", help="MQTT broker")
+    d.add_argument("--port", type=int, default=1883)
+    d.add_argument("--username")
+    d.add_argument("--password", help="default: $RADIATE_MQTT_PASSWORD")
+    d.add_argument("--tls", action="store_true")
+    d.add_argument("--base-topic", default="zigbee2mqtt")
+    d.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for the list")
+    d.add_argument("--from-file", help="saved bridge/devices payload instead of the broker")
+    d.add_argument("--groups-file", help="saved bridge/groups payload, with --from-file")
+    d.add_argument("--out", help="write the configuration here instead of stdout")
+    d.add_argument("--force", action="store_true", help="overwrite --out if it exists")
+    d.set_defaults(func=_discover)
     return p
 
 
