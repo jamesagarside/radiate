@@ -19,7 +19,8 @@ PRIOR_B = (0.08, 0.06, 0.005, 0.6)
 PRIOR_D = (0.0, 0.05, -0.5, 3.0)
 PRIOR_D_CONTINUOUS = (0.3, 1.0, -0.5, 3.0)
 
-# Memory of roughly 3 days of 1-minute heating samples.
+# Effective memory of 2000 learning updates: about 33 hours of 1-minute samples that
+# pass every gate. The spec aimed for about 3 days; see docs/spec.md open questions.
 FORGETTING = 1.0 - 1.0 / 2000.0
 NOISE_SD = 0.6  # K/h, residual scale used to normalise updates
 

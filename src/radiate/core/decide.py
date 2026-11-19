@@ -62,7 +62,7 @@ CLOSE_BUMP = 10
 PREHEAT_MAX_S = 3 * 3600
 PREHEAT_MARGIN = 1.2
 INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
-LOCKSHIELD_DECAY = 0.9995  # per sample, roughly a 3 day half-life at one sample a minute
+LOCKSHIELD_DECAY = 0.9995  # per firing sample: half-life of about 23 hours of firing
 REJECTED_HOLD_S = 3600.0  # learning stays paused this long after a TRV rejected a setting
 # Disturbances that can warm a TRV with its valve shut, so the leak check looks away.
 # Not `unexplained_heat`: the check compares the TRV with the room, which sun or guests
