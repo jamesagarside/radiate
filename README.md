@@ -8,7 +8,7 @@ Plumbers balance a heating system by hand, turning the lockshield valve on each 
 
 ## Try it
 
-![Radiate web UI running the simulated house: lounge fire detected and its radiator closed, boiler on one long burn](docs/images/ui-demo.png)
+![Radiate web UI running the simulated house: the burner is topping up the toilet so it will not need a second burn soon, and Bedroom 3 is held at 16.5° until 06:30](docs/images/ui-demo.png)
 
 Try the [online demo](https://jamesagarside.github.io/radiate/): a simulated 9-radiator house running the real engine in your browser. Nothing to install, and nothing leaves your browser.
 

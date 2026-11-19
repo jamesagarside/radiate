@@ -59,15 +59,17 @@
         <button class="btn" id="boost">Boost hot water</button>
       </div>
       <div class="guard" id="guard" aria-hidden="true"><div class="guard-fill"></div></div>
+      <p class="boiler-note" id="short-cycle" hidden><strong class="tag">Short-cycling</strong> <span id="short-cycle-text"></span></p>
       <div class="timeline" id="timeline" aria-label="Last 24 hours of burns and hot-water windows">
         <div class="lane burns"></div>
         <div class="lane store"></div>
         <div class="ticks"><span>−24 h</span><span>−18 h</span><span>−12 h</span><span>−6 h</span><span>now</span></div>
       </div>
       <dl class="stats">
+        <div><dt id="s-today-label">Burner today</dt><dd><span id="s-today">–</span><span class="sub" id="s-today-sub"></span></dd></div>
         <div><dt>Starts, last hour</dt><dd id="s-starts">–</dd></div>
         <div><dt>Predicted burn</dt><dd id="s-pred">–</dd></div>
-        <div><dt>Burner hours</dt><dd id="s-hours">–</dd></div>
+        <div><dt>Balance, yesterday</dt><dd><span id="s-balance">–</span><span class="sub" id="s-balance-sub"></span></dd></div>
         <div><dt>Supply factor</dt><dd id="s-supply">–</dd></div>
       </dl>
     </section>
@@ -91,6 +93,18 @@
         <span class="badge"></span>
       </header>
       <p class="temp"><span class="now"></span><span class="target"></span></p>
+      <div class="sp" hidden>
+        <div class="sp-copy">
+          <span class="sp-label">Setpoint</span>
+          <button type="button" class="link hold-clear" hidden>Resume schedule</button>
+        </div>
+        <div class="stepper" role="group">
+          <button type="button" class="step" data-step="-0.5"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" /></svg></button>
+          <span class="sp-val" aria-live="polite" aria-atomic="true"></span>
+          <button type="button" class="step" data-step="0.5"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" /></svg></button>
+        </div>
+      </div>
+      <p class="flag" hidden></p>
       <div class="valve">
         <div class="valve-label"><span>Opening limit</span><span class="valve-val"></span></div>
         <div class="bar"><div class="fill"></div></div>

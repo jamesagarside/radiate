@@ -84,6 +84,18 @@ async def test_state_reports_minimum_off_and_short_cycling(client):
     assert boiler["short_cycle"] == {"extra_off_min": 5, "ends_in_h": 23.5}
 
 
+async def test_state_tells_burn_extension_from_heat_sink(client):
+    state = await (await client.get("/api/v1/state", headers=H)).json()
+    assert all(r["extend"] is False for r in state["rooms"] if r["role"] != "passive")
+    assert "extend" not in next(r for r in state["rooms"] if r["role"] == "passive")
+    rooms = client.rt.state.rooms
+    rooms["dining"].topup = rooms["dining"].extend = True
+    rooms["bedroom_2"].topup, rooms["bedroom_2"].extend = True, False
+    by_id = {r["id"]: r for r in client.rt.describe()["rooms"]}
+    assert (by_id["dining"]["topup"], by_id["dining"]["extend"]) == (True, True)
+    assert (by_id["bedroom_2"]["topup"], by_id["bedroom_2"]["extend"]) == (True, False)
+
+
 async def test_alerts_are_logged_once_when_they_appear():
     driver = DemoDriver()
     for room in driver.house.rooms.values():

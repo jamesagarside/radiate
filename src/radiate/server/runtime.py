@@ -345,6 +345,9 @@ class Runtime:
                     opening=v.opening if v else None,
                     calling=rs.calling,
                     topup=rs.topup,
+                    # Burn extension: a top-up that may keep the burner on. A top-up
+                    # without it is a heat sink, opened only so the heat has somewhere to go.
+                    extend=rs.extend,
                     preheating=rs.preheating,
                     fire=rs.dist.fire,
                     learning=rs.learning_gate,

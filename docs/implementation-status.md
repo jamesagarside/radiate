@@ -184,7 +184,10 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Item | Status | Where | Note |
 |---|---|---|---|
 | House view: room cards, valve bar, reasons, learning state | done | `web/` | |
-| Boiler strip with 24 h burn timeline and countdowns | done | `web/app.js` | |
+| Boiler strip with 24 h burn timeline and countdowns | done | `web/app.js` | Countdown uses the effective minimum off; short-cycling note under the guard bar |
+| Why the burner is on | done | `web/app.js` `statusLine` | Names burn extensions ("Topping up") and heat sinks separately, from `rooms[].extend` |
+| Setpoint control and hold | done | `web/app.js`, `server/bridge.py` | Stepper per room, 0.5 °C steps, 5 to 28 °C; shows the hold and resumes the schedule. Server and demo |
+| Daily accounting and stuck valves in the UI | done | `web/app.js` | Burner hours and starts today, yesterday's balance score, a line on a room whose valve may be stuck |
 | Setup wizard | missing | | |
 
 ## 11. Simulator
