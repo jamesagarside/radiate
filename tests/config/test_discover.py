@@ -275,8 +275,9 @@ def test_reference_fixture_matches_the_example_configuration():
     assert rooms["bedroom_1"].window.name == "window_bedroom_1"
     assert [d.name for d in found.ignored] == ["plug_hall_lamp"]
     assert found.unplaced == ()
-    (warning,) = found.warnings
-    assert warning.startswith("trv_toilet: TRVZB firmware 1.1.5")
+    # The toilet's TRVZB is on 1.1.5: fine for an internal-sensor room, which never
+    # sends external_temperature_input.
+    assert found.warnings == ()
 
 
 def test_reference_draft_passes_validation_once_the_secret_is_set():
@@ -292,7 +293,7 @@ def test_reference_draft_passes_validation_once_the_secret_is_set():
     assert roles["toilet"] is RoomRole.INTERNAL_SENSOR_ONLY
     assert "stairs" not in roles  # passive candidates are commented out
     assert [r.id for r in site.house.rooms if r.actuation_enabled] == [found.pilot]
-    assert found.pilot == "bathroom"
+    assert found.pilot == "bedroom_1"  # same pilot as examples/reference-house.yaml
     assert site.house.room("bathroom").has_humidity
     assert site.devices["bedroom_1"].window == "window_bedroom_1"
     assert "# - id: stairs" in text and "#   role: passive" in text
@@ -306,12 +307,25 @@ def test_draft_without_credentials_needs_no_environment():
     parse_site(data, {})
 
 
-def test_pilot_prefers_a_normal_room_with_current_firmware():
+def test_pilot_prefers_a_dry_normal_room_with_current_firmware():
     found = discover(load("z2m_devices_reference.json"))
+    assert found.pilot == "bedroom_1"  # the bathroom sorts first but has showers
     rooms = list(found.rooms)
-    old = next(r for r in rooms if r.id == "bathroom")
+    old = next(r for r in rooms if r.id == "bedroom_1")
     rooms[rooms.index(old)] = replace(old, trv=replace(old.trv, software_build_id="1.1.0"))
-    assert replace(found, rooms=tuple(rooms)).pilot == "bedroom_1"
+    assert replace(found, rooms=tuple(rooms)).pilot == "bedroom_2"
+    # With every dry room on old firmware, a bathroom on current firmware is next.
+    for i, r in enumerate(rooms):
+        if r.role == "normal" and not r.wet:
+            rooms[i] = replace(r, trv=replace(r.trv, software_build_id="1.1.0"))
+    assert replace(found, rooms=tuple(rooms)).pilot == "bathroom"
+
+
+def test_external_input_firmware_only_matters_with_a_room_sensor():
+    found = discover(load("z2m_devices_reference.json"))
+    trv = next(r for r in found.rooms if r.id == "toilet").trv
+    assert firmware_warnings(trv) and "1.2.1" in firmware_warnings(trv)[0]
+    assert firmware_warnings(trv, uses_external=False) == []
 
 
 # --- the naming-variants fixture -------------------------------------------------------

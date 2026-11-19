@@ -36,7 +36,7 @@ Then check the draft before you use it:
 
 A thermostat that exposes neither valve feature is left out with a warning, because Radiate can't drive it. Discover skips the coordinator and disabled devices, and lists devices that Zigbee2MQTT doesn't support among the devices Radiate doesn't use.
 
-For each TRVZB, discover reads the firmware version from `software_build_id` and warns if it's older than 1.1.4 (no opening or closing degree) or 1.2.1 (no `external_temperature_input`), or if Zigbee2MQTT doesn't report it.
+For each TRVZB, discover reads the firmware version from `software_build_id` and warns if it's older than 1.1.4 (no opening or closing degree), older than 1.2.1 (no `external_temperature_input`) in a room with its own sensor, or if Zigbee2MQTT doesn't report it.
 
 ### How it finds rooms
 
@@ -53,7 +53,7 @@ A name that is only a number after the device words are removed, such as `TRV 1`
 - One room for each TRV. A room with a TRV and a sensor is `normal`. A room with a TRV and no sensor is `internal_sensor_only`.
 - A room for each sensor with no TRV, commented out as a `passive` candidate. Uncomment it only if the room's radiator has no controllable valve, such as a bypass radiator left open. Discover can't tell an unvalved radiator from a room with no radiator.
 - `humidity: true` on bathrooms and shower rooms whose sensor reports humidity.
-- One `default` schedule for every room, `dry_run: true`, and `actuate: true` on one pilot valve: the first normal room with a TRVZB on current firmware.
+- One `default` schedule for every room, `dry_run: true`, and `actuate: true` on one pilot valve: the first normal room with a TRVZB on current firmware, avoiding bathrooms, whose shower spikes make a poor first test.
 - The `mqtt` section from the options you gave, with the password as `${RADIATE_MQTT_PASSWORD}`. Without `--username` or a password, the credentials are commented out.
 - The `shelly` section as a comment, to fill in once the relay is wired.
 - Comments listing the warnings, the devices discover couldn't place, and the devices Radiate doesn't use.

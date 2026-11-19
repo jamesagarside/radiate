@@ -146,6 +146,16 @@ class DraftRoom:
     def name(self) -> str:
         return self.id.replace("_", " ").capitalize()
 
+    @property
+    def wet(self) -> bool:
+        """A bathroom-like room whose humidity drives shower detection."""
+        return (
+            self.trv is not None
+            and self.sensor is not None
+            and "humidity" in self.sensor.features
+            and bool(set(_words(self.id)) & WET_ROOM_WORDS)
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Unplaced:
@@ -173,7 +183,8 @@ class Discovery:
     def pilot(self) -> str | None:
         """The room whose valve is actuated first.
 
-        The first normal room with a TRVZB on current firmware, else the first normal
+        The first normal room with a TRVZB on current firmware, preferring one that is
+        not a bathroom (shower spikes make a poor first test), else the first normal
         room, else the first room with a TRV.
         """
         heated = self.heated_rooms
@@ -183,7 +194,8 @@ class Discovery:
             for r in normal
             if r.trv is not None and r.trv.model in KNOWN_TRVS and not firmware_warnings(r.trv)
         ]
-        chosen = ready or normal or list(heated)
+        dry = [r for r in ready if not r.wet]
+        chosen = dry or ready or normal or list(heated)
         return chosen[0].id if chosen else None
 
 
@@ -460,14 +472,20 @@ def _clashing(cands: list[_Candidate]) -> list[_Candidate]:
     return [c for group in by_room.values() if len(group) > 1 for c in group]
 
 
-def firmware_warnings(device: Z2mDevice) -> list[str]:
+def firmware_warnings(device: Z2mDevice, uses_external: bool = True) -> list[str]:
+    """Warnings for a TRVZB's firmware. `uses_external`: the room sends the TRV its
+    room temperature (a normal room); internal-sensor rooms do not need 1.2.1."""
     if device.model not in KNOWN_TRVS:
         return []
     version = parse_version(device.software_build_id)
     if version is None:
         return [
             f"{device.name}: Zigbee2MQTT did not report its firmware version. "
-            "Check it is 1.2.1 or later before running live."
+            + (
+                "Check it is 1.2.1 or later before running live."
+                if uses_external
+                else "Check it is 1.1.4 or later before running live."
+            )
         ]
     shown = device.software_build_id
     if version < FW_OPENING_DEGREE:
@@ -476,7 +494,7 @@ def firmware_warnings(device: Z2mDevice) -> list[str]:
             "valve opening or closing degree and Radiate cannot regulate it. "
             "Update it in Zigbee2MQTT (OTA) first."
         ]
-    if version < FW_EXTERNAL_INPUT:
+    if version < FW_EXTERNAL_INPUT and uses_external:
         return [
             f"{device.name}: TRVZB firmware {shown} is older than 1.2.1, so it ignores "
             "external_temperature_input and regulates on its own sensor. "
@@ -515,7 +533,8 @@ def discover(devices_payload: Any, groups_payload: Any = None) -> Discovery:
                 "not a Sonoff TRVZB. Radiate is written and tested for the TRVZB; check its "
                 "attributes match before you let Radiate actuate it."
             )
-        warnings.extend(firmware_warnings(d))
+        internal = any(r.trv is d and r.role == "internal_sensor_only" for r in rooms)
+        warnings.extend(firmware_warnings(d, uses_external=not internal))
     for d in ignored:
         if "occupied_heating_setpoint" in d.features:
             warnings.append(
@@ -590,12 +609,7 @@ def _room_lines(room: DraftRoom, pilot: str | None, prefix: str = "  ") -> list[
         out.append(f"{prefix}  sensor: {scalar(room.sensor.name)}")
     if room.window is not None:
         out.append(f"{prefix}  window: {scalar(room.window.name)}")
-    if (
-        room.trv is not None
-        and room.sensor is not None
-        and "humidity" in room.sensor.features
-        and set(_words(room.id)) & WET_ROOM_WORDS
-    ):
+    if room.wet:
         out.append(f"{prefix}  humidity: true            # shower detection")
     if room.trv is not None:
         out.append(f"{prefix}  schedule: default")
