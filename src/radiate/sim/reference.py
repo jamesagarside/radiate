@@ -99,11 +99,17 @@ def setpoint(spec: RoomSpec, minute_of_day: int) -> float:
 
 
 def next_change(spec: RoomSpec, minute_of_day: int) -> tuple[float, float]:
-    """Next scheduled setpoint and seconds until it applies."""
+    """Next scheduled setpoint and seconds until it applies.
+
+    The schedule only changes at OCCUPIED boundaries, so checking those (nearest first)
+    gives the same answer as scanning every minute of the day, at a fraction of the cost.
+    """
     now_sp = setpoint(spec, minute_of_day)
-    for step in range(1, 24 * 60):
-        m = (minute_of_day + step) % (24 * 60)
-        sp = setpoint(spec, m)
+    steps = sorted(
+        {(edge - minute_of_day) % (24 * 60) for period in OCCUPIED for edge in period} - {0}
+    )
+    for step in steps:
+        sp = setpoint(spec, (minute_of_day + step) % (24 * 60))
         if sp != now_sp:
             return sp, step * 60.0
     return now_sp, 24 * 3600.0

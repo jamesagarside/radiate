@@ -83,3 +83,12 @@ async def test_ingress_trusted_only_from_supervisor_address():
     async with TestClient(TestServer(app)) as c:
         r = await c.get("/api/v1/state", headers={"X-Ingress-Path": "/api/hassio_ingress/abc"})
         assert r.status == 200
+
+
+async def test_bad_bodies_are_400_not_500(client):
+    r = await client.post("/api/v1/store/boost", json={"minutes": "lots"}, headers=H)
+    assert r.status == 400
+    r = await client.post("/api/v1/mode", data="{bad", headers=H)
+    assert r.status == 400
+    r = await client.post("/api/v1/rooms/nope/fire", data="{bad", headers=H)
+    assert r.status == 404
