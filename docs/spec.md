@@ -253,7 +253,7 @@ Before LEAD → FIRING, the predicted heat sink must be enough for the burner: `
 
 - Burner hours, starts, burn-length histogram and starts per hour are kept per day.
 - With a nozzle rating (litres/h, from the service sheet), litres used and kWh delivered (litres × 10.35 kWh × assumed efficiency 0.85) are estimated. If relay power metering shows burner firing, actual firing time replaces relay time.
-- Short-cycle alert: more than 4 starts in an hour, or burns under the minimum because of an external stop, for 2 hours running.
+- Short-cycle alert: more than 4 relay starts in an hour, or burns under the minimum because of an external stop (the relay dropped while Radiate still called) for 2 hours running, meaning such burns at least an hour apart within the last two hours. Radiate's own guard allows at most 3 starts an hour, so this catches another controller, a manual switch or a relay dropping out.
 
 ### 5.7 Fail-safe relay watchdog (Shelly script)
 
@@ -306,7 +306,7 @@ Order inside `decide`:
 | Internet down | | No effect on control; cloud telemetry buffered on disk (up to 7 days) |
 | Boiler lockout or out of oil | heating relay on for 30 min with at least one valve open (store recovery and time with every valve shut do not count), and no sign of heat: no TRV reading rising 0.6 K above its room, no ordinary calling room warming by 0.3 K/h, no 0.3 K stairs rise | Alert "No heat: check oil and boiler lockout"; keep calling (the boiler may recover) but stop learning. Clears when heat is seen again |
 | Valve stuck or calibration lost | commanded open, room calling, boiler firing, no `T_trv` rise for 3 burns; or rise with valve closed | Alert; offer recalibration; room flagged untrusted |
-| Short-cycling | > 4 starts per hour | Raise minimum off by 5 min (up to 30) for 24 h; alert |
+| Short-cycling | > 4 starts per hour, or external stops (section 5.6) | Raise minimum off by 5 min (up to 30) for 24 h, at most once an hour; alert. Kept across restarts |
 | Overheating | room > setpoint + 2 K with valve closed | Flag episodic heat (section 4.6); if a valve, not external heat, is to blame, close it and alert |
 | Frost | any room < 7 °C | Frost override (section 5.2) |
 | Clock jump or DST | monotonic clock in the server | Timers use monotonic time; schedules use local time |

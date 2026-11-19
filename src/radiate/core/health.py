@@ -5,6 +5,12 @@
   no ordinary calling room warming and no rise on a passive (bypass) radiator's room.
   Out of oil or burner lockout. Time with every valve shut does not count: then the
   radiators cannot show heat whatever the boiler does.
+- Short-cycling (spec 5.6): more than 4 relay starts in an hour, or burns cut short
+  of the minimum by something other than Radiate, still happening an hour after the
+  first one (cut burns at least an hour apart within the last two hours).
+  Radiate's own guard allows at most `max_starts_per_hour`, so this catches another
+  controller, a manual switch or a relay dropping out. Minimum off is raised by
+  5 min (to at most 30 min) for 24 h, at most once an hour.
 """
 
 from __future__ import annotations
@@ -20,6 +26,12 @@ PASSIVE_RISE_K = 0.3  # room rise on the always-open bypass radiator
 ROOM_RISE_KPH = 0.3  # a calling room warming at least this fast is getting heat
 MAX_TICK_S = 300.0  # longer gaps (restart, stalled loop) are not counted
 NO_HEAT_MESSAGE = "No heat: check oil and boiler lockout"
+
+SHORT_CYCLE_STARTS = 4  # more than this many relay starts in an hour
+SHORT_CYCLE_STEP_S = 5 * 60
+SHORT_CYCLE_MIN_OFF_CAP_S = 30 * 60
+SHORT_CYCLE_HOLD_S = 24 * 3600
+HOUR = 3600.0
 
 
 def _rise(points: list[tuple[float, float]]) -> float:
@@ -86,3 +98,59 @@ class NoHeat:
         self.open_flow_s = 0.0
         self.trv.clear()
         self.passive.clear()
+
+
+@dataclass(slots=True)
+class ShortCycle:
+    starts: list[float] = field(default_factory=list)  # observed relay starts
+    cut_burns: list[float] = field(default_factory=list)  # ends of burns cut short
+    relay: bool | None = None  # observed relay last tick
+    burn_start: float | None = None
+    commanded: bool = False  # what Radiate asked for last tick
+    extra_off_s: float = 0.0
+    until: float | None = None  # when the raised minimum off ends
+    raised_at: float | None = None
+
+    def min_off_s(self, base_s: float) -> float:
+        if self.extra_off_s <= 0:
+            return base_s
+        return min(max(base_s, SHORT_CYCLE_MIN_OFF_CAP_S), base_s + self.extra_off_s)
+
+    def update(self, now: float, *, relay_on: bool, min_burn_s: float, base_off_s: float) -> bool:
+        """Advance one tick with the observed relay. Returns True when minimum off is raised."""
+        if self.until is not None and now >= self.until:
+            self.extra_off_s, self.until = 0.0, None
+        if self.relay is not None and relay_on != self.relay:
+            if relay_on:
+                self.starts.append(now)
+                self.burn_start = now
+            else:
+                cut = self.burn_start is not None and now - self.burn_start < min_burn_s
+                if cut and self.commanded:
+                    self.cut_burns.append(now)  # Radiate still wanted heat
+                self.burn_start = None
+        self.relay = relay_on
+        self.starts = [t for t in self.starts if now - t < HOUR]
+        self.cut_burns = [t for t in self.cut_burns if now - t < 2 * HOUR]
+
+        too_many = len(self.starts) > SHORT_CYCLE_STARTS
+        # Still happening after an hour: cut burns at least an hour apart in the last two.
+        cut_for_two_hours = bool(self.cut_burns) and (
+            self.cut_burns[-1] - self.cut_burns[0] >= HOUR
+        )
+        if not (too_many or cut_for_two_hours):
+            return False
+        if self.raised_at is not None and now - self.raised_at < HOUR:
+            return False
+        room = max(0.0, SHORT_CYCLE_MIN_OFF_CAP_S - base_off_s)
+        self.extra_off_s = min(room, self.extra_off_s + SHORT_CYCLE_STEP_S)
+        self.until = now + SHORT_CYCLE_HOLD_S
+        self.raised_at = now
+        # Judge the next hour on fresh evidence.
+        self.starts.clear()
+        self.cut_burns.clear()
+        return True
+
+    def message(self, base_off_s: float) -> str:
+        minutes = round(self.min_off_s(base_off_s) / 60)
+        return f"Boiler short-cycling: minimum off raised to {minutes} min"

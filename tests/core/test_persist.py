@@ -82,6 +82,31 @@ def test_corrupt_room_resets_to_priors():
     assert restored.rooms["dining"].est.theta == st.rooms["dining"].est.theta
 
 
+def test_raised_minimum_off_survives_a_restart():
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    sc = st.short_cycle
+    sc.extra_off_s, sc.until, sc.raised_at = 600.0, 5000.0 + 20 * 3600, 5000.0
+    sc.starts, sc.cut_burns = [4000.0, 4500.0], [4200.0]
+    data = json.loads(json.dumps(dump_state(st, 5000.0)))
+    restored, problems = load_state(cfg, data, now=10.0, elapsed_s=3600.0)
+    assert problems == []
+    r = restored.short_cycle
+    assert r.extra_off_s == 600.0
+    assert math.isclose(r.until - 10.0, 19 * 3600)  # an hour of the 20 left went by
+    assert [10.0 - t for t in r.starts] == [4600.0, 4100.0]
+    assert r.relay is None  # the first relay reading after a restart is not a start
+
+
+def test_state_saved_before_health_data_still_loads():
+    cfg, st = learned()
+    data = dump_state(st, st.last_now)
+    del data["health"]
+    restored, problems = load_state(cfg, data, 0.0)
+    assert problems == []
+    assert restored.short_cycle.extra_off_s == 0.0
+
+
 def test_wrong_version_starts_fresh():
     cfg = house_config()
     st, problems = load_state(cfg, {"version": 99}, 0.0)

@@ -85,7 +85,7 @@ class Runtime:
     store: object | None = None  # radiate.server.store.Store; None keeps state in memory
     save_every_s: float = 300.0
     _saved_at: float | None = None
-    _alert_keys: set[tuple[str, str | None]] = field(default_factory=set)
+    _alert_keys: set[tuple[str, str | None, str]] = field(default_factory=set)
     _task: asyncio.Task | None = None
 
     def __post_init__(self) -> None:
@@ -242,10 +242,11 @@ class Runtime:
             if r.code.startswith(("boiler.", "disturbance.", "safe_mode.")):
                 self._log(now, r)
                 logged.append((r.code, r.message, r.room_id))
-        # Alerts repeat every tick while they hold; log each one when it first appears.
+        # Alerts repeat every tick while they hold; log each one when it first appears
+        # or when its message changes.
         keys = set()
         for r in actions.alerts:
-            key = (r.code, r.room_id)
+            key = (r.code, r.room_id, r.message)
             keys.add(key)
             if key not in self._alert_keys:
                 self._log(now, r)
@@ -357,6 +358,7 @@ class Runtime:
             rooms.append(item)
 
         guard = st.boiler
+        sc = st.short_cycle
         burns, stores = _intervals(self.relay_history, now)
         return {
             "now": now,
@@ -373,6 +375,14 @@ class Runtime:
                 "starts_last_hour": guard.starts_last_hour(now),
                 "predicted_burn_min": round(st.allocation.t_star_h * 60) if st.allocation else 0,
                 "supply": round(st.supply, 3),
+                # Effective minimum off, raised while short-cycling was seen (spec 7).
+                "min_off_s": sc.min_off_s(self.cfg.boiler.min_off_s),
+                "short_cycle": {
+                    "extra_off_min": round(sc.extra_off_s / 60),
+                    "ends_in_h": round(max(0.0, sc.until - now) / 3600, 1),
+                }
+                if sc.extra_off_s > 0 and sc.until is not None
+                else None,
             },
             "store": {
                 "relay": acts.store_relay if acts else False,

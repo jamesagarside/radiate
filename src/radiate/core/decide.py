@@ -7,6 +7,7 @@ The caller owns `state` and must not share it between houses.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass, field
 
@@ -15,7 +16,7 @@ from .allocator import Allocation, AllocRoom, allocate
 from .boiler import BoilerGuard
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator, local_slope
-from .health import NO_HEAT_MESSAGE, ROOM_RISE_KPH, NoHeat
+from .health import NO_HEAT_MESSAGE, ROOM_RISE_KPH, NoHeat, ShortCycle
 from .types import (
     Actions,
     BoilerState,
@@ -108,6 +109,7 @@ class EngineState:
     allocation: Allocation | None = None
     topup_burn: float | None = None  # burn start time for which top-up was used
     no_heat: NoHeat = field(default_factory=NoHeat)  # out of oil or burner lockout
+    short_cycle: ShortCycle = field(default_factory=ShortCycle)
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -408,15 +410,25 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             )
         )
         want_fire = want_fire and hard_frost
+    # Short-cycling from outside Radiate (spec 5.6, 7): a longer minimum off for 24 h.
+    sc = st.short_cycle
+    sc.update(
+        now, relay_on=snap.heating_relay, min_burn_s=bcfg.min_burn_s, base_off_s=bcfg.min_off_s
+    )
+    guard_cfg = bcfg
+    if sc.extra_off_s > 0:
+        guard_cfg = dataclasses.replace(bcfg, min_off_s=sc.min_off_s(bcfg.min_off_s))
+        alerts.append(Reason("boiler.short_cycle", sc.message(bcfg.min_off_s)))
     prev_state = guard.state
     relay = guard.step(
-        bcfg,
+        guard_cfg,
         now,
         want_fire=want_fire,
         want_stop=want_stop,
         hard_frost=hard_frost,
         force_stop=force_stop,
     )
+    sc.commanded = relay
     if guard.state is not prev_state:
         reasons.append(
             _boiler_reason(prev_state, guard.state, len(calling), predicted_burn_s, max_gap)

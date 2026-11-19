@@ -6,9 +6,10 @@ against the new clock, with the wall time spent down added on top. A restart in 
 middle of a burn therefore still honours minimum burn, and a restart during REST
 still honours minimum off.
 
-Kept: learned room models, arrival lags, lockshield histograms, disturbance hold-offs
-and the boiler guard. Dropped: short-lived signals (reading windows, radiator drive,
-demand latches), which rebuild within a few ticks.
+Kept: learned room models, arrival lags, lockshield histograms, disturbance hold-offs,
+the boiler guard and the short-cycle adaptation. Dropped: short-lived signals (reading
+windows, radiator drive, demand latches, the no-heat check), which rebuild within a
+few ticks. Sections added after version 1 are optional, so older saves still load.
 
 Corrupt or out-of-range room data resets that room to priors (spec 7).
 """
@@ -62,6 +63,7 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
             },
         }
     g = st.boiler
+    sc = st.short_cycle
     return {
         "version": VERSION,
         "rooms": rooms,
@@ -71,7 +73,39 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
             "starts": [_age(t, now) for t in g.starts],
             "burn_started_at": _age(g.burn_started_at, now),
         },
+        "health": {
+            "short_cycle": {
+                "starts": [_age(t, now) for t in sc.starts],
+                "cut_burns": [_age(t, now) for t in sc.cut_burns],
+                "extra_off_s": sc.extra_off_s,
+                "until": _age(sc.until, now),
+                "raised_at": _age(sc.raised_at, now),
+            },
+        },
     }
+
+
+def _times(raw: Any, now: float, elapsed: float) -> list[float]:
+    if not isinstance(raw, list):
+        return []
+    return [t for t in (_at(a, now, elapsed) for a in raw) if t is not None]
+
+
+def _load_health(st: EngineState, raw: Any, now: float, elapsed: float) -> None:
+    """Failure-detector state. Missing (older saves) or malformed data keeps defaults."""
+    if not isinstance(raw, dict):
+        return
+    sc_raw = raw.get("short_cycle")
+    if isinstance(sc_raw, dict):
+        sc = st.short_cycle
+        sc.starts = _times(sc_raw.get("starts"), now, elapsed)
+        sc.cut_burns = _times(sc_raw.get("cut_burns"), now, elapsed)
+        extra = sc_raw.get("extra_off_s")
+        until = _at(sc_raw.get("until"), now, elapsed)
+        if isinstance(extra, (int, float)) and math.isfinite(extra) and until is not None:
+            sc.extra_off_s = max(0.0, min(30 * 60.0, float(extra)))
+            sc.until = until
+        sc.raised_at = _at(sc_raw.get("raised_at"), now, elapsed)
 
 
 def _valid_estimator(data: Any, est: RoomEstimator) -> bool:
@@ -159,4 +193,5 @@ def load_state(
             # Valves were opening when Radiate stopped; start the lead again.
             guard.state, guard.since = BoilerState.IDLE, now
         st.boiler = guard
+    _load_health(st, data.get("health"), now, elapsed)
     return st, problems

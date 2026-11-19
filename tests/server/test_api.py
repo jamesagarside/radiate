@@ -71,6 +71,16 @@ async def test_mode_and_boost(client):
     assert state["store"]["boost"]
 
 
+async def test_state_reports_minimum_off_and_short_cycling(client):
+    boiler = (await (await client.get("/api/v1/state", headers=H)).json())["boiler"]
+    assert boiler["min_off_s"] == 600 and boiler["short_cycle"] is None
+    sc = client.rt.state.short_cycle
+    sc.extra_off_s, sc.until = 300.0, client.rt.driver.clock() + 23.5 * 3600
+    boiler = client.rt.describe()["boiler"]
+    assert boiler["min_off_s"] == 900
+    assert boiler["short_cycle"] == {"extra_off_min": 5, "ends_in_h": 23.5}
+
+
 async def test_alerts_are_logged_once_when_they_appear():
     driver = DemoDriver()
     for room in driver.house.rooms.values():

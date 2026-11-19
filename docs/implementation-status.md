@@ -111,7 +111,7 @@ Top gaps, most important first:
 | 5.6 Burner hours, starts, burn-length histogram, starts per hour per day | missing | | Simulator telemetry only |
 | 5.6 Litres and kWh from the nozzle rating | missing | | |
 | 5.6 Firing time from relay power metering | missing | | |
-| 5.6 Short-cycle alert | missing | | |
+| 5.6 Short-cycle alert | done | `core/health.py` `ShortCycle` | Counts observed relay starts; physical burner starts inside a long call need a firing signal (open question 1) |
 | 5.7 Shelly watchdog script | done | `shelly/radiate-watchdog.js` | |
 | 5.7 Heartbeat every tick, fallback windows in KVS | done | `drivers/shelly.py` | |
 | 5.7 Hard auto-off on channel 1 | done | `drivers/shelly.py` `toggle_after` | |
@@ -139,7 +139,7 @@ Top gaps, most important first:
 | Internet down, telemetry buffered 7 days | done | `server/store.py` `SqliteQueue` | |
 | Boiler lockout or out of oil | done | `core/health.py` `NoHeat`, `core/decide.py` | Simulated empty tank caught within 3 h; no false alarms over 3 seeds and the cold scenario. Thresholds are simulator-tuned: check on the real house |
 | Valve stuck or calibration lost | missing | | |
-| Short-cycling: raise minimum off for 24 h | missing | | |
+| Short-cycling: raise minimum off for 24 h | done | `core/health.py`, `core/decide.py`, `core/persist.py` | Effective minimum off and the adaptation in `describe()` (`boiler.min_off_s`, `boiler.short_cycle`) |
 | Overheating with the valve closed | partial | `core/disturbance.py` | Gates learning (`unexplained_heat`); no alert, no valve check |
 | Frost | done | `core/decide.py` | |
 | Clock jump or DST | done | `server/runtime.py`, `drivers/live.py` | Monotonic timers; schedules in local time (`next_change` is out by an hour across a DST change) |

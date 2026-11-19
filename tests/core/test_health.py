@@ -136,3 +136,94 @@ def test_store_recovery_does_not_count_as_no_heat():
     _, hist = run(cold, 70, store_on=lambda m: m >= 1)
     assert not any(no_heat(a) for a in hist[:55])
     assert no_heat(hist[-1])
+
+
+# --- short-cycling ----------------------------------------------------------------------
+
+
+def warm(_m: int) -> dict[str, tuple[float, float]]:
+    return {rid: (21.0, 21.5) for rid in ROOMS}
+
+
+def step(st, m: int, temps: Temps, relay: bool):
+    readings = temps(m)
+    rooms = {
+        rid: RoomInput(temperature=t, trv_temperature=trv, setpoint=20.0, trv_heating=t < 20.0)
+        for rid, (t, trv) in readings.items()
+    }
+    snap = Snapshot(m * 60.0, 12 * 60, 5.0, rooms, heating_relay=relay, store_relay=False)
+    return decide(CFG, snap, st)
+
+
+def short_cycling(acts) -> bool:
+    return any(a.code == "boiler.short_cycle" for a in acts.alerts)
+
+
+def toggle_externally(st, start: int, starts: int, minutes: int = 60):
+    """Something other than Radiate switches the relay on `starts` times in an hour."""
+    acts = None
+    period = minutes // starts
+    for m in range(start, start + minutes):
+        acts = step(st, m, warm, relay=(m - start) % period < 3)
+    return acts
+
+
+def test_more_than_four_starts_an_hour_raises_minimum_off_for_a_day():
+    st = EngineState.new(CFG)
+    acts = toggle_externally(st, 0, 4)
+    assert not short_cycling(acts) and st.short_cycle.extra_off_s == 0
+    acts = toggle_externally(st, 60, 6)
+    assert short_cycling(acts)
+    assert st.short_cycle.extra_off_s == 5 * 60
+    msg = next(a.message for a in acts.alerts if a.code == "boiler.short_cycle")
+    assert msg == "Boiler short-cycling: minimum off raised to 15 min"
+    # Still short-cycling an hour later: another 5 minutes.
+    acts = toggle_externally(st, 120, 6)
+    assert st.short_cycle.extra_off_s == 10 * 60
+    # Quiet for 24 hours: back to normal.
+    for m in range(180, 180 + 24 * 60 + 5, 5):
+        acts = step(st, m, warm, relay=False)
+    assert st.short_cycle.extra_off_s == 0 and not short_cycling(acts)
+
+
+def test_raised_minimum_off_is_capped_at_30_minutes():
+    st = EngineState.new(CFG)
+    for hour in range(1, 8):
+        toggle_externally(st, hour * 60, 6)
+    assert st.short_cycle.extra_off_s == 20 * 60  # 10 min default + 20 = 30 min
+
+
+def test_guard_uses_the_raised_minimum_off():
+    st = EngineState.new(CFG)
+    toggle_externally(st, 0, 6)
+    assert st.short_cycle.extra_off_s == 5 * 60
+    # Now the house needs heat. Radiate fires, burns, rests: rest must last 15 min.
+    relay = False
+    m = 60
+    while not relay:
+        relay = step(st, m, cold, relay).heating_relay
+        m += 1
+    while relay:
+        hot = {rid: (21.0, 22.0) for rid in ROOMS}
+        relay = step(st, m, lambda _m, h=hot: h, relay).heating_relay
+        m += 1
+    stopped = m
+    while not relay:
+        relay = step(st, m, cold, relay).heating_relay
+        m += 1
+    # Rest of 15 min, then the 90 s valve lead.
+    assert m - stopped >= 15 + 1
+
+
+def test_burns_cut_short_by_something_else_for_two_hours():
+    st = EngineState.new(CFG)
+    relay = False
+    raised_at = None
+    for m in range(0, 150):
+        cmd = step(st, m, cold, relay).heating_relay
+        # Radiate keeps calling, but the relay only stays in for 3 minutes in every 50.
+        relay = cmd and m % 50 < 3
+        if raised_at is None and st.short_cycle.extra_off_s > 0:
+            raised_at = m
+    # The relay drops out at minutes 4, 54 and 104: an hour apart only at the third.
+    assert raised_at == 104
