@@ -327,7 +327,7 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 |---|---|---|
 | `GET /api/v1/health` | | `{"ok": true}`; never needs a token |
 | `GET /api/v1/house` | | House ID, version, driver name, rooms (id, name, role, heat source, controllable) and boiler guard settings |
-| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler, store, per-room temperatures, opening limits, demand flags, learning gate, learned model and latest reason, 24 h relay timeline, alerts and driver telemetry |
+| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler, store, per-room temperatures, opening limits, demand flags (`calling`, `topup`, and `extend` for a burn extension rather than a heat sink), learning gate, learned model and latest reason, 24 h relay timeline, alerts and driver telemetry |
 | `GET /api/v1/decisions?since=T` | | Decision log entries (`at`, `code`, `message`, `room_id`) after `T`, in the server's monotonic seconds |
 | `POST /api/v1/rooms/{id}/setpoint` | `{"setpoint": 21.0}` | Override the schedule, 5 to 28 °C, until the room's next scheduled change. Optional `"duration_min": 90` holds it for that long instead (up to 7 days); `"until": "cleared"` holds it until `{"setpoint": null}` clears it. Saved across restarts; the response and each room's `override` in `state` give `until` and `expires_in_min` |
 | `POST /api/v1/rooms/{id}/fire` | `{"lit": true}` | Manual fire flag |
