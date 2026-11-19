@@ -270,8 +270,8 @@ The temperature Radiate is heating a room towards this tick: the setpoint, the n
 Code: `RoomState.target`, API `rooms[].target`.
 
 **Override**:
-A setpoint set through the API or the Home Assistant climate entity that replaces the schedule until cleared. Held in memory only.
-Code: `Runtime.overrides`, API `POST /api/v1/rooms/{id}/setpoint`.
+A setpoint set through the API, the web UI's setpoint control or the Home Assistant climate entity that replaces the schedule until the next scheduled change, for a set time, or until cleared. Saved across restarts. The UI calls it a hold ("Held until 22:30") and clearing it "Resume schedule".
+Code: `Runtime.overrides`, API `POST /api/v1/rooms/{id}/setpoint`, `rooms[].override` in `state`.
 
 **Calling**:
 A room Radiate wants heated: it started calling when its gap passed the hysteresis and stops when it reaches its target.
@@ -303,16 +303,21 @@ Code: `RoomState.topup`, `_topup_target`, `TOPUP_K`, Elastic `demand.topup`.
 
 **Burn extension**:
 A top-up for a room predicted to call soon after the burner stops, so one longer burn replaces two short ones. Only burn extensions may keep the burner running.
-Code: `RoomState.extend`, reason `boiler.topup`.
+Code: `RoomState.extend`, reason `boiler.topup`, API `rooms[].extend`, UI badge "Topping up".
+_Avoid_: heat sink for this case; the UI status line says "topping up Bedroom 2 to save a second burn soon".
 
 **Heat sink**:
 A room opened as somewhere for the burner's heat to go, because too few radiators are open. Also called a dump room in the spec.
-Code: `_ensure_sink`, reason `boiler.dump_room`, UI badge "Heat sink".
+Code: `_ensure_sink`, reason `boiler.dump_room`, API `rooms[].topup` with `extend` false, UI badge "Heat sink".
 _Avoid_: dump room in UI text.
 
 **Open-path guarantee**:
 Before and during a burn, open radiators plus the bypass equivalent must add up to at least the sink minimum (default 1.5 fully open radiators). If not, Radiate opens heat sinks.
 Code: `HouseConfig.sink_min`, `_ensure_sink`.
+
+**Stuck valve**:
+A radiator that stays cold for several burns in a row while its valve should be open and other radiators warm. Radiate alerts and stops trusting that valve until it warms again.
+Code: `ValveCheck` in `radiate.core.health`, reason `valve.stuck`, API `rooms[].valve` (`untrusted`, `misses`), UI line "Valve may be stuck".
 
 **Boiler guard**:
 The state machine that alone decides the heating relay and enforces minimum burn, minimum off and starts per hour, whatever demand asks for.
@@ -337,8 +342,16 @@ The shortest time the heating relay stays on once on. Default 8 minutes. Short o
 Code: `BoilerConfig.min_burn_s`, config key `boiler.min_burn_min`.
 
 **Minimum off**:
-The shortest time the heating relay stays off after a burn. Default 10 minutes.
-Code: `BoilerConfig.min_off_s`, config key `boiler.min_off_min`.
+The shortest time the heating relay stays off after a burn. Default 10 minutes, raised for a day while short-cycling is seen.
+Code: `BoilerConfig.min_off_s`, config key `boiler.min_off_min`, effective value in API `boiler.min_off_s`.
+
+**Short-cycling**:
+More than four relay starts in an hour, or burns cut short by an external stop for two hours running. Either points to another controller, a manual switch or a failing relay. Radiate alerts and lengthens minimum off for 24 hours.
+Code: `EngineState.short_cycle`, API `boiler.short_cycle` (`extra_off_min`, `ends_in_h`), UI tag "Short-cycling".
+
+**Balance score**:
+How evenly rooms that call together reach setpoint, scored per day from 0 to 100: 100 × (1 − median arrival spread / 120 min). The arrival spread is the time between the first and last room reaching setpoint after a start with two or more calling rooms.
+Code: `balance_score` in `radiate.core.accounting`, API `accounting.{today,yesterday}.balance`, UI "Balance, yesterday".
 
 **Starts per hour**:
 The most relay starts allowed in any 60 minutes. Default 3.
@@ -488,7 +501,7 @@ For the lead. Each item names the conflict and a suggested resolution.
 8. **Arrival lag measurement.** Spec 4.1: time to `dT_trv/dt > 0.05 K/min`. Code: time to a 0.6 K rise in `T_trv` within 40 minutes, with an 8-minute default before any sample.
 9. **Lockshield cap computation.** Spec 4.4: 90th percentile of allocated openings over the last 7 days. Code: 90th percentile of a decaying histogram fed only while firing, 60 % until enough data. The code comment says the decay is "roughly a 3 day half-life", but 0.9995 per minute-sample halves in about 1,400 samples, roughly 23 hours of firing.
 10. **Fire detection thresholds.** Spec 4.6: residual above +1.5 K/h for 10 minutes, or a 0.8 K/h rise with the valve closed. Code: residual above 2.0 K/h with confidence at least 0.6, or a 0.8 K/h rise after the radiator has been off for 30 minutes. `docs/simulation.md` explains the change; spec 4.6 has not caught up.
-11. **Top-up covers two things.** `RoomState.topup` is set for both burn extensions and heat sinks, `extend` tells them apart, and the UI labels every top-up "Heat sink". Spec 5.3 and 5.4 give both a target of setpoint + 0.3 K; the code uses `max(target + 0.3, min(temperature + 0.5, target + 1.0))`.
+11. **Top-up covers two things.** `RoomState.topup` is set for both burn extensions and heat sinks, and `extend` tells them apart. The API reports both flags, and the UI labels a burn extension "Topping up" and a heat sink "Heat sink". Spec 5.3 and 5.4 give both a target of setpoint + 0.3 K; the code uses `max(target + 0.3, min(temperature + 0.5, target + 1.0))`.
 12. **Pooled demand `D`.** Spec 5.3 defines a gain-weighted pooled demand. The code never computes it; it fires on the largest gap, predicted burn, preheating or frost.
 13. **Target, setpoint and TRV setpoint.** The spec uses `T_set` for everything. The code has the schedule or override setpoint, the effective target, and the TRV setpoint (target plus the call bias, rounded to 0.5 °C). The call bias is not in the spec.
 14. **Calling.** Used both for a TRV whose thermostat is open and for a room in Radiate's demand latch. Suggest "calling" for Radiate's latch only.
