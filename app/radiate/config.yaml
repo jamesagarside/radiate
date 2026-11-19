@@ -18,13 +18,17 @@ discovery:
   - radiate
 services:
   - mqtt:want
+map:
+  - addon_config:rw
 options:
   demo: true
+  config_file: radiate.yaml
   token: ""
   elastic_url: ""
   elastic_api_key: ""
 schema:
   demo: bool
+  config_file: str?
   token: password?
   elastic_url: url?
   elastic_api_key: password?

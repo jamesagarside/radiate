@@ -232,7 +232,7 @@ class ShellyBoiler:
         except Exception as err:
             self.reachable = False
             self.errors += 1
-            LOG.warning("Shelly %s unreachable: %s", self.cfg.host, err)
+            LOG.warning("Shelly %s unreachable: %r", self.cfg.host, err)
             return
         self.heating = _switch(h)
         self.store = _switch(s)

@@ -4,41 +4,61 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import os
 import sys
 
 
 def _serve(args: argparse.Namespace) -> None:
+    import logging
+
     from aiohttp import web
 
     from radiate.server.app import create_app
-    from radiate.server.runtime import Runtime
-    from radiate.sim.reference import house_config
 
-    if not args.demo:
-        sys.exit(
-            "Only --demo is available in this pre-alpha. Device drivers (Zigbee2MQTT, Shelly) "
-            "are specified in docs/spec.md and land next."
-        )
-    from radiate.server.demo import DemoDriver
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    if args.demo == bool(args.config):
+        sys.exit("Use exactly one of --demo or --config <file>.")
+    site = _load(args.config) if args.config else None
+    if site is not None:
+        import dataclasses
+
+        if args.dry_run:
+            site = dataclasses.replace(site, dry_run=True)
+        if args.data_dir:
+            site = dataclasses.replace(site, data_dir=args.data_dir)
 
     async def main() -> None:
-        runtime = Runtime(house_config(), DemoDriver())
-        session = None
-        if os.environ.get("RADIATE_ELASTIC_URL"):
-            import aiohttp
+        import aiohttp
 
+        session = aiohttp.ClientSession()
+        cleanup = []
+        if site is None:
+            from radiate.server.demo import DemoDriver
+            from radiate.server.runtime import Runtime
+            from radiate.sim.reference import house_config
+
+            runtime = Runtime(house_config(), DemoDriver())
+            queue = None
+            interval = 60.0 / args.speed  # one simulated minute per 1/speed real minutes
+            banner = f"Radiate demo ({args.speed:g}x)"
+        else:
+            runtime, queue, cleanup = await _start_live(site, session)
+            interval = 60.0
+            banner = f"Radiate {'DRY RUN' if site.dry_run else 'LIVE'}"
+        if os.environ.get("RADIATE_ELASTIC_URL"):
             from radiate.export.elastic import ElasticExporter
 
-            session = aiohttp.ClientSession()
             runtime.exporter = ElasticExporter(
                 os.environ["RADIATE_ELASTIC_URL"],
                 os.environ.get("RADIATE_ELASTIC_API_KEY", ""),
                 runtime.house_id,
+                queue=queue,
             )
             runtime.exporter.start(session)
-        # One simulated minute per real `1/speed` minutes.
-        runtime.start(interval_s=60.0 / args.speed)
+        runtime.start(interval_s=interval)
         app = create_app(
             runtime,
             token=os.environ.get("RADIATE_TOKEN", ""),
@@ -47,10 +67,90 @@ def _serve(args: argparse.Namespace) -> None:
         runner = web.AppRunner(app)
         await runner.setup()
         await web.TCPSite(runner, args.host, args.port).start()
-        print(f"Radiate demo on http://{args.host}:{args.port} ({args.speed:g}x)")
-        await asyncio.Event().wait()
+        print(f"{banner} on http://{args.host}:{args.port}")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await runtime.stop()
+            if runtime.exporter is not None:
+                await runtime.exporter.stop()
+            for fn in reversed(cleanup):
+                await fn()
+            await runner.cleanup()
+            await session.close()
 
-    asyncio.run(main())
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(main())
+
+
+async def _start_live(site, session):
+    """Wire the live driver: SQLite store, MQTT, Shelly, then restore state."""
+    import logging
+    from pathlib import Path
+
+    from radiate.drivers.live import LiveDriver
+    from radiate.drivers.mqtt import MqttTransport
+    from radiate.drivers.shelly import ShellyBoiler, ShellyRpc, watchdog_code
+    from radiate.export.elastic import MAX_BUFFER
+    from radiate.server.runtime import Runtime
+    from radiate.server.store import SqliteQueue, Store
+
+    log = logging.getLogger("radiate")
+    for note in site.notes:
+        log.info("config: %s", note)
+    store = Store(Path(site.data_dir) / "radiate.db")
+    boiler = None
+    if site.shelly is not None:
+        rpc = ShellyRpc(site.shelly.host, site.shelly.password, session)
+        boiler = ShellyBoiler(site.shelly, rpc, dry_run=site.dry_run)
+        try:
+            status = await boiler.watchdog_status(watchdog_code())
+            if not status.ok:
+                log.warning(
+                    "Shelly watchdog not installed or not current (%s). Install it with "
+                    "'radiate shelly install-watchdog' before running live.",
+                    status,
+                )
+        except Exception as err:
+            log.warning("could not check the Shelly watchdog: %s", err)
+
+    transport: MqttTransport | None = None
+
+    async def publish(topic, payload):
+        return await transport.publish(topic, payload) if transport else False
+
+    driver = LiveDriver(
+        site,
+        publish,
+        boiler,
+        connected=lambda: transport is not None and transport.connected,
+    )
+
+    def on_connect() -> None:
+        asyncio.get_running_loop().create_task(driver.request_state())
+
+    transport = MqttTransport(
+        site.mqtt, driver.devices.subscriptions(), driver.handle_message, on_connect
+    )
+    transport.start()
+    # Give MQTT a moment to connect and the TRVs time to answer their state reads, so
+    # the first decision is not made blind.
+    for _ in range(30):
+        if transport.connected:
+            break
+        await asyncio.sleep(1)
+    await asyncio.sleep(10 if transport.connected else 0)
+
+    runtime = Runtime(site.house, driver, store=store)
+    for problem in runtime.restore():
+        log.warning("restore: %s", problem)
+
+    async def close() -> None:
+        await driver.drain()
+        await transport.stop()
+        store.close()
+
+    return runtime, SqliteQueue(store, MAX_BUFFER), [close]
 
 
 def _sim(args: argparse.Namespace) -> None:
@@ -138,6 +238,8 @@ def main(argv: list[str] | None = None) -> None:
     sub = p.add_subparsers(required=True)
     s = sub.add_parser("serve", help="run the server and web UI")
     s.add_argument("--demo", action="store_true", help="drive the simulated reference house")
+    s.add_argument("--config", help="house configuration file (real devices)")
+    s.add_argument("--dry-run", action="store_true", help="force dry run whatever the file says")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8099)
     s.add_argument("--speed", type=float, default=60.0, help="demo speed-up factor")
