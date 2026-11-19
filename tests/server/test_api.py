@@ -63,6 +63,13 @@ async def test_fire_switch_reaches_the_core(client):
     await client.post("/api/v1/rooms/lounge/fire", json={"lit": True}, headers=H)
     await client.rt.step()
     assert client.rt.state.rooms["lounge"].dist.fire
+    state = await (await client.get("/api/v1/state", headers=H)).json()
+    lounge = next(r for r in state["rooms"] if r["id"] == "lounge")
+    assert lounge["fire_switch"] is True
+    await client.post("/api/v1/rooms/lounge/fire", json={"lit": False}, headers=H)
+    state = await (await client.get("/api/v1/state", headers=H)).json()
+    lounge = next(r for r in state["rooms"] if r["id"] == "lounge")
+    assert lounge["fire_switch"] is False
 
 
 async def test_mode_and_boost(client):
@@ -94,6 +101,11 @@ async def test_alerts_are_logged_once_when_they_appear():
         await rt.step()
     assert any(a.code == "safe_mode.no_trvs" for a in rt.last_actions.alerts)
     assert [d.code for d in rt.decisions].count("safe_mode.no_trvs") == 1
+    state = rt.describe()
+    assert {"code": "safe_mode.no_trvs", "message": state["alerts"][0], "room_id": None} in state[
+        "alert_details"
+    ]
+    assert len(state["alert_details"]) == len(state["alerts"])
 
 
 async def test_ingress_header_alone_does_not_bypass_token(client):
