@@ -7,6 +7,7 @@ middle of a burn therefore still honours minimum burn, and a restart during REST
 still honours minimum off.
 
 Kept: learned room models, arrival lags, lockshield histograms, disturbance hold-offs,
+stuck-valve verdicts,
 the boiler guard, the short-cycle adaptation and the day's oil and runtime totals with
 the last 7 days' summaries. Dropped: short-lived signals (reading
 windows, radiator drive, demand latches, the no-heat check), which rebuild within a
@@ -63,6 +64,7 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
                 "spike_kind": d.spike_kind,
                 **{k: _age(getattr(d, k), now) for k in _DIST_TIMES},
             },
+            "valve": {"misses": rs.valve.misses, "untrusted": rs.valve.untrusted},
         }
     g = st.boiler
     sc = st.short_cycle
@@ -223,6 +225,12 @@ def load_state(
                 if t is not None:
                     setattr(d, k, t)
             rs.dist = d
+        valve = raw.get("valve")
+        if isinstance(valve, dict):
+            misses = valve.get("misses")
+            if isinstance(misses, int) and not isinstance(misses, bool) and misses >= 0:
+                rs.valve.misses = misses
+            rs.valve.untrusted = valve.get("untrusted") is True
 
     g = data.get("boiler")
     if isinstance(g, dict):

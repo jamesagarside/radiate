@@ -100,6 +100,14 @@ def test_out_of_oil_is_detected_and_the_boiler_keeps_calling():
     assert all(rs.learning_gate == "no_heat" for rs in r.engine.rooms.values())
 
 
+def test_seized_valve_is_flagged():
+    r = run("radiate", 5, 2, 1, seized_valves=frozenset({"bedroom_2"}))
+    assert r.engine.rooms["bedroom_2"].valve.untrusted
+    assert [rid for rid, rs in r.engine.rooms.items() if rs.valve.untrusted] == ["bedroom_2"]
+    assert "valve.stuck" in r.alert_minutes
+    assert "boiler.no_heat" not in r.first_alert_s
+
+
 def test_crash_falls_back_safely(runs):
     # Radiate dies at midday on day 2 (setback). TRVs follow their mirrored on-device
     # schedules and the Shelly watchdog runs the boiler: no worse than smart TRVs.

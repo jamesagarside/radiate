@@ -11,6 +11,9 @@
   Radiate's own guard allows at most `max_starts_per_hour`, so this catches another
   controller, a manual switch or a relay dropping out. Minimum off is raised by
   5 min (to at most 30 min) for 24 h, at most once an hour.
+- Stuck valve: a room called for heat with its valve open and the TRV heating for
+  40 min of flow, other radiators warmed, but its own TRV did not, in 3 burns in a
+  row. The room is flagged untrusted (learning paused) until its radiator warms.
 """
 
 from __future__ import annotations
@@ -32,6 +35,9 @@ SHORT_CYCLE_STEP_S = 5 * 60
 SHORT_CYCLE_MIN_OFF_CAP_S = 30 * 60
 SHORT_CYCLE_HOLD_S = 24 * 3600
 HOUR = 3600.0
+
+STUCK_AFTER_S = 40 * 60  # flow with the valve open and calling, per burn
+STUCK_BURNS = 3
 
 
 def _rise(points: list[tuple[float, float]]) -> float:
@@ -154,3 +160,42 @@ class ShortCycle:
     def message(self, base_off_s: float) -> str:
         minutes = round(self.min_off_s(base_off_s) / 60)
         return f"Boiler short-cycling: minimum off raised to {minutes} min"
+
+
+@dataclass(slots=True)
+class ValveCheck:
+    """Per room: does its radiator warm when its valve should be open? One verdict a burn."""
+
+    misses: int = 0  # burns in a row with no warming
+    untrusted: bool = False
+    eligible_s: float = 0.0  # this burn: flowing, calling, valve open, TRV heating
+    low: float | None = None  # this burn: lowest TRV reading relative to the room
+    rose: bool = False  # this burn: the radiator warmed
+    judged: bool = False  # this burn's verdict is in
+
+    def observe(self, dt: float, *, flowing: bool, eligible: bool, offset: float | None) -> None:
+        if not flowing:
+            self.eligible_s, self.low, self.rose, self.judged = 0.0, None, False, False
+            return
+        if offset is not None:
+            self.low = offset if self.low is None else min(self.low, offset)
+            if not self.rose and offset - self.low >= TRV_RISE_K:
+                self.rose = True
+                self.misses, self.untrusted, self.judged = 0, False, True
+        if eligible:
+            self.eligible_s += dt
+
+    def judge(self, house_heat: bool) -> bool:
+        """Count a miss once this burn has been long enough. True when newly untrusted.
+
+        Only when another radiator warmed this burn: otherwise no heat is arriving at
+        all, which is the no-heat check's job.
+        """
+        if self.judged or self.rose or self.eligible_s < STUCK_AFTER_S or not house_heat:
+            return False
+        self.judged = True
+        self.misses += 1
+        if self.misses >= STUCK_BURNS and not self.untrusted:
+            self.untrusted = True
+            return True
+        return False

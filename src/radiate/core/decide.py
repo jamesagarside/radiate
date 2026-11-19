@@ -17,7 +17,7 @@ from .allocator import Allocation, AllocRoom, allocate
 from .boiler import BoilerGuard
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator, local_slope
-from .health import NO_HEAT_MESSAGE, ROOM_RISE_KPH, NoHeat, ShortCycle
+from .health import MAX_TICK_S, NO_HEAT_MESSAGE, ROOM_RISE_KPH, NoHeat, ShortCycle, ValveCheck
 from .types import (
     Actions,
     BoilerState,
@@ -78,6 +78,7 @@ class RoomState:
     closed_since: float | None = None  # radiator receiving no heat since
     slope: float | None = None
     residual: float | None = None
+    valve: ValveCheck = field(default_factory=ValveCheck)  # stuck-valve check
 
     @property
     def arrival_lag_s(self) -> float:
@@ -239,14 +240,25 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         u = flow_fraction(opening) if heating and avail else 0.0
         # "Could this radiator be getting heat?" ignores the learned arrival lag: a
         # radiator can warm the room before Radiate's lag estimate says it should.
-        if inp.trv_available and heating and opening > 0:
-            any_open = True
+        if inp.trv_available and heating and opening > 0 and not rs.valve.untrusted:
+            any_open = True  # a valve known to be stuck shut does not count
         if flowing and heating and opening > 0:
             rs.closed_since = None
         elif rs.closed_since is None:
             rs.closed_since = now
         drive_target = st.supply * u
         rs.drive += (drive_target - rs.drive) * (1.0 - math.exp(-dt / RADIATOR_TAU_S))
+        # Stuck valve (spec 7): calling, valve open, TRV heating, flow, but no warming.
+        rs.valve.observe(
+            min(dt, MAX_TICK_S),
+            flowing=flowing,
+            eligible=rs.calling
+            and inp.trv_available
+            and inp.trv_heating is True
+            and opening >= cfg.opening_floor
+            and not rs.dist.fire,
+            offset=trv_now.get(rc.id),
+        )
 
         delta_out = (temp - out) if (temp is not None and out is not None) else None
         rs.residual = (
@@ -291,6 +303,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         if gate is None:
             if st.no_heat.active:
                 gate = "no_heat"  # the model would learn that radiators do nothing
+            elif rs.valve.untrusted:
+                gate = "valve_untrusted"
             elif temp is None or rs.slope is None or delta_out is None:
                 gate = "no_data"
             elif not inp.trv_available:
@@ -336,6 +350,17 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     )
     if st.no_heat.active:
         alerts.append(Reason("boiler.no_heat", NO_HEAT_MESSAGE))
+    # Judge valves only when heat is reaching other radiators.
+    house_heat = not st.no_heat.active and any(rs.valve.rose for rs in st.rooms.values())
+    for rc in cfg.rooms:
+        rs = st.rooms.get(rc.id)
+        if rs is None:
+            continue
+        rs.valve.judge(house_heat)
+        if rs.valve.untrusted:
+            alerts.append(
+                Reason("valve.stuck", f"{rc.name} radiator not warming: check the valve", rc.id)
+            )
 
     # --- 5: boiler demand, pooling, open path ------------------------------------------
     guard = st.boiler

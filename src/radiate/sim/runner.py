@@ -123,11 +123,14 @@ def run(
     pump_qmax: float | None = None,
     optimum_start: bool = True,
     oil_out_at_s: float | None = None,
+    seized_valves: frozenset[str] = frozenset(),
 ) -> Result:
     d = disturbances or Disturbances()
     cfg = cfg or house_config()
     house = build_house(seed)
     house.outdoor_mean = outdoor_mean
+    for rid in seized_valves:
+        house.rooms[rid].radiator.pipe_k = 0.0  # pin seized shut: the head moves, no flow
     if pump_qmax is not None:
         house.pump_qmax = pump_qmax
     st = engine or EngineState.new(cfg)

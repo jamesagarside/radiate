@@ -306,7 +306,7 @@ Order inside `decide`:
 | Home Assistant restarts or is down | | No effect on control (MQTT drivers); the HA integration shows unavailable |
 | Internet down | | No effect on control; cloud telemetry buffered on disk (up to 7 days) |
 | Boiler lockout or out of oil | heating relay on for 30 min with at least one valve open (store recovery and time with every valve shut do not count), and no sign of heat: no TRV reading rising 0.6 K above its room, no ordinary calling room warming by 0.3 K/h, no 0.3 K stairs rise | Alert "No heat: check oil and boiler lockout"; keep calling (the boiler may recover) but stop learning. Clears when heat is seen again |
-| Valve stuck or calibration lost | commanded open, room calling, boiler firing, no `T_trv` rise for 3 burns; or rise with valve closed | Alert; offer recalibration; room flagged untrusted |
+| Valve stuck or calibration lost | commanded open, room calling, boiler firing, no `T_trv` rise for 3 burns; or rise with valve closed. As built: 40 min of flow per burn with the room calling, opening at least the floor and the TRV reporting heat, while another radiator warmed; the "rise with valve closed" case is not checked yet | Alert; offer recalibration; room flagged untrusted (learning paused, not counted as an open valve) until its radiator warms again. No recalibration service yet |
 | Short-cycling | > 4 starts per hour, or external stops (section 5.6) | Raise minimum off by 5 min (up to 30) for 24 h, at most once an hour; alert. Kept across restarts |
 | Overheating | room > setpoint + 2 K with valve closed | Flag episodic heat (section 4.6); if a valve, not external heat, is to blame, close it and alert |
 | Frost | any room < 7 °C | Frost override (section 5.2) |

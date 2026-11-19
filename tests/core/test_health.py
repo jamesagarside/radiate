@@ -227,3 +227,70 @@ def test_burns_cut_short_by_something_else_for_two_hours():
             raised_at = m
     # The relay drops out at minutes 4, 54 and 104: an hour apart only at the third.
     assert raised_at == 104
+
+
+# --- stuck valves -----------------------------------------------------------------------
+
+CYCLE = 90  # minutes: 60 calling for heat, then 30 satisfied (burn ends, rest)
+
+
+def burns(stuck: set[str], healthy_from: int = 10**6) -> Temps:
+    """Repeated burns. Rooms in `stuck` never see their TRV warm (until `healthy_from`)."""
+
+    def temps(m: int) -> dict[str, tuple[float, float]]:
+        c = m % CYCLE
+        if c >= 60:
+            return warm(m)
+        out = {}
+        for rid in ROOMS:
+            rising = rid not in stuck or m >= healthy_from
+            trv = 17.5 + (max(0, c - 8) * 0.1 if rising else 0.0)
+            out[rid] = (17.0, trv)
+        return out
+
+    return temps
+
+
+def drive_burns(temps: Temps, cycles: float, start: int = 0, st=None):
+    st = st or EngineState.new(CFG)
+    relay = False
+    acts = None
+    for m in range(start, start + int(cycles * CYCLE)):
+        acts = step(st, m, temps, relay)
+        relay = acts.heating_relay
+    return st, acts
+
+
+def stuck_alerts(acts) -> set[str]:
+    return {a.room_id for a in acts.alerts if a.code == "valve.stuck"}
+
+
+def test_valve_that_never_warms_over_three_burns_is_flagged():
+    temps = burns({"bed"})
+    st, acts = drive_burns(temps, 2)
+    assert stuck_alerts(acts) == set()
+    assert st.rooms["bed"].valve.misses == 2
+    st, acts = drive_burns(temps, 1, start=2 * CYCLE, st=st)
+    assert stuck_alerts(acts) == {"bed"}
+    msg = next(a.message for a in acts.alerts if a.code == "valve.stuck")
+    assert msg == "Bedroom radiator not warming: check the valve"
+    assert st.rooms["bed"].valve.untrusted and not st.rooms["dining"].valve.untrusted
+    # Untrusted: learning paused for that room only.
+    st, acts = drive_burns(temps, 0.5, start=3 * CYCLE, st=st)
+    assert st.rooms["bed"].learning_gate == "valve_untrusted"
+    assert st.rooms["dining"].learning_gate != "valve_untrusted"
+
+
+def test_flag_clears_when_the_radiator_warms_again():
+    st, _ = drive_burns(burns({"bed"}), 3)
+    assert st.rooms["bed"].valve.untrusted
+    st, acts = drive_burns(burns({"bed"}, healthy_from=0), 1, start=3 * CYCLE, st=st)
+    assert not st.rooms["bed"].valve.untrusted and st.rooms["bed"].valve.misses == 0
+    assert stuck_alerts(acts) == set()
+
+
+def test_no_stuck_valve_verdict_when_no_radiator_warms():
+    # Nothing warms anywhere: that is the no-heat check's job, not a stuck valve.
+    st, acts = drive_burns(burns(set(ROOMS)), 3)
+    assert all(rs.valve.misses == 0 for rs in st.rooms.values())
+    assert stuck_alerts(acts) == set()

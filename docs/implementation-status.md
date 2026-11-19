@@ -81,7 +81,7 @@ Top gaps, most important first:
 | 4.6 Gate: store recovery | partial | `core/decide.py` | Time-based only; no "`T_trv` rising again" check |
 | 4.6 Gate: settled after setpoint change | done | `core/decide.py` | |
 | 4.6 Gate: shower | done | `core/disturbance.py` | |
-| 4.6 Gate: valve trusted (no reconciler failure) | missing | | Writer failures do not reach the core |
+| 4.6 Gate: valve trusted (no reconciler failure) | partial | `core/decide.py` | A valve flagged stuck pauses learning (`valve_untrusted`); reconciler failures still do not reach the core |
 | 4.6 Gate: not passive | done | `core/decide.py` | Passive rooms have no engine state |
 | 4.6 Open fire detection, closing and 4 h hold-off | done | `core/disturbance.py` | Residual threshold 2.0 K/h with confidence ≥ 0.6, not 1.5 K/h (tuned in simulation) |
 | 4.6 Range cooker: free `d`, cooking spikes excluded | done | `core/estimator.py`, `core/disturbance.py` | |
@@ -138,7 +138,7 @@ Top gaps, most important first:
 | Home Assistant down | done | | Control does not depend on HA |
 | Internet down, telemetry buffered 7 days | done | `server/store.py` `SqliteQueue` | |
 | Boiler lockout or out of oil | done | `core/health.py` `NoHeat`, `core/decide.py` | Simulated empty tank caught within 3 h; no false alarms over 3 seeds and the cold scenario. Thresholds are simulator-tuned: check on the real house |
-| Valve stuck or calibration lost | missing | | |
+| Valve stuck or calibration lost | partial | `core/health.py` `ValveCheck`, `core/decide.py` | "No warming in 3 burns" done and saved across restarts; simulated seized valve flagged within a day, no false flags over 3 seeds and the cold scenario. "Rise with valve closed" and the recalibration offer missing |
 | Short-cycling: raise minimum off for 24 h | done | `core/health.py`, `core/decide.py`, `core/persist.py` | Effective minimum off and the adaptation in `describe()` (`boiler.min_off_s`, `boiler.short_cycle`) |
 | Overheating with the valve closed | partial | `core/disturbance.py` | Gates learning (`unexplained_heat`); no alert, no valve check |
 | Frost | done | `core/decide.py` | |
@@ -200,7 +200,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Feature | Status | Where | Note |
 |---|---|---|---|
 | Pin closing = 100 minus opening | done (deliberately not) | `drivers/z2m.py` | Spec 4.5 chose governed mode instead; closing degree is 100 |
-| Valve feedback plausibility | missing | | Same work as stuck-valve detection |
+| Valve feedback plausibility | partial | `core/health.py` `ValveCheck` | Command against TRV temperature response, see stuck valves |
 | Manual recalibration service | missing | | |
 | External temperature keepalive under 2 h | done | `drivers/z2m.py` | 25 min default |
 | Seed write-only entities at start | done | `drivers/z2m.py` | Writers start empty, so the first tick sends everything |

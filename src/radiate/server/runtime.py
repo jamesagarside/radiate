@@ -356,6 +356,8 @@ class Runtime:
                         "lockshield": rs.lockshield,
                     },
                     reason=reasons_by_room.get(rc.id),
+                    # Stuck-valve check (spec 7): burns in a row with no warming.
+                    valve={"untrusted": rs.valve.untrusted, "misses": rs.valve.misses},
                 )
             rooms.append(item)
 

@@ -117,6 +117,21 @@ def test_accounting_survives_a_restart():
     assert r.relay is None and r.arrival is None
 
 
+def test_stuck_valve_verdicts_survive_a_restart():
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    st.rooms["bedroom_2"].valve.misses = 3
+    st.rooms["bedroom_2"].valve.untrusted = True
+    st.rooms["dining"].valve.misses = 1
+    data = json.loads(json.dumps(dump_state(st, 100.0)))
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == []
+    assert restored.rooms["bedroom_2"].valve.untrusted
+    assert restored.rooms["bedroom_2"].valve.misses == 3
+    assert restored.rooms["dining"].valve.misses == 1
+    assert not restored.rooms["bedroom_1"].valve.untrusted
+
+
 def test_state_saved_before_health_data_still_loads():
     cfg, st = learned()
     data = dump_state(st, st.last_now)
