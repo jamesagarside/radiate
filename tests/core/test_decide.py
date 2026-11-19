@@ -140,3 +140,70 @@ def test_warm_up_before_learned_lag_is_not_a_fire():
         acts = decide(CFG, s, st)
         relay = acts.heating_relay
     assert not st.rooms["lounge"].dist.fire
+
+
+def test_internal_sensor_room_setpoint_is_in_the_trv_frame():
+    # The toilet TRV compares its setpoint with its own reading (room - bias), so a
+    # call must send target - bias plus the call lead, or the valve stays shut.
+    st = EngineState.new(CFG)
+    temps = {"bed": 17.0, "lounge": 17.0, "loo": 15.0, "stairs": 17.0}
+    acts = drive(st, 5, temps)
+    assert acts.boiler_state is BoilerState.FIRING and st.rooms["loo"].calling
+    v = acts.valves["loo"]
+    assert v.setpoint == 22.5  # 20 + 1.5 + 0.6, rounded up to the TRV's 0.5 K step
+    trv_reading = 15.0 + 1.5
+    assert trv_reading <= v.setpoint - 0.5  # below the TRV's hysteresis band: it opens
+
+
+def test_internal_sensor_room_setpoint_when_not_calling():
+    st = EngineState.new(CFG)
+    acts = drive(st, 3, {"bed": 20.5, "lounge": 21.0, "loo": 20.5, "stairs": 20.0})
+    assert not st.rooms["loo"].calling
+    assert acts.valves["loo"].setpoint == 21.5  # 20 - (-1.5)
+
+
+def test_trv_setpoint_is_clamped_to_the_trv_range():
+    st = EngineState.new(CFG)
+    temps = {"bed": 35.0, "lounge": 35.0, "loo": 35.0, "stairs": 35.0}
+    acts = drive(st, 3, temps, setpoint=34.5)
+    assert acts.valves["loo"].setpoint == 35.0  # 34.5 + 1.5, clamped
+
+
+def test_dump_room_setpoint_clears_the_trv_hysteresis():
+    # The bedroom calls alone, which is not enough sink, so the lounge (warm, but the
+    # coldest non-calling room) is opened as a dump room. Its TRV must be sent at
+    # least room temperature + 1 K, rounded up, or its own hysteresis keeps it shut.
+    st = EngineState.new(CFG)
+    temps = {"bed": 17.0, "lounge": 20.8, "loo": 20.9, "stairs": 17.0}
+    acts = drive(st, 5, temps)
+    assert acts.boiler_state is BoilerState.FIRING
+    assert st.rooms["lounge"].topup and not st.rooms["lounge"].calling
+    v = acts.valves["lounge"]
+    assert v.setpoint == 22.0  # 20.8 + 1, rounded up to 0.5 K
+    assert v.external_temperature <= v.setpoint - 1.0
+
+
+def test_internal_sensor_dump_room_floor_uses_the_trv_reading():
+    # As a dump room, the toilet's floor is its own TRV reading + 1 K.
+    cfg = HouseConfig(rooms=(RoomConfig("bed", "Bedroom"), CFG.room("loo")))
+    st = EngineState.new(cfg)
+    relay = False
+    for m in range(5):
+        rooms = {
+            "bed": RoomInput(temperature=17.0, trv_temperature=17.5, setpoint=20.0),
+            "loo": RoomInput(trv_temperature=22.8, setpoint=20.0),  # judged 21.3
+        }
+        acts = decide(cfg, Snapshot(m * 60.0, 720, 5.0, rooms, relay, False), st)
+        relay = acts.heating_relay
+    assert st.rooms["loo"].topup
+    assert acts.valves["loo"].setpoint == 24.0  # 22.8 + 1, rounded up
+
+
+def test_internal_sensor_room_confidence_is_capped():
+    # Spec 4.6: the toilet learns from a TRV beside its radiator, so its model is
+    # never trusted as much as a room with its own sensor.
+    st = EngineState.new(CFG)
+    for rs in st.rooms.values():
+        rs.est.p[0][0] = 0.0
+    assert st.rooms["loo"].est.confidence == 0.5
+    assert st.rooms["bed"].est.confidence == 1.0

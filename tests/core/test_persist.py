@@ -115,6 +115,29 @@ def test_accounting_survives_a_restart():
     assert r.today.below_min == led.today.below_min
     assert [7.0 - t for t in r.today.starts] == [now - t + 120.0 for t in led.today.starts]
     assert r.relay is None and r.arrival is None
+    assert r.today.unseen_s == led.today.unseen_s
+
+
+def test_a_long_restart_makes_the_day_partial():
+    # Partial days (spec 5.6): the time Radiate was down counts as unseen. The last
+    # tick is saved as an age, so the gap is known after the restart.
+    from radiate.core.accounting import Ledger
+
+    def tick(st, now, minute):
+        st.ledger.update(
+            now, 0, relay_on=False, firing=False, calling=set(), below={}, minute=minute
+        )
+
+    cfg = house_config()
+    for down_s, partial in ((120.0, False), (3 * 3600.0, True)):
+        st = EngineState.new(cfg)
+        st.ledger = Ledger()
+        for m in range(600):
+            tick(st, 1000.0 + m * 60, m)
+        saved = json.loads(json.dumps(dump_state(st, st.ledger.last_t)))
+        restored, _ = load_state(cfg, saved, now=5.0, elapsed_s=down_s)
+        tick(restored, 5.0, 600 + round(down_s / 60))
+        assert restored.ledger.summary(None)["partial"] is partial
 
 
 def test_stuck_valve_verdicts_survive_a_restart():
@@ -149,3 +172,10 @@ def test_wrong_version_starts_fresh():
     assert problems and st.boiler.state is BoilerState.IDLE
     st, problems = load_state(cfg, None, 0.0)
     assert problems
+
+
+def test_internal_sensor_room_keeps_its_confidence_cap():
+    cfg, st = learned()
+    restored, _ = load_state(cfg, dump_state(st, st.last_now), 0.0)
+    restored.rooms["toilet"].est.p[0][0] = 0.0
+    assert restored.rooms["toilet"].est.confidence == 0.5

@@ -113,6 +113,9 @@ def daily_doc(summary: dict, house_id: str, ts: datetime) -> dict:
     day = _calendar_day(summary.get("day"))
     if day is not None:
         doc["radiate"]["day"] = day
+    # Radiate did not see the whole day (it started after midnight, or was down for a
+    # while): totals cover what it saw and the balance score is null.
+    doc["radiate"]["partial_day"] = bool(summary.get("partial", False))
     doc["boiler"] = {
         "starts": summary["starts"],
         "max_starts_1h": summary["max_starts_in_hour"],
@@ -247,6 +250,7 @@ def index_templates() -> dict[str, dict]:
                             {
                                 "radiate.house.id": {"type": "keyword"},
                                 "radiate.day": {"type": "date", "format": "yyyy-MM-dd"},
+                                "radiate.partial_day": {"type": "boolean"},
                                 "boiler.starts": {"type": "short"},
                                 "boiler.max_starts_1h": {"type": "short"},
                                 "boiler.burner_hours": {"type": "float"},
