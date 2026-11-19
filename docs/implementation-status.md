@@ -10,11 +10,11 @@ Last audit: November 2026, against `main` at `c4657fe`.
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 97 |
+| Done | 82 | 98 |
 | Partial | 26 | 26 |
 | Missing | 37 | 25 |
 
-Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score.
+Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score.
 
 Top remaining gaps, most important first:
 
@@ -114,6 +114,7 @@ Top remaining gaps, most important first:
 | 5.6 Short-cycle alert | done | `core/health.py` `ShortCycle` | Counts observed relay starts; physical burner starts inside a long call need a firing signal (open question 1) |
 | 5.7 Shelly watchdog script | done | `shelly/radiate-watchdog.js` | |
 | 5.7 Heartbeat every tick, fallback windows in KVS | done | `drivers/shelly.py` | |
+| 5.7 Hand-back: the guard adopts the relay as found | done | `core/boiler.py` `adopt`, `core/decide.py`, `core/persist.py`, `drivers/live.py` | A burn Radiate did not start gets a full minimum burn from when it is seen; a stop seen, or a relay unseen for 5 min (downtime, Shelly unreachable, first start), restarts minimum off. In safe mode Radiate follows the watchdog's burns and leaves them alone. The Shelly does not report when the relay changed (`timer_started_at` is the last `toggle_after` re-arm), so `Snapshot.heating_relay_age_s` is not filled yet. Simulated crash and Zigbee outages with Radiate back mid-burn and mid-rest: no guard violations over 3 seeds (`tests/sim/test_watchdog_handback.py`) |
 | 5.7 Hard auto-off on channel 1 | done | `drivers/shelly.py` `toggle_after` | |
 | 5.7 `radiate shelly install-watchdog --yes` | done | `cli.py` | |
 
@@ -132,9 +133,9 @@ Top remaining gaps, most important first:
 |---|---|---|---|
 | Room sensor stale | partial | `core/decide.py` | Falls back to the TRV reading and stops sending external temperature; learning is not switched off |
 | TRV offline | partial | `core/decide.py`, `drivers/live.py` | Excluded from demand and learning, alert raised; not counted as possibly open in the supply factor |
-| Coordinator or MQTT down: safe mode | done | `core/decide.py` `force_stop`, `drivers/live.py` | Broker disconnected or Zigbee2MQTT offline marks every TRV unreachable; relay off after minimum burn, then no relay commands and no heartbeat, so the watchdog takes over. On hand-back, a burn the watchdog started is not adopted by the guard (unsure how short it can be cut) |
+| Coordinator or MQTT down: safe mode | done | `core/decide.py` `force_stop`, `drivers/live.py` | Broker disconnected or Zigbee2MQTT offline marks every TRV unreachable; relay off after minimum burn (the off command is now sent; before, the relay stayed on until the watchdog took over), then no relay commands and no heartbeat, so the watchdog takes over. Radiate follows the watchdog's burns meanwhile and adopts the relay on hand-back |
 | Radiate process dies | done | `shelly/radiate-watchdog.js`, schedule mirror | Simulated in `tests/sim` |
-| Radiate restarts | done | `core/persist.py`, `server/store.py` | Timers moved on by the downtime |
+| Radiate restarts | done | `core/persist.py`, `server/store.py` | Timers moved on by the downtime; after 5 min or more down, or with no saved state, restarted from the relay as found (hand-back) |
 | Home Assistant down | done | | Control does not depend on HA |
 | Internet down, telemetry buffered 7 days | done | `server/store.py` `SqliteQueue` | |
 | Boiler lockout or out of oil | done | `core/health.py` `NoHeat`, `core/decide.py` | Simulated empty tank caught within 3 h; no false alarms over 3 seeds and the cold scenario. Thresholds are simulator-tuned: check on the real house |

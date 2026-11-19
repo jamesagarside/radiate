@@ -407,8 +407,25 @@ _Avoid_: DHW priority.
 ## Safety and fallback
 
 **Safe mode**:
-What Radiate does when it cannot reach any TRV: it stops the burner after minimum burn and raises the `safe_mode.no_trvs` alert. The spec describes a wider safe mode; see the ambiguities.
-Code: `force_stop` in `decide`, alert `safe_mode.no_trvs`.
+What Radiate does when it cannot reach any TRV: it stops the burner after minimum burn, switches the relay off, stops sending the heartbeat so the watchdog takes over, and raises the `safe_mode.no_trvs` alert.
+Code: `force_stop` in `decide`, `Actions.watchdog_handover`, alerts `safe_mode.no_trvs` and `driver.watchdog_handover`, API `boiler.watchdog_handover`.
+
+**Hand-back**:
+Radiate taking the relay back from the watchdog, after safe mode, an outage, a crash or a restart. The boiler guard adopts the relay as it finds it, so it neither cuts a burn it did not start short of minimum burn nor starts a new one inside minimum off.
+Code: `BoilerGuard.adopt`, `Snapshot.heating_relay_unseen_s`, `Snapshot.heating_relay_age_s`, `EngineState.relay_unseen_s`.
+
+**Adopted burn**:
+A burn Radiate did not start (the watchdog's, or a manual switch) that the boiler guard has taken on. Its start time is unknown, so it gets a full minimum burn from when Radiate first sees it. In safe mode Radiate leaves it to the watchdog.
+Code: `BoilerGuard.external`, reason `boiler.adopted`, API `boiler.adopted`.
+_Avoid_: external burn in UI text.
+
+**External stop**:
+The heating relay switching off while Radiate had it on, for example by the watchdog, a manual switch or the Shelly restarting. Minimum off runs from when Radiate sees it.
+Code: reason `boiler.external_stop`.
+
+**Unseen relay**:
+A relay Radiate could not read for 5 minutes or more (Shelly unreachable, Radiate down, or a first start). The watchdog might have switched it meanwhile, so the guard restarts its timers from the relay as observed.
+Code: `HIDDEN_RELAY_S`, reason `boiler.relay_unseen`.
 
 **Watchdog**:
 A script that runs on the Shelly relay and takes over the boiler and store channels when Radiate's heartbeat is more than 10 minutes old.
@@ -507,7 +524,7 @@ For the lead. Each item names the conflict and a suggested resolution.
 1. **Opening, opening limit, cap.** The spec says "opening" and "cap", the UI and HA say "opening limit", Elastic says `valve.opening_pct`, ADR-0001 says "cap". The TRV decides the actual valve position; Radiate only sets a limit. Suggest "opening limit" everywhere for `valve_opening_degree`, "allocated opening" for the allocator's output, and "lockshield cap" only for `L_r`.
 2. **Comfort limit means two things.** Spec 4.4 step 6 uses "comfort limit" for 150 minutes of arrival time; spec 5.1 uses it for 0.5 K of pooling. The code separates them (`comfort_horizon_s`, `comfort_limit_k`). Suggest "comfort horizon" for the time and "comfort limit" for the temperature, and update spec 4.4.
 3. **Store means two things.** The hot-water store, and `radiate.server.store.Store` (the SQLite state database). Suggest renaming the class or module, for example `StateDb`, when that code is next touched.
-4. **Safe mode.** Spec section 7 says safe mode starts when the coordinator or MQTT is down, stops the heartbeat so the watchdog takes over, and writes lockshield caps. The code enters it only when no TRV is reachable, keeps sending the heartbeat, and only forces the burner off after minimum burn. Lockshield caps are written whenever a room is not allocated, not as a safe mode step.
+4. **Safe mode.** Spec section 7 says safe mode starts when the coordinator or MQTT is down, stops the heartbeat so the watchdog takes over, and writes lockshield caps. The code enters it when no TRV is reachable, which a broker or Zigbee2MQTT outage causes, and hands the relay to the watchdog once its own burn is over. Lockshield caps are written whenever a room is not allocated, not as a safe mode step.
 5. **Supply factor formula and kappa.** Spec 4.1: `S = 1 / (1 + κ·Σf + κ_bypass)`, with `κ` learned. Code: `S = 1 / (1 + κ·(Σf + bypass_equivalent))`, with `κ` a fixed 0.15 and the bypass in radiator equivalents. Suggest the spec follow the code and say `κ` is not learned yet.
 6. **Flow sensitivity is not learned.** Spec 4.2 estimates `η` per room; the code always uses the default 0.7, so no room is treated as emitter-limited.
 7. **Heat availability.** Spec 4.1 has `φ` rising with a 6-minute time constant after the lag. The code treats it as on or off after the arrival lag and smooths the whole drive with a 15-minute time constant.
