@@ -260,11 +260,11 @@ Before LEAD → FIRING, the predicted heat sink must be enough for the burner: `
 A small Shelly Gen4 script runs on the relay itself:
 
 - Radiate sends a heartbeat every 60 s.
-- No heartbeat for 10 min: the script takes over. Channel 1 follows a local fallback schedule (default 06:30 to 08:00 and 17:00 to 21:30) with its own minimum burn and off times; channel 2 follows the store schedule last pushed by Radiate.
+- No heartbeat for 10 min: the script takes over. Channel 1 follows a local fallback schedule (the windows Radiate last pushed; 05:30 to 08:30 and 16:00 to 22:30 until it has pushed any) with its own minimum burn (8 min) and off (10 min) times; channel 2 follows the store schedule last pushed by Radiate.
 - Heartbeat returns: control goes back to Radiate.
 - A hard auto-off of 120 min on channel 1 means the relay can never latch on indefinitely.
 
-The script is published in the repository and installed by the user, or with `radiate shelly install-watchdog --yes` over the Shelly local API. Radiate keeps the fallback windows in KVS keys `radiate_heat` (derived from the room schedules, started an hour early) and `radiate_store`.
+The script is published in the repository and installed by the user, or with `radiate shelly install-watchdog --config radiate.yaml --yes` over the Shelly local API. Radiate keeps the fallback windows in KVS keys `radiate_heat` (derived from the room schedules, started an hour early) and `radiate_store`.
 
 ---
 
@@ -320,12 +320,21 @@ Order inside `decide`:
 
 ### 8.1 Server API (v1)
 
-- `GET /api/v1/house`: rooms, radiators, boiler, store, learned parameters, health.
-- `GET /api/v1/state`: live snapshot (temperatures, openings, demand, boiler state, reasons).
-- `POST /api/v1/rooms/{id}/setpoint`, `POST /api/v1/rooms/{id}/fire` (manual fire flag), `POST /api/v1/store/boost`, `POST /api/v1/mode` (`auto`, `off`, `frost`).
-- `GET /api/v1/decisions?since=`: decision log.
-- `WS /api/v1/stream`: state and decision events.
-- Authentication: local token; ingress auth in the HA App.
+Request and response bodies are JSON. A body that is not a JSON object returns 400, as does an invalid setpoint or mode; an unknown room returns 404.
+
+| Method and path | Body | Purpose |
+|---|---|---|
+| `GET /api/v1/health` | | `{"ok": true}`; never needs a token |
+| `GET /api/v1/house` | | House ID, version, driver name, rooms (id, name, role, heat source, controllable) and boiler guard settings |
+| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler, store, per-room temperatures, opening limits, demand flags, learning gate, learned model and latest reason, 24 h relay timeline, alerts and driver telemetry |
+| `GET /api/v1/decisions?since=T` | | Decision log entries (`at`, `code`, `message`, `room_id`) after `T`, in the server's monotonic seconds |
+| `POST /api/v1/rooms/{id}/setpoint` | `{"setpoint": 21.0}` | Override the schedule, 5 to 28 °C; `{"setpoint": null}` clears it. Held in memory only |
+| `POST /api/v1/rooms/{id}/fire` | `{"lit": true}` | Manual fire flag |
+| `POST /api/v1/store/boost` | `{"minutes": 60}` | Boost the store for 0 to 180 minutes; 0 cancels |
+| `POST /api/v1/mode` | `{"mode": "auto"}` | `auto`, `off` or `frost` |
+| `GET /api/v1/stream` | | WebSocket: the state on connect and after every tick |
+
+Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` needs `Authorization: Bearer <token>`. In the HA App, requests from the Supervisor's ingress address (`RADIATE_INGRESS_IP`) that carry an `X-Ingress-Path` header are trusted without a token. The web UI at `/` and `/static/` is not protected.
 
 ### 8.2 Home Assistant integration
 
