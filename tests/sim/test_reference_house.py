@@ -67,6 +67,24 @@ def test_balancing_cuts_arrival_spread_when_everyone_calls_at_once():
     assert spread_on < 0.9 * spread_off
 
 
+def test_daily_accounting_matches_the_relay(runs):
+    for _, radiate in runs.values():
+        days = radiate.day_summaries
+        assert [d["day"] for d in days] == [0, 1, 2, 3]
+        for d in days:
+            assert 0 < d["burner_hours"] < 24
+            assert d["max_starts_in_hour"] <= 3
+            assert d["burns"]["count"] in (d["starts"] - 1, d["starts"], d["starts"] + 1)
+            assert d["balance"]["score"] is None or 0 <= d["balance"]["score"] <= 100
+        # Measured days 2 to 4 (day 4 is still open): relay hours agree with the
+        # simulator's own count, which only differs by burns crossing the edges.
+        today = radiate.engine.ledger.summary(None)
+        assert today["day"] == 4
+        measured = sum(d["burner_hours"] for d in days[2:]) + today["burner_hours"]
+        relay_h = sum(radiate.relay_burns_s) / 3600
+        assert abs(measured - relay_h) < 0.1 * relay_h + 1.0
+
+
 def test_no_false_failure_alerts(runs):
     for _, radiate in runs.values():
         assert radiate.alert_minutes == {}, radiate.alert_minutes

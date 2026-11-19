@@ -108,8 +108,8 @@ Top gaps, most important first:
 | 5.5 Store boost | done | `server/app.py` | |
 | 5.5 Priority awareness: no heat during recovery, learning gated | done | `core/decide.py` | |
 | 5.5 Learned recovery time | missing | `core/types.py` `recovery_s` | Fixed (25 min default) |
-| 5.6 Burner hours, starts, burn-length histogram, starts per hour per day | missing | | Simulator telemetry only |
-| 5.6 Litres and kWh from the nozzle rating | missing | | |
+| 5.6 Burner hours, starts, burn-length histogram, starts per hour per day | done | `core/accounting.py` `Ledger`, `core/persist.py` | Per local day, from the observed relay; today and yesterday under `accounting` in `describe()` |
+| 5.6 Litres and kWh from the nozzle rating | done | `core/accounting.py` | Relay time, so an upper bound (about 60 % high in simulation) until a firing signal exists |
 | 5.6 Firing time from relay power metering | missing | | |
 | 5.6 Short-cycle alert | done | `core/health.py` `ShortCycle` | Counts observed relay starts; physical burner starts inside a long call need a firing signal (open question 1) |
 | 5.7 Shelly watchdog script | done | `shelly/radiate-watchdog.js` | |
@@ -159,7 +159,7 @@ Top gaps, most important first:
 | HA: learning state sensor | missing | | |
 | HA: "fire lit" switch | partial | `custom_components/radiate/binary_sensor.py` | Read-only binary sensor |
 | HA: boiler state, starts | partial | `custom_components/radiate/sensor.py` | Starts in the last hour, not today |
-| HA: burner hours, litres today, balance score | missing | | |
+| HA: burner hours, litres today, balance score | missing | | The server now reports them under `accounting.today`; the integration does not read them yet |
 | HA services `boost_store`, `set_mode` | done | `custom_components/radiate/__init__.py` | |
 | HA service `recalibrate_valve` | missing | | |
 
@@ -170,7 +170,7 @@ Top gaps, most important first:
 | Room stream | partial | `export/elastic.py` `room_docs` | No `temperature.trv`, `model.eta`, or shower, window and cooker flags |
 | Boiler stream | partial | `export/elastic.py` `boiler_doc` | No `boiler.firing` or `store.recovering` |
 | Decision stream | done | `export/elastic.py` | |
-| Daily stream with balance score | missing | | |
+| Daily stream with balance score | done | `export/elastic.py` `daily_doc`, `server/runtime.py` | Sent when the core closes a day; index template `radiate-daily`; balance score not weather-normalised |
 | Common fields | partial | `export/elastic.py` | No `host.name` (edge id) |
 | TSDS index templates | done | `export/elastic.py` `index_templates` | Built in code; no install command |
 | On-disk buffer, 7 days, batch 500 or 10 s | done | `server/store.py`, `export/elastic.py` | |

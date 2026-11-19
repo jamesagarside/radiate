@@ -252,7 +252,8 @@ Before LEAD → FIRING, the predicted heat sink must be enough for the burner: `
 ### 5.6 Oil and runtime accounting
 
 - Burner hours, starts, burn-length histogram and starts per hour are kept per day.
-- With a nozzle rating (litres/h, from the service sheet), litres used and kWh delivered (litres × 10.35 kWh × assumed efficiency 0.85) are estimated. If relay power metering shows burner firing, actual firing time replaces relay time.
+- With a nozzle rating (litres/h, from the service sheet), litres used and kWh delivered (litres × 10.35 kWh × assumed efficiency 0.85) are estimated. If relay power metering shows burner firing, actual firing time replaces relay time. Until then relay time is used, which includes the boiler thermostat's own off periods inside a call, so litres are an upper bound (about 60 % high in simulation).
+- Days follow local midnight. The day so far and the previous day are in `GET /api/v1/state` under `accounting`; each closed day goes to the daily Elastic stream.
 - Short-cycle alert: more than 4 relay starts in an hour, or burns under the minimum because of an external stop (the relay dropped while Radiate still called) for 2 hours running, meaning such burns at least an hour apart within the last two hours. Radiate's own guard allows at most 3 starts an hour, so this catches another controller, a manual switch or a relay dropping out.
 
 ### 5.7 Fail-safe relay watchdog (Shelly script)
@@ -343,7 +344,7 @@ Optional, off by default. Documents follow ECS and are sent with the Bulk API (A
 | `metrics-radiate.room-default` | 1 min | `radiate.room.{id,name}`, `temperature.{room,trv,setpoint}`, `valve.opening_pct`, `demand.gap_k`, `model.{a,b,d,eta,arrival_lag_min,confidence}`, `learning.{active,gate}`, `disturbance.{fire,shower,window,cooker_spike}` |
 | `metrics-radiate.boiler-default` | 1 min | `boiler.{state,relay,firing}`, `boiler.burn.{elapsed_s}`, `boiler.starts_1h`, `store.{relay,recovering}`, `supply.factor`, `outdoor.temperature` |
 | `logs-radiate.decision-default` | per decision | `event.action`, `event.reason`, `radiate.room.id`, `message` |
-| `metrics-radiate.daily-default` | daily | `balance.arrival_spread_min`, `balance.score`, `boiler.{starts,burner_hours,litres,kwh}`, `rooms.{comfort_minutes_below}` |
+| `metrics-radiate.daily-default` | daily | `radiate.day`, `balance.{arrival_spread_min,score,starts_measured}`, `boiler.{starts,max_starts_1h,burner_hours,hours_basis,litres,kwh}`, `boiler.burns.{count,mean_min,min_min,max_min,histogram.*}`, `rooms.{comfort_minutes_below}` |
 
 Common fields: `@timestamp`, `data_stream.*`, `host.name` (edge id, not the house name), `service.{name,version}`, `radiate.house.id` (random UUID). No personal data, no location.
 
@@ -351,7 +352,7 @@ Common fields: `@timestamp`, `data_stream.*`, `host.name` (edge id, not the hous
 - **Buffering**: an on-disk queue (SQLite) holds up to 7 days when Elastic is unreachable; retries with backoff; batch size 500 or 10 s.
 - **Assets**: index templates and a Kibana dashboard (balance, burns, rooms) ship in `export/elastic/`.
 
-**Balance score (daily):** for each heating start with two or more calling rooms, the spread between the first and last room reaching setpoint. Score = 100 × (1 − median spread / 120 min), clamped 0 to 100. Weather-normalised following Håkansson et al. 2025.
+**Balance score (daily):** for each heating start with two or more calling rooms, the spread between the first and last room reaching setpoint. Score = 100 × (1 − median spread / 120 min), clamped 0 to 100. Weather-normalised following Håkansson et al. 2025. As built: rooms are the `normal` rooms calling when the burn starts; a room still calling when the burn ends counts as arriving then; a burn where no room arrives is not scored. Weather normalisation is not done yet.
 
 ---
 

@@ -98,13 +98,34 @@ def test_raised_minimum_off_survives_a_restart():
     assert r.relay is None  # the first relay reading after a restart is not a start
 
 
+def test_accounting_survives_a_restart():
+    cfg, st = learned()  # two simulated days: day 0 closed, day 1 running
+    now = st.last_now
+    led = st.ledger
+    assert led.history and led.history[-1]["day"] == 0
+    data = json.loads(json.dumps(dump_state(st, now)))
+    restored, problems = load_state(cfg, data, now=7.0, elapsed_s=120.0)
+    assert problems == []
+    r = restored.ledger
+    assert r.history == led.history
+    assert r.today.day == led.today.day
+    assert r.today.burner_s == led.today.burner_s
+    assert r.today.burns_min == led.today.burns_min
+    assert r.today.spreads_min == led.today.spreads_min
+    assert r.today.below_min == led.today.below_min
+    assert [7.0 - t for t in r.today.starts] == [now - t + 120.0 for t in led.today.starts]
+    assert r.relay is None and r.arrival is None
+
+
 def test_state_saved_before_health_data_still_loads():
     cfg, st = learned()
     data = dump_state(st, st.last_now)
     del data["health"]
+    del data["accounting"]
     restored, problems = load_state(cfg, data, 0.0)
     assert problems == []
     assert restored.short_cycle.extra_off_s == 0.0
+    assert restored.ledger.history == [] and restored.ledger.today.starts == []
 
 
 def test_wrong_version_starts_fresh():

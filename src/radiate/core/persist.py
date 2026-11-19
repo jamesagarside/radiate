@@ -7,7 +7,8 @@ middle of a burn therefore still honours minimum burn, and a restart during REST
 still honours minimum off.
 
 Kept: learned room models, arrival lags, lockshield histograms, disturbance hold-offs,
-the boiler guard and the short-cycle adaptation. Dropped: short-lived signals (reading
+the boiler guard, the short-cycle adaptation and the day's oil and runtime totals with
+the last 7 days' summaries. Dropped: short-lived signals (reading
 windows, radiator drive, demand latches, the no-heat check), which rebuild within a
 few ticks. Sections added after version 1 are optional, so older saves still load.
 
@@ -19,6 +20,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from .accounting import HISTORY_DAYS
 from .boiler import BoilerGuard
 from .decide import EngineState, RoomState
 from .disturbance import DisturbanceState
@@ -82,7 +84,56 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
                 "raised_at": _age(sc.raised_at, now),
             },
         },
+        "accounting": _dump_ledger(st, now),
     }
+
+
+def _dump_ledger(st: EngineState, now: float) -> dict[str, Any]:
+    led, t = st.ledger, st.ledger.today
+    return {
+        "started": led.started,
+        "day": t.day,
+        "burner_s": t.burner_s,
+        "starts": [_age(s, now) for s in t.starts],
+        "burns_min": list(t.burns_min),
+        "spreads_min": list(t.spreads_min),
+        "below_min": dict(t.below_min),
+        "burn_start": _age(led.burn_start, now),
+        "history": list(led.history),
+    }
+
+
+def _numbers(raw: Any) -> list[float]:
+    if not isinstance(raw, list):
+        return []
+    return [float(v) for v in raw if isinstance(v, (int, float)) and math.isfinite(v) and v >= 0]
+
+
+def _load_ledger(st: EngineState, raw: Any, now: float, elapsed: float) -> None:
+    """Today's running totals and the last days' summaries. Missing data keeps defaults."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("day"), int):
+        return
+    led = st.ledger
+    t = led.today
+    t.day = raw["day"]
+    led.started = bool(raw.get("started", True))
+    burner = raw.get("burner_s")
+    if isinstance(burner, (int, float)) and math.isfinite(burner) and burner >= 0:
+        t.burner_s = float(burner)
+    t.starts = _times(raw.get("starts"), now, elapsed)
+    t.burns_min = _numbers(raw.get("burns_min"))
+    t.spreads_min = _numbers(raw.get("spreads_min"))
+    below = raw.get("below_min")
+    if isinstance(below, dict):
+        t.below_min = {
+            str(k): float(v)
+            for k, v in below.items()
+            if isinstance(v, (int, float)) and math.isfinite(v) and v >= 0
+        }
+    led.burn_start = _at(raw.get("burn_start"), now, elapsed)
+    history = raw.get("history")
+    if isinstance(history, list):
+        led.history = [h for h in history if isinstance(h, dict)][-HISTORY_DAYS:]
 
 
 def _times(raw: Any, now: float, elapsed: float) -> list[float]:
@@ -194,4 +245,5 @@ def load_state(
             guard.state, guard.since = BoilerState.IDLE, now
         st.boiler = guard
     _load_health(st, data.get("health"), now, elapsed)
+    _load_ledger(st, data.get("accounting"), now, elapsed)
     return st, problems

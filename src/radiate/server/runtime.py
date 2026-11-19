@@ -255,6 +255,8 @@ class Runtime:
         payload = self.describe()
         if self.exporter is not None:
             self.exporter.record(payload, logged)
+            if actions.day_summary is not None:
+                self.exporter.record_daily(actions.day_summary)
         for q in list(self.listeners):
             if q.full():
                 with contextlib.suppress(asyncio.QueueEmpty):
@@ -389,6 +391,11 @@ class Runtime:
                 "boost": now < self.store_boost_until,
             },
             "rooms": rooms,
+            # Burner hours, starts, burns, litres and the balance score per local day.
+            "accounting": {
+                "today": st.ledger.summary(self.cfg.boiler.nozzle_lph),
+                "yesterday": st.ledger.history[-1] if st.ledger.history else None,
+            },
             "timeline": {"burns": burns, "store": stores, "window_s": 86400},
             "alerts": [a.message for a in acts.alerts] if acts else [],
             "telemetry": self.driver.telemetry(),

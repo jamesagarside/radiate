@@ -11,10 +11,11 @@ import asyncio
 import contextlib
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from radiate import __version__
+from radiate.core.accounting import BURN_BUCKETS
 from radiate.server.store import ExportQueue, MemoryQueue
 
 LOG = logging.getLogger(__name__)
@@ -95,6 +96,36 @@ def boiler_doc(state: dict, house_id: str, ts: datetime) -> dict:
     doc["supply"] = {"factor": b["supply"]}
     doc["outdoor"] = {"temperature": state.get("outdoor")}
     doc["radiate"]["mode"] = state["mode"]
+    return doc
+
+
+def _calendar_day(label: object) -> str | None:
+    """ISO date for a day label that is a real `date.toordinal()`, else None (simulator)."""
+    if not isinstance(label, int) or label < 1:
+        return None
+    day = date.fromordinal(label)
+    return day.isoformat() if day.year >= 2000 else None
+
+
+def daily_doc(summary: dict, house_id: str, ts: datetime) -> dict:
+    """One document per closed day from `core.accounting` (spec 9)."""
+    doc = _base(DAILY_STREAM, house_id, ts)
+    day = _calendar_day(summary.get("day"))
+    if day is not None:
+        doc["radiate"]["day"] = day
+    doc["boiler"] = {
+        "starts": summary["starts"],
+        "max_starts_1h": summary["max_starts_in_hour"],
+        "burner_hours": summary["burner_hours"],
+        "hours_basis": summary.get("basis", "relay"),
+        "litres": summary["litres"],
+        "kwh": summary["kwh"],
+        "burns": summary["burns"],
+    }
+    doc["balance"] = dict(summary["balance"])
+    doc["rooms"] = {
+        "comfort_minutes_below": round(sum(summary["comfort_minutes_below"].values()), 1)
+    }
     return doc
 
 
@@ -204,6 +235,42 @@ def index_templates() -> dict[str, dict]:
             "metrics-radiate.room-*", room_fields, ["radiate.house.id", "radiate.room.id"]
         ),
         "radiate-boiler": tsds("metrics-radiate.boiler-*", boiler_fields, ["radiate.house.id"]),
+        "radiate-daily": {
+            "index_patterns": ["metrics-radiate.daily-*"],
+            "data_stream": {},
+            "priority": 200,
+            "template": {
+                "mappings": {
+                    "properties": {
+                        **common,
+                        **props(
+                            {
+                                "radiate.house.id": {"type": "keyword"},
+                                "radiate.day": {"type": "date", "format": "yyyy-MM-dd"},
+                                "boiler.starts": {"type": "short"},
+                                "boiler.max_starts_1h": {"type": "short"},
+                                "boiler.burner_hours": {"type": "float"},
+                                "boiler.hours_basis": {"type": "keyword"},
+                                "boiler.litres": {"type": "float"},
+                                "boiler.kwh": {"type": "float"},
+                                "boiler.burns.count": {"type": "short"},
+                                "boiler.burns.mean_min": {"type": "float"},
+                                "boiler.burns.min_min": {"type": "float"},
+                                "boiler.burns.max_min": {"type": "float"},
+                                **{
+                                    f"boiler.burns.histogram.{b}": {"type": "short"}
+                                    for b in BURN_BUCKETS
+                                },
+                                "balance.starts_measured": {"type": "short"},
+                                "balance.arrival_spread_min": {"type": "float"},
+                                "balance.score": {"type": "float"},
+                                "rooms.comfort_minutes_below": {"type": "float"},
+                            }
+                        ),
+                    }
+                }
+            },
+        },
         "radiate-decision": {
             "index_patterns": ["logs-radiate.decision-*"],
             "data_stream": {},
@@ -264,6 +331,10 @@ class ElasticExporter:
         for code, message, room in decisions:
             docs.append(decision_doc(code, message, room, self.house_id, ts))
         self.buffer.extend(docs)
+
+    def record_daily(self, summary: dict, ts: datetime | None = None) -> None:
+        """Queue the summary of a day that just closed (`metrics-radiate.daily-default`)."""
+        self.buffer.extend([daily_doc(summary, self.house_id, ts or datetime.now(UTC))])
 
     async def flush(self, session) -> bool:
         if not self.buffer:

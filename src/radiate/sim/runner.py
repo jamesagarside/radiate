@@ -57,6 +57,7 @@ class Result:
     last_actions: Actions | None = None
     alert_minutes: dict[str, int] = field(default_factory=dict)  # measured period, by code
     first_alert_s: dict[str, float] = field(default_factory=dict)  # whole run, by code
+    day_summaries: list[dict] = field(default_factory=list)  # closed days from the core
 
     @property
     def median_spread(self) -> float:
@@ -169,6 +170,8 @@ def run(
                 res.last_actions = actions
                 if st.rooms["lounge"].dist.fire and house.now >= measure_from:
                     res.fire_flagged_minutes += 1
+                if actions.day_summary is not None:
+                    res.day_summaries.append(actions.day_summary)
                 for code in {a.code for a in actions.alerts}:
                     res.first_alert_s.setdefault(code, house.now)
                     if house.now >= measure_from:
@@ -238,6 +241,7 @@ def _snapshot(house: SimHouse, reports: dict, minute: int, optimum_start: bool =
         rooms=rooms,
         heating_relay=house.heating_relay,
         store_relay=house.store_relay,
+        day=int(house.now // DAY),
     )
 
 

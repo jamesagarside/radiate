@@ -81,6 +81,8 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 
 `min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none). Ranges are checked against spec section 5.1.
 
+`nozzle_lph` is the burner nozzle rating in litres per hour, from the boiler's service sheet. With it, the daily accounting also estimates litres and kWh. Burner time comes from the heating relay, so the litres are an upper bound.
+
 ### store
 
 `windows` (list of `HH:MM-HH:MM`, at most four), `recovery_min` (25), `priority_over_heating` (`true`).

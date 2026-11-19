@@ -12,6 +12,7 @@ import math
 from dataclasses import dataclass, field
 
 from . import disturbance
+from .accounting import Ledger
 from .allocator import Allocation, AllocRoom, allocate
 from .boiler import BoilerGuard
 from .disturbance import DisturbanceState
@@ -110,6 +111,7 @@ class EngineState:
     topup_burn: float | None = None  # burn start time for which top-up was used
     no_heat: NoHeat = field(default_factory=NoHeat)  # out of oil or burner lockout
     short_cycle: ShortCycle = field(default_factory=ShortCycle)
+    ledger: Ledger = field(default_factory=Ledger)  # oil, runtime and balance per day
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -173,6 +175,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     passive_now: dict[str, float] = {}
     rooms_warming = False
     any_open = False  # some TRV is open and asking for heat
+    below: dict[str, bool] = {}  # rooms short of their setpoint by the comfort limit
 
     # --- 1-4: per-room sensing, disturbances, learning, demand -------------------------
     for rc in cfg.rooms:
@@ -306,6 +309,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             if rc.role is RoomRole.INTERNAL_SENSOR_ONLY
             else cfg.hysteresis_k
         )
+        if temp is not None and not rs.dist.fire:
+            below[rc.id] = temp < _target(cfg, snap, inp) - bcfg.comfort_limit_k
         excluded = temp is None or not inp.trv_available or rs.dist.fire
         if excluded:
             rs.calling = False
@@ -429,6 +434,18 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         force_stop=force_stop,
     )
     sc.commanded = relay
+
+    # Oil and runtime accounting, arrival spread for the balance score (spec 5.6, 9).
+    day_summary = st.ledger.update(
+        now,
+        snap.day,
+        relay_on=snap.heating_relay,
+        firing=guard.state is BoilerState.FIRING,
+        calling={rc.id for rc in calling if rc.role is RoomRole.NORMAL},
+        below=below,
+        minute=snap.minute_of_day,
+        nozzle_lph=bcfg.nozzle_lph,
+    )
     if guard.state is not prev_state:
         reasons.append(
             _boiler_reason(prev_state, guard.state, len(calling), predicted_burn_s, max_gap)
@@ -500,6 +517,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         reasons=reasons,
         alerts=alerts,
         safe_mode=force_stop,
+        day_summary=day_summary,
     )
 
 

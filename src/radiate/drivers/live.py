@@ -189,6 +189,7 @@ class LiveDriver:
             store_relay=store,
             mode=mode,
             store_boost=store_boost,
+            day=local.date().toordinal(),
         )
 
     async def apply(self, actions: Actions) -> None:

@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from radiate.export.elastic import (
     BOILER_STREAM,
+    DAILY_STREAM,
     ROOM_STREAM,
     ElasticExporter,
     bulk_body,
@@ -47,6 +48,74 @@ async def test_bulk_body_targets_data_streams():
     assert targets == {ROOM_STREAM, BOILER_STREAM}
 
 
+SUMMARY = {
+    "day": 739938,
+    "basis": "relay",
+    "burner_hours": 6.5,
+    "starts": 4,
+    "max_starts_in_hour": 1,
+    "burns": {
+        "count": 4,
+        "mean_min": 97.5,
+        "min_min": 30.0,
+        "max_min": 180.0,
+        "histogram": {
+            "under_10": 0,
+            "10_to_20": 0,
+            "20_to_30": 0,
+            "30_to_60": 1,
+            "60_to_120": 2,
+            "over_120": 1,
+        },
+    },
+    "litres": 13.0,
+    "kwh": 114.4,
+    "balance": {"starts_measured": 3, "arrival_spread_min": 30.0, "score": 75.0},
+    "comfort_minutes_below": {"bedroom_1": 12.0, "dining": 3.0},
+}
+
+
+def test_daily_document():
+    exp = ElasticExporter("http://es:9200", "key", house_id="h")
+    exp.record_daily(SUMMARY, ts=TS)
+    (doc,) = list(exp.buffer)
+    assert doc["data_stream"]["dataset"] == "radiate.daily"
+    assert doc["radiate"]["house"]["id"] == "h"
+    assert doc["radiate"]["day"] == "2026-11-18"  # local calendar day it covers
+    assert doc["boiler"]["burner_hours"] == 6.5 and doc["boiler"]["starts"] == 4
+    assert doc["boiler"]["litres"] == 13.0 and doc["boiler"]["kwh"] == 114.4
+    assert doc["boiler"]["burns"]["histogram"]["over_120"] == 1
+    assert doc["balance"] == {"arrival_spread_min": 30.0, "score": 75.0, "starts_measured": 3}
+    assert doc["rooms"]["comfort_minutes_below"] == 15.0
+    assert DAILY_STREAM in bulk_body([doc])
+
+
+async def test_runtime_exports_the_closed_day_and_describes_accounting():
+    class Capture:
+        def __init__(self):
+            self.daily = []
+
+        def record(self, state, decisions=()):
+            pass
+
+        def record_daily(self, summary):
+            self.daily.append(summary)
+
+    rt = Runtime(house_config(), DemoDriver(start_hour=23.8))  # 23:48 in the demo house
+    rt.exporter = Capture()
+    for _ in range(5):
+        await rt.step()
+    assert rt.exporter.daily == []
+    acc = rt.describe()["accounting"]
+    assert acc["today"]["day"] == 0 and acc["yesterday"] is None
+    for _ in range(10):
+        await rt.step()  # past midnight
+    assert [s["day"] for s in rt.exporter.daily] == [0]
+    acc = rt.describe()["accounting"]
+    assert acc["today"]["day"] == 1 and acc["yesterday"]["day"] == 0
+    assert {"burner_hours", "starts", "litres", "balance"} <= set(acc["today"])
+
+
 def test_templates_are_tsds_with_dimensions():
     t = index_templates()
     room = t["radiate-room"]["template"]
@@ -54,6 +123,11 @@ def test_templates_are_tsds_with_dimensions():
     props = room["mappings"]["properties"]
     assert props["radiate"]["properties"]["room"]["properties"]["id"]["time_series_dimension"]
     assert props["model"]["properties"]["a"]["time_series_metric"] == "gauge"
+    daily = t["radiate-daily"]
+    assert daily["index_patterns"] == ["metrics-radiate.daily-*"]
+    dprops = daily["template"]["mappings"]["properties"]
+    assert dprops["balance"]["properties"]["score"]["type"] == "float"
+    assert dprops["radiate"]["properties"]["day"]["type"] == "date"
 
 
 class _Resp:
