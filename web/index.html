@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Radiate</title>
+  <link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V8m4.67 12V5m4.66 15V5M19 20V8M3 20h18" /></svg>
+      <span>Radiate</span>
+    </div>
+    <p class="status" id="status" aria-live="polite">Connecting…</p>
+    <div class="right">
+      <span class="outdoor" id="outdoor" title="Outdoor temperature"></span>
+      <div class="seg" role="radiogroup" aria-label="Heating mode" id="mode">
+        <button role="radio" data-mode="auto">Auto</button>
+        <button role="radio" data-mode="frost">Frost</button>
+        <button role="radio" data-mode="off">Off</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <main>
+    <section class="card boiler" aria-labelledby="boiler-h">
+      <div class="boiler-head">
+        <h2 id="boiler-h">Boiler</h2>
+        <span class="chip" id="boiler-chip">–</span>
+        <span class="muted" id="boiler-detail"></span>
+        <button class="btn" id="boost">Boost hot water</button>
+      </div>
+      <div class="guard" id="guard" aria-hidden="true"><div class="guard-fill"></div></div>
+      <div class="timeline" id="timeline" aria-label="Last 24 hours of burns and hot-water windows">
+        <div class="lane burns"></div>
+        <div class="lane store"></div>
+        <div class="ticks"><span>−24 h</span><span>−18 h</span><span>−12 h</span><span>−6 h</span><span>now</span></div>
+      </div>
+      <dl class="stats">
+        <div><dt>Starts, last hour</dt><dd id="s-starts">–</dd></div>
+        <div><dt>Predicted burn</dt><dd id="s-pred">–</dd></div>
+        <div><dt>Burner hours</dt><dd id="s-hours">–</dd></div>
+        <div><dt>Supply factor</dt><dd id="s-supply">–</dd></div>
+      </dl>
+    </section>
+
+    <section aria-labelledby="rooms-h">
+      <h2 id="rooms-h" class="section-h">Rooms</h2>
+      <div class="rooms" id="rooms"></div>
+    </section>
+
+    <section class="alerts" id="alerts" hidden></section>
+  </main>
+
+  <template id="room-tpl">
+    <article class="card room">
+      <header>
+        <h3 class="name"></h3>
+        <span class="badge"></span>
+      </header>
+      <p class="temp"><span class="now"></span><span class="target"></span></p>
+      <div class="valve">
+        <div class="valve-label"><span>Opening limit</span><span class="valve-val"></span></div>
+        <div class="bar"><div class="fill"></div></div>
+      </div>
+      <p class="reason"></p>
+      <footer class="meta"></footer>
+      <button class="btn fire" hidden>Fire lit</button>
+    </article>
+  </template>
+
+  <script src="static/app.js" type="module"></script>
+</body>
+</html>

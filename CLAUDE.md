@@ -2,13 +2,15 @@
 
 ## What this is
 
-A Home Assistant custom integration (HACS) for local, subscription-free whole-house hydronic balancing and boiler orchestration. See README.md and docs/research/.
+A local-first, subscription-free whole-house hydronic balancing and boiler controller. One engine, three editions: standalone service with web UI, Home Assistant App (plus a thin HACS integration), and a cloud version whose control loop still runs on a local edge. See README.md, docs/adr/ and docs/spec.md.
 
 ## Owner preferences
 
 - UK English, metric units, no em dashes.
 - Concise, direct communication.
-- Python is the language. Follow Home Assistant integration conventions (config flow, async, `custom_components/radiate`).
+- Python is the language. Core engine in `src/radiate/core` is pure (no I/O, no HA imports). Follow Home Assistant conventions in `custom_components/radiate` (config flow, async), which is a thin API client with no control logic.
+- Licence is Elastic License 2.0. Never copy AGPL code (Better Thermostat) into the repo.
+- UI work follows Emil Kowalski's design-engineering principles (emil-design-eng skill).
 
 ## Reference install (first real-world target)
 
@@ -25,7 +27,8 @@ Do not publish personal details (house name, location) in this repo.
 ## Key technical facts
 
 - TRVZB via Z2M exposes writable `valve_opening_degree` / `valve_closing_degree` (fw >= 1.1.4) and `external_temperature_input` (fw >= 1.2.1). External input reverts to internal if not refreshed for about 2 hours. Adaptive PID mode disables opening limits. Reported calibration loss when opening/closing degree is used: test on one valve first.
-- Versatile Thermostat already offers TRVZB direct valve regulation, central boiler aggregation and `max_opening_degree`. Prefer building on it over duplicating it; decide this explicitly early.
+- Decided in ADR-0001: Radiate is standalone, not a Versatile Thermostat companion (VTherm's `max_opening_degree` is config-only and its boiler logic has no min burn/off time). VTherm and Better Thermostat are prior art only.
+- Decided in ADR-0002: the cloud never sits in the control loop.
 
 ## Research and reverse engineering
 

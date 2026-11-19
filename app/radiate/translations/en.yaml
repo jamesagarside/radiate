@@ -1,0 +1,13 @@
+configuration:
+  demo:
+    name: Demo mode
+    description: Run the simulated reference house instead of real devices. Real device drivers are in development.
+  token:
+    name: API token
+    description: Optional. Required by clients outside Home Assistant (the sidebar panel does not need it).
+  elastic_url:
+    name: Elastic URL
+    description: Optional. Elasticsearch endpoint for metrics export, for example https://my-deployment.es.europe-west2.gcp.elastic-cloud.com
+  elastic_api_key:
+    name: Elastic API key
+    description: Optional. An API key with permission to write to metrics-radiate.* and logs-radiate.* data streams.
