@@ -126,6 +126,11 @@ async def test_runtime_exports_the_closed_day_and_describes_accounting():
     acc = rt.describe()["accounting"]
     assert acc["today"]["day"] == 1 and acc["yesterday"]["day"] == 0
     assert {"burner_hours", "starts", "litres", "balance"} <= set(acc["today"])
+    # Radiate started at 23:48, so day 0 was not seen in full: no balance score.
+    assert acc["yesterday"]["partial"] is True
+    assert acc["yesterday"]["balance"]["score"] is None
+    assert acc["today"]["partial"] is False
+    assert rt.exporter.daily[0]["partial"] is True
 
 
 def test_templates_are_tsds_with_dimensions():
