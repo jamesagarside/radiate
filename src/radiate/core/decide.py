@@ -14,13 +14,22 @@ from dataclasses import dataclass, field
 from . import disturbance
 from .accounting import Ledger
 from .allocator import Allocation, AllocRoom, allocate
-from .boiler import BoilerGuard
+from .boiler import HIDDEN_RELAY_S, BoilerGuard
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator, local_slope
-from .health import MAX_TICK_S, NO_HEAT_MESSAGE, ROOM_RISE_KPH, NoHeat, ShortCycle, ValveCheck
+from .health import (
+    LEAK_SETTLE_S,
+    MAX_TICK_S,
+    NO_HEAT_MESSAGE,
+    ROOM_RISE_KPH,
+    NoHeat,
+    ShortCycle,
+    ValveCheck,
+)
 from .types import (
     Actions,
     BoilerState,
+    DemandMode,
     HeatSource,
     HouseConfig,
     Mode,
@@ -54,7 +63,14 @@ CLOSE_BUMP = 10
 PREHEAT_MAX_S = 3 * 3600
 PREHEAT_MARGIN = 1.2
 INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
-LOCKSHIELD_DECAY = 0.9995  # per sample, roughly a 3 day half-life at one sample a minute
+LOCKSHIELD_DECAY = 0.9995  # per firing sample: half-life of about 23 hours of firing
+REJECTED_HOLD_S = 3600.0  # learning stays paused this long after a TRV rejected a setting
+POOL_BURNS = 1.5  # demand worth a burn: this many minimum burns (spec 5.3)
+ECO_LEAD_HOLD = 0.75  # share of that pooled demand that keeps a valve lead going
+# Disturbances that can warm a TRV with its valve shut, so the leak check looks away.
+# Not `unexplained_heat`: the check compares the TRV with the room, which sun or guests
+# warm together, and a strong leak itself raises `unexplained_heat`.
+LEAK_BLIND_GATES = frozenset({"fire", "fire_holdoff", "window", "shower", "cooker_spike"})
 
 
 @dataclass(slots=True)
@@ -82,7 +98,12 @@ class RoomState:
     closed_since: float | None = None  # radiator receiving no heat since
     slope: float | None = None
     residual: float | None = None
-    valve: ValveCheck = field(default_factory=ValveCheck)  # stuck-valve check
+    valve: ValveCheck = field(default_factory=ValveCheck)  # stuck and leaking valve checks
+    rejected: tuple[str, ...] = ()  # TRV settings the device did not accept (reconciler)
+    rejected_until: float = -1e12  # learning paused until then (spec 4.6 valve trusted)
+    # A normal room's own sensor is stale and its temperature comes from the TRV, or
+    # did within the slope window: the `sensor_stale` gate holds until then.
+    fallback_until: float = -1e12
 
     @property
     def arrival_lag_s(self) -> float:
@@ -117,19 +138,25 @@ class EngineState:
     no_heat: NoHeat = field(default_factory=NoHeat)  # out of oil or burner lockout
     short_cycle: ShortCycle = field(default_factory=ShortCycle)
     ledger: Ledger = field(default_factory=Ledger)  # oil, runtime and balance per day
+    # Set by a restore after downtime or on a first start: how long the relay went
+    # unobserved. Used once, on the next tick, by the boiler guard's hand-back.
+    relay_unseen_s: float = 0.0
+    pooled_demand_s: float = 0.0  # this tick's pooled demand (spec 5.3)
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
         return cls(
-            rooms={r.id: RoomState(est=new_estimator(r)) for r in cfg.rooms if r.controllable}
+            rooms={r.id: RoomState(est=new_estimator(r, cfg)) for r in cfg.rooms if r.controllable}
         )
 
 
-def new_estimator(rc: RoomConfig) -> RoomEstimator:
-    """A room model at its priors, with the room's confidence cap."""
+def new_estimator(rc: RoomConfig, cfg: HouseConfig) -> RoomEstimator:
+    """A room model at its priors, with the room's confidence cap and the house's
+    learning memory."""
     return RoomEstimator.new(
         rc.heat_source is HeatSource.CONTINUOUS,
         INTERNAL_SENSOR_MAX_CONFIDENCE if rc.role is RoomRole.INTERNAL_SENSOR_ONLY else 1.0,
+        cfg.learning.memory_days,
     )
 
 
@@ -200,8 +227,21 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         rs = st.rooms[rc.id]
         inp = snap.rooms.get(rc.id, RoomInput())
         any_trv = any_trv or inp.trv_available
+        # Valve trusted (spec 4.6): a setting the TRV would not take pauses learning
+        # while it lasts and for an hour after.
+        rs.rejected = inp.trv_rejected
+        if inp.trv_rejected:
+            rs.rejected_until = now + REJECTED_HOLD_S
         temp = _effective_temperature(rc, inp)
         rs.temperature = temp
+        if (
+            rc.role is RoomRole.NORMAL
+            and temp is not None
+            and (inp.temperature is None or inp.temperature_age_s > ROOM_SENSOR_STALE_S)
+        ):
+            # TRV fallback: keep the gate shut until the slope window holds room
+            # sensor readings only again.
+            rs.fallback_until = now + SLOPE_WINDOW_S
         target = _target(cfg, snap, inp)
         rs.preheating = False
         rs.deadline_s = None
@@ -276,6 +316,25 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             and not rs.dist.fire,
             offset=trv_now.get(rc.id),
         )
+        # Leaking valve (spec 7, "rise with valve closed"): the radiator warms while the
+        # valve should be shut. Needs a fresh room sensor to tell the radiator from the
+        # room, and no heat source or disturbance that can warm the TRV on its own.
+        rs.valve.observe_shut(
+            min(dt, MAX_TICK_S),
+            flowing=flowing,
+            shut=rc.role is RoomRole.NORMAL
+            and inp.temperature is not None
+            and inp.temperature_age_s <= ROOM_SENSOR_STALE_S
+            and inp.trv_available
+            and inp.trv_heating is False
+            and not (rs.calling or rs.topup)
+            and rs.closed_since is not None
+            and st.flow_since is not None
+            and rs.closed_since <= st.flow_since  # shut since before this flow began
+            and now - rs.closed_since >= LEAK_SETTLE_S
+            and rs.dist.learning_blocked(now) not in LEAK_BLIND_GATES,
+            offset=trv_now.get(rc.id),
+        )
 
         delta_out = (temp - out) if (temp is not None and out is not None) else None
         rs.residual = (
@@ -322,8 +381,15 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 gate = "no_heat"  # the model would learn that radiators do nothing
             elif rs.valve.untrusted:
                 gate = "valve_untrusted"
+            elif rs.valve.leaking:
+                gate = "valve_leaking"
+            elif now < rs.rejected_until:
+                gate = "valve_rejected"
             elif temp is None or rs.slope is None or delta_out is None:
                 gate = "no_data"
+            elif now < rs.fallback_until and not cfg.learning.learn_on_trv_fallback:
+                # The TRV reads its radiator as much as the room (spec 4.6, 7).
+                gate = "sensor_stale"
             elif not inp.trv_available:
                 gate = "trv_offline"
             elif recovering:
@@ -332,7 +398,17 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 gate = "setpoint_change"
         rs.learning_gate = gate
         if gate is None:
+            relearns = rs.est.relearns
             rs.est.update(rs.slope, rs.drive, delta_out)
+            if rs.est.relearns != relearns:
+                # Change detection (spec 4.3): the model no longer fits; re-learn it.
+                reasons.append(
+                    Reason(
+                        "learning.relearn",
+                        f"{rc.name}: heating no longer matches what was learned, re-learning",
+                        rc.id,
+                    )
+                )
 
         # Demand latch.
         hyst = (
@@ -378,9 +454,30 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             alerts.append(
                 Reason("valve.stuck", f"{rc.name} radiator not warming: check the valve", rc.id)
             )
+        if rs.valve.leaking:
+            alerts.append(
+                Reason(
+                    "valve.leaking",
+                    f"{rc.name} radiator warming with its valve shut: check the valve",
+                    rc.id,
+                )
+            )
 
     # --- 5: boiler demand, pooling, open path ------------------------------------------
     guard = st.boiler
+    # Hand-back (spec 5.7): adopt a relay someone else switched (the Shelly watchdog
+    # while Radiate was away, a manual switch), before deciding anything with it.
+    if snap.relay_follows_commands:
+        unseen = max(snap.heating_relay_unseen_s, st.relay_unseen_s)
+        adopted = guard.adopt(
+            now,
+            relay_on=snap.heating_relay,
+            age_s=snap.heating_relay_age_s,
+            unseen_s=unseen,
+        )
+        if adopted is not None:
+            reasons.append(_adopt_reason(adopted, unseen))
+    st.relay_unseen_s = 0.0
     heating_allowed = snap.mode is not Mode.OFF or frost
     if guard.state in (BoilerState.IDLE, BoilerState.REST):
         for rs in st.rooms.values():
@@ -393,19 +490,37 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     )
     preheat = any(st.rooms[rc.id].preheating for rc in calling)
     predicted_burn_s = alloc.t_star_h * 3600 if calling else 0.0
-
-    want_fire = (
-        heating_allowed
-        and bool(calling)
-        and (
-            max_gap > bcfg.comfort_limit_k
-            or predicted_burn_s >= 1.5 * bcfg.min_burn_s
-            or frost
-            or preheat
-        )
-    )
+    st.pooled_demand_s = _pooled_demand_s(st, calling)
+    demand_mode = snap.demand_mode or bcfg.demand_mode
+    worth_a_burn = POOL_BURNS * bcfg.min_burn_s
+    if demand_mode is DemandMode.COMFORT:
+        # Any calling room past the comfort limit, or a long enough predicted burn.
+        demand = max_gap > bcfg.comfort_limit_k or predicted_burn_s >= worth_a_burn
+    else:
+        # Eco: rooms fire the boiler together. A room on its own waits until it is
+        # past the wider eco limit, or until other rooms join it. Once the valves are
+        # opening, a reading 0.1 K higher does not call the start off.
+        pooled = worth_a_burn * (ECO_LEAD_HOLD if guard.state is BoilerState.LEAD else 1.0)
+        demand = st.pooled_demand_s >= pooled or max_gap > bcfg.eco_limit_k
+    want_fire = heating_allowed and bool(calling) and (demand or frost or preheat)
     if hard_frost:
         want_fire = True
+    if (
+        not want_fire
+        and calling
+        and heating_allowed
+        and demand_mode is DemandMode.ECO
+        and guard.state is BoilerState.IDLE
+    ):
+        for rc in calling:
+            reasons.append(
+                Reason(
+                    "demand.pooled",
+                    f"{rc.name}: calling, waiting for more rooms to share a burn (eco)",
+                    rc.id,
+                    values={"pooled_demand_min": st.pooled_demand_s / 60},
+                )
+            )
 
     # Burn extension and minimum-burn tail: keep useful sinks open rather than stopping.
     if guard.state is BoilerState.FIRING and not calling and heating_allowed:
@@ -425,7 +540,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                             rc.id,
                         )
                     )
-    if guard.state in (BoilerState.LEAD, BoilerState.FIRING) and heating_allowed:
+    if guard.state in (BoilerState.LEAD, BoilerState.FIRING) and (
+        heating_allowed or guard.external
+    ):
         # Heat sinks while there is real demand, and during the minimum-burn tail.
         if (
             calling
@@ -467,14 +584,24 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         guard_cfg = dataclasses.replace(bcfg, min_off_s=sc.min_off_s(bcfg.min_off_s))
         alerts.append(Reason("boiler.short_cycle", sc.message(bcfg.min_off_s)))
     prev_state = guard.state
+    # In safe mode a burn Radiate has not commanded (the watchdog's) is left alone: the
+    # guard follows the relay until it is seen off.
+    own = guard.commanded
     relay = guard.step(
         guard_cfg,
         now,
         want_fire=want_fire,
-        want_stop=want_stop,
+        want_stop=want_stop and (own or not force_stop),
         hard_frost=hard_frost,
-        force_stop=force_stop,
+        force_stop=force_stop and own,
     )
+    # Hand the boiler to the watchdog in safe mode, unless Radiate is in a valve lead
+    # or finishing a burn it commanded (spec 7).
+    handover = force_stop and not (
+        guard.state is BoilerState.LEAD or (guard.state is BoilerState.FIRING and guard.commanded)
+    )
+    if guard.state is BoilerState.FIRING and not handover:
+        guard.commanded = True  # Radiate asserts the relay from this tick on
     sc.commanded = relay
 
     # Oil and runtime accounting, arrival spread for the balance score (spec 5.6, 9).
@@ -490,7 +617,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     )
     if guard.state is not prev_state:
         reasons.append(
-            _boiler_reason(prev_state, guard.state, len(calling), predicted_burn_s, max_gap)
+            _boiler_reason(
+                prev_state, guard.state, len(calling), predicted_burn_s, max_gap, st.pooled_demand_s
+            )
         )
 
     # --- 6: openings ---------------------------------------------------------------------
@@ -541,6 +670,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             "shower",
             "cooker_spike",
             "store_recovery",
+            "sensor_stale",
         ):
             reasons.append(
                 Reason(
@@ -561,14 +691,28 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         reasons=reasons,
         alerts=alerts,
         safe_mode=force_stop,
+        watchdog_handover=handover,
         day_summary=day_summary,
     )
+
+
+def _pooled_demand_s(st: EngineState, calling: list[RoomConfig]) -> float:
+    """Pooled demand (spec 5.3): the full radiator output the calling rooms need
+    between them, as seconds, each room's gap divided by its heating gain. A room that
+    warms quickly needs little of the burner per kelvin, so it counts for less."""
+    total_h = 0.0
+    for rc in calling:
+        rs = st.rooms[rc.id]
+        if rs.temperature is not None:
+            total_h += max(0.0, rs.target - rs.temperature) / max(rs.est.a, 1e-6)
+    return total_h * 3600
 
 
 def _preheat_due(cfg: HouseConfig, rs: RoomState, inp: RoomInput, temp: float, out: float) -> bool:
     """Optimum start: is it time to heat towards the next scheduled setpoint?"""
     nxt, in_s = inp.next_setpoint, inp.next_setpoint_in_s
-    if nxt is None or in_s is None or in_s > PREHEAT_MAX_S or nxt <= temp + cfg.hysteresis_k:
+    horizon = PREHEAT_MAX_S if inp.preheat_max_s is None else inp.preheat_max_s
+    if nxt is None or in_s is None or in_s > horizon or nxt <= temp + cfg.hysteresis_k:
         return False
     # Assume most of the house heats at once (mornings), so the supply factor is low.
     n = sum(1 for r in cfg.rooms if r.controllable)
@@ -723,14 +867,43 @@ def _discipline(rs: RoomState, action: ValveAction, now: float) -> ValveAction:
     return action
 
 
+def _adopt_reason(kind: str, unseen_s: float) -> Reason:
+    """Why the boiler guard took on a relay state it did not command (spec 5.7)."""
+    if unseen_s >= HIDDEN_RELAY_S:
+        what = "burn" if kind == "burn" else "off"
+        if math.isinf(unseen_s):
+            return Reason(
+                "boiler.relay_unseen",
+                f"Boiler relay history unknown at start: minimum {what} runs from now",
+            )
+        return Reason(
+            "boiler.relay_unseen",
+            f"Boiler relay not seen for {unseen_s / 60:.0f} min: minimum {what} runs from now",
+            values={"unseen_min": unseen_s / 60},
+        )
+    if kind == "burn":
+        return Reason(
+            "boiler.adopted",
+            "Burner already on, started outside Radiate: kept on for at least the minimum burn",
+        )
+    return Reason(
+        "boiler.external_stop", "Burner switched off outside Radiate: minimum off runs from now"
+    )
+
+
 def _boiler_reason(
-    prev: BoilerState, new: BoilerState, n: int, burn_s: float, gap: float
+    prev: BoilerState, new: BoilerState, n: int, burn_s: float, gap: float, pooled_s: float
 ) -> Reason:
     if new is BoilerState.LEAD:
         return Reason(
             "boiler.lead",
             f"{n} room(s) calling, predicted burn {burn_s / 60:.0f} min: opening valves",
-            values={"rooms": n, "predicted_burn_min": burn_s / 60, "max_gap_k": gap},
+            values={
+                "rooms": n,
+                "predicted_burn_min": burn_s / 60,
+                "max_gap_k": gap,
+                "pooled_demand_min": pooled_s / 60,
+            },
         )
     if new is BoilerState.FIRING:
         return Reason("boiler.firing", "Burner called")

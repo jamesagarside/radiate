@@ -14,10 +14,13 @@ import json
 from collections.abc import Coroutine
 from typing import Any
 
-from radiate.core import Mode
+from radiate.config.away import parse_local
+from radiate.core import DemandMode, Mode
 from radiate.core.types import RoomConfig
 
 from .runtime import Runtime
+from .schedules import schedules_view
+from .setup import HouseholdSetup, SetupError
 
 SETPOINT_MIN_C = 5.0
 SETPOINT_MAX_C = 28.0
@@ -25,12 +28,17 @@ BOOST_MAX_MIN = 180
 
 
 class RequestError(Exception):
-    """A request the API rejects; `status` is the HTTP status code to send."""
+    """A request the API rejects; `status` is the HTTP status code to send.
 
-    def __init__(self, status: int, text: str) -> None:
+    `body`, when set, is sent as JSON instead of `text`: the household setup's
+    field-level errors.
+    """
+
+    def __init__(self, status: int, text: str, body: dict | None = None) -> None:
         super().__init__(text)
         self.status = status
         self.text = text
+        self.body = body
 
 
 def require_object(body: Any) -> dict:
@@ -44,6 +52,61 @@ def room(rt: Runtime, room_id: str) -> RoomConfig:
         return rt.cfg.room(room_id)
     except KeyError as err:
         raise RequestError(404, "unknown room") from err
+
+
+def person(rt: Runtime, person_id: str) -> str:
+    if person_id not in rt.people:
+        raise RequestError(404, "unknown person")
+    return person_id
+
+
+def _local_time(rt: Runtime, raw: Any, key: str) -> float:
+    if not isinstance(raw, str):
+        raise RequestError(400, f"{key} must be an ISO 8601 date or date and time")
+    try:
+        return parse_local(raw, rt.timezone)
+    except ValueError as err:
+        raise RequestError(400, f"{key} must be an ISO 8601 date or date and time") from err
+
+
+def set_away(rt: Runtime, person_id: str, body: Any) -> dict:
+    """Count a person as away until a local date and time.
+
+    `{"until": "2026-11-24T18:00"}`. Without an offset the time is local to the house;
+    a date on its own means the start of that day. `{"until": null}` clears it.
+    """
+    pid = person(rt, person_id)
+    body = require_object(body)
+    if "until" not in body:
+        raise RequestError(400, "until is required: a date and time, or null to clear")
+    if body["until"] is None:
+        rt.clear_away(pid)
+    else:
+        until = _local_time(rt, body["until"], "until")
+        try:
+            rt.set_away(pid, until)
+        except ValueError as err:
+            raise RequestError(400, str(err)) from err
+    return {"ok": True, "person": rt.person_view(pid)}
+
+
+def set_presence(rt: Runtime, person_id: str, body: Any) -> dict:
+    """Presence from Home Assistant: `{"state": "home" | "not_home", "since": "..."}`.
+
+    `since` is when the state last changed (optional). `{"state": null}` forgets the
+    person's presence, for example when their `person` entity is no longer mapped.
+    """
+    pid = person(rt, person_id)
+    body = require_object(body)
+    if "state" not in body:
+        raise RequestError(400, "state is required: home, not_home or null")
+    state = body["state"]
+    if state is not None and state not in ("home", "not_home"):
+        raise RequestError(400, "state must be home, not_home or null")
+    since = body.get("since")
+    when = None if since is None else _local_time(rt, since, "since")
+    rt.report_presence(pid, state, when)
+    return {"ok": True, "person": rt.person_view(pid)}
 
 
 def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
@@ -113,10 +176,66 @@ def set_mode(rt: Runtime, body: Any) -> dict:
     return {"ok": True}
 
 
+def setup(rt: Runtime) -> HouseholdSetup:
+    if not isinstance(rt.setup, HouseholdSetup):
+        raise RequestError(404, "household setup is not available")
+    return rt.setup
+
+
+def household(rt: Runtime, method: str, body: Any = None) -> dict:
+    """The household setup: GET reads it, PUT saves a draft, DELETE goes back to the
+    house file's. `household/preview` (POST) compiles a draft without saving it."""
+    s = setup(rt)
+    try:
+        if method == "GET":
+            return s.view()
+        if method == "PREVIEW":
+            return s.preview(rt, body)
+        if method == "PUT":
+            return s.save(rt, body)
+        if method == "DELETE":
+            return s.revert(rt)
+    except SetupError as err:
+        raise RequestError(err.status, str(err) or "invalid household", err.body) from err
+    raise RequestError(405, "method not allowed")
+
+
+SETTINGS = ("demand_mode",)
+
+
+def set_settings(rt: Runtime, body: Any) -> dict:
+    """Change runtime settings. Only the keys given change.
+
+    `demand_mode`: `eco`, `comfort`, or null to follow `boiler.demand_mode` in the
+    configuration file. Saved straight away; used from the next tick.
+    """
+    body = require_object(body)
+    unknown = sorted(k for k in body if k not in SETTINGS)
+    if unknown:
+        raise RequestError(400, f"unknown setting: {', '.join(unknown)}")
+    if "demand_mode" in body:
+        value = body["demand_mode"]
+        if value is None:
+            mode = None
+        else:
+            try:
+                mode = DemandMode(value) if isinstance(value, str) else None
+            except ValueError:
+                mode = None
+            if mode is None:
+                raise RequestError(400, "demand_mode must be eco, comfort or null")
+        rt.set_demand_mode(mode)
+    return {"ok": True, "settings": rt.settings()}
+
+
 def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
     """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`."""
     method = method.upper()
     parts = [p for p in path.strip("/").split("/") if p]
+    if parts == ["household"] and method in ("GET", "PUT", "DELETE"):
+        return household(rt, method, body)
+    if parts == ["household", "preview"] and method == "POST":
+        return household(rt, "PREVIEW", body)
     if method == "GET":
         if parts == ["house"]:
             return rt.house()
@@ -124,11 +243,24 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return rt.describe()
         if parts == ["health"]:
             return {"ok": True}
+        if parts == ["people"]:
+            return rt.away_view()
+        if parts == ["schedules"]:
+            return schedules_view(rt)
+        if parts == ["settings"]:
+            return rt.settings()
     elif method == "POST":
         if parts == ["mode"]:
             return set_mode(rt, body)
+        if parts == ["settings"]:
+            return set_settings(rt, body)
         if parts == ["store", "boost"]:
             return boost_store(rt, body)
+        if len(parts) == 3 and parts[0] == "people":
+            if parts[2] == "away":
+                return set_away(rt, parts[1], body)
+            if parts[2] == "presence":
+                return set_presence(rt, parts[1], body)
         if len(parts) == 3 and parts[0] == "rooms":
             if parts[2] == "setpoint":
                 return set_setpoint(rt, parts[1], body)
@@ -161,11 +293,9 @@ class DemoSession:
     """
 
     def __init__(self, start_hour: float = 5.5, seed: int = 7) -> None:
-        from radiate.sim.reference import house_config
+        from .demo import demo_runtime
 
-        from .demo import DemoDriver
-
-        self.rt = Runtime(house_config(), DemoDriver(start_hour=start_hour, seed=seed))
+        self.rt = demo_runtime(start_hour=start_hour, seed=seed)
 
     def step(self, count: int = 1) -> None:
         for _ in range(count):
@@ -183,4 +313,5 @@ class DemoSession:
         try:
             return json.dumps({"status": 200, "body": handle(self.rt, method, path, body)})
         except RequestError as err:
-            return json.dumps({"status": err.status, "body": err.text})
+            body = err.body if err.body is not None else err.text
+            return json.dumps({"status": err.status, "body": body})

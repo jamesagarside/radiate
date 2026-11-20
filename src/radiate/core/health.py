@@ -14,6 +14,13 @@
 - Stuck valve: a room called for heat with its valve open and the TRV heating for
   40 min of flow, other radiators warmed, but its own TRV did not, in 3 burns in a
   row. The room is flagged untrusted (learning paused) until its radiator warms.
+- Leaking valve ("rise with valve closed"): while the boiler sends flow, the room is
+  not calling, its TRV reports it is not heating and its radiator has been off for
+  20 min, the TRV's reading rises at least 1 K relative to the room sensor, in 2 of
+  the last 5 judged burns. Water is getting past a valve that should be shut: lost
+  calibration or a worn seat. Relative to the room, so sun or guests warming the room
+  do not count. The flag clears after 5 judged burns in a row that stayed cool
+  (under 0.5 K over at least 30 min of such flow).
 """
 
 from __future__ import annotations
@@ -38,6 +45,14 @@ HOUR = 3600.0
 
 STUCK_AFTER_S = 40 * 60  # flow with the valve open and calling, per burn
 STUCK_BURNS = 3
+
+# Leaking valve. In simulation a healthy shut valve's TRV rises at most 0.3 K against
+# the room in a burn; a valve passing a tenth of its flow rises 1.1 to 1.2 K.
+LEAK_SETTLE_S = 20 * 60  # radiator off at least this long before watching it
+LEAK_RISE_K = 1.0
+LEAK_WINDOW = 5  # judged burns kept
+LEAK_BURNS = 2  # burns that warmed, within the window, to raise the flag
+LEAK_CLEAR_S = 30 * 60  # shut flow a burn needs to count as clearly cool
 
 
 def _rise(points: list[tuple[float, float]]) -> float:
@@ -164,14 +179,57 @@ class ShortCycle:
 
 @dataclass(slots=True)
 class ValveCheck:
-    """Per room: does its radiator warm when its valve should be open? One verdict a burn."""
+    """Per room: does its radiator warm when its valve should be open, and stay cool
+    when it should be shut? One verdict of each a burn."""
 
     misses: int = 0  # burns in a row with no warming
-    untrusted: bool = False
+    untrusted: bool = False  # stuck: not warming when open
     eligible_s: float = 0.0  # this burn: flowing, calling, valve open, TRV heating
     low: float | None = None  # this burn: lowest TRV reading relative to the room
     rose: bool = False  # this burn: the radiator warmed
     judged: bool = False  # this burn's verdict is in
+    # Leak verdicts of the last judged burns, oldest first: True warmed, False stayed cool.
+    leak_history: list[bool] = field(default_factory=list)
+    leaking: bool = False
+    shut_s: float = 0.0  # this burn: flow while the valve is shut and watched
+    shut_low: float | None = None  # this burn: lowest offset while shut
+    shut_rise: float = 0.0  # this burn: largest rise from that low
+
+    @property
+    def leak_burns(self) -> int:
+        return sum(self.leak_history)
+
+    def observe_shut(self, dt: float, *, flowing: bool, shut: bool, offset: float | None) -> bool:
+        """Watch a valve that should be shut. True when it is newly flagged as leaking.
+
+        `shut`: the valve has been shut since before this flow started, long enough for
+        the radiator to cool, so any warming is water getting past it.
+        `offset`: the TRV's reading minus the room sensor's.
+        """
+        if flowing:
+            if shut and offset is not None:
+                self.shut_s += dt
+                low = offset if self.shut_low is None else min(self.shut_low, offset)
+                self.shut_low = low
+                self.shut_rise = max(self.shut_rise, offset - low)
+            return False
+        # The burn is over: judge it. A leak shows in some burns and not others (it
+        # depends on how many other valves share the flow), hence a window of verdicts.
+        verdict: bool | None = None
+        if self.shut_s > 0 and self.shut_rise >= LEAK_RISE_K:
+            verdict = True
+        elif self.shut_s >= LEAK_CLEAR_S and self.shut_rise < LEAK_RISE_K / 2:
+            verdict = False  # clearly cool; in between says nothing either way
+        self.shut_s, self.shut_low, self.shut_rise = 0.0, None, 0.0
+        if verdict is None:
+            return False
+        self.leak_history = [*self.leak_history, verdict][-LEAK_WINDOW:]
+        if not self.leaking and self.leak_burns >= LEAK_BURNS:
+            self.leaking = True
+            return True
+        if self.leaking and len(self.leak_history) == LEAK_WINDOW and not self.leak_burns:
+            self.leaking = False
+        return False
 
     def observe(self, dt: float, *, flowing: bool, eligible: bool, offset: float | None) -> None:
         if not flowing:

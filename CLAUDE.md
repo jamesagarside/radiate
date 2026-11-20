@@ -2,13 +2,13 @@
 
 ## What this is
 
-A local-first, subscription-free whole-house hydronic balancing and boiler controller. One engine, three editions: standalone service with web UI, Home Assistant App (plus a thin HACS integration), and a cloud version whose control loop still runs on a local edge. See README.md, docs/adr/ and docs/spec.md.
+A local-first, subscription-free whole-house hydronic balancing and boiler controller. One engine, three editions: standalone service with web UI, Home Assistant App (plus a thin HACS integration in its own repository, radiate-ha), and a planned cloud version whose control loop still runs on a local edge. See README.md, docs/adr/ and docs/spec.md.
 
 ## Owner preferences
 
 - UK English, metric units, no em dashes.
 - Concise, direct communication.
-- Python is the language. Core engine in `src/radiate/core` is pure (no I/O, no HA imports). Follow Home Assistant conventions in `custom_components/radiate` (config flow, async), which is a thin API client with no control logic.
+- Python is the language. Core engine in `src/radiate/core` is pure (no I/O, no HA imports). The Home Assistant integration is a thin API client with no control logic, in the Apache-2.0 repo `jamesagarside/radiate-ha` (ADR-0003). Don't drop or rename an API field without changing radiate-ha first; `tests/server/test_ha_contract.py` enforces this.
 - Licence is Elastic License 2.0. Never copy AGPL code (Better Thermostat) into the repo.
 - UI work follows Emil Kowalski's design-engineering principles (emil-design-eng skill).
 - Commits go on a feature branch, with no `Co-Authored-By` or other attribution lines.
@@ -17,10 +17,11 @@ A local-first, subscription-free whole-house hydronic balancing and boiler contr
 ## Docs to read first
 
 - `docs/GLOSSARY.md`: before naming code or writing docs. Use its terms; it maps each to its code identifier.
-- `docs/standards/engineering.md`: before changing `src/`, `custom_components/` or `app/`. Pure core, drivers, time handling, safety rules, testing.
+- `docs/standards/engineering.md`: before changing `src/` or `app/`. Pure core, drivers, time handling, safety rules, testing.
 - `docs/standards/design.md`: before changing `web/` or any UI text. Tokens, motion, accessibility, copy.
+- `docs/implementation-status.md`: before saying a feature exists, and in the same change as any code that builds one. `docs/spec.md` marks unbuilt parts **Not yet implemented** and owner decisions **Open question**: leave an open question for the owner to settle.
 - `docs/deployment.md`: when changing the CLI, Dockerfiles, `app/`, env vars or the watchdog. Keep it accurate.
-- `CONTRIBUTING.md`: test, lint and simulator commands, including the separate `.venv-ha` for `tests/ha`.
+- `CONTRIBUTING.md`: test, lint and simulator commands, and the Home Assistant fixtures.
 - `docs/README.md`: index of everything else.
 
 ## Reference install (first real-world target)

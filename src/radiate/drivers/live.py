@@ -9,6 +9,7 @@ kept in `intended` instead (spec 4.5 one-valve rollout).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import time
 from collections import deque
@@ -17,7 +18,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from radiate.config import SiteConfig
+from radiate.config import SiteConfig, WeekSchedule
 from radiate.core import Actions, Mode, Reason, RoomInput, Snapshot
 from radiate.core.types import RoomRole
 
@@ -75,7 +76,10 @@ class LiveDriver:
         self._last_heating = False
         self._last_store = False
         self._handover = False  # safe mode: boiler left to the Shelly watchdog
+        self._relay_seen_at: float | None = None  # last successful read of the relay
         self._pending: set[asyncio.Task] = set()
+        # Days of ticks the runtime records for replay and bootstrap (spec 4.3, 6).
+        self.history_days = site.history_days
 
     # --- clock -----------------------------------------------------------------------
 
@@ -89,14 +93,75 @@ class LiveDriver:
         t = self._local()
         return t.hour * 60 + t.minute
 
+    def wall_weekday(self) -> int:
+        return self._local().weekday()
+
+    def schedules(self) -> dict[str, tuple[str | None, WeekSchedule]]:
+        """Each controllable room's week as Radiate follows it now, with its schedule name.
+
+        The name is None for a household room, whose week is compiled for the people
+        at home (see `set_household_schedules`). Household rooms give the live week,
+        with warm-by times; the valve's copy starts each period earlier.
+        """
+        return {
+            rc.id: (self.site.devices[rc.id].schedule, self.site.live_schedule_for(rc.id))
+            for rc in self.cfg.rooms
+            if rc.controllable
+        }
+
     def next_change_s(self, room_id: str) -> float | None:
         """Seconds until the room's schedule next changes its setpoint."""
         rc = next((r for r in self.cfg.rooms if r.id == room_id), None)
         if rc is None or not rc.controllable:
             return None
         t = self._local()
-        _, in_s = self.site.schedule_for(room_id).next_change(t.weekday(), t.hour * 60 + t.minute)
+        week = self.site.live_schedule_for(room_id)
+        _, in_s = week.next_change(t.weekday(), t.hour * 60 + t.minute)
         return in_s - t.second
+
+    def replace_household(self, site: SiteConfig) -> None:
+        """Use `site`'s household from now on: a new setup saved from the web UI.
+
+        Rooms it covers follow its weeks; every other room goes back to the house
+        file's schedule. Only the household changes: devices and settings stay as they
+        are. The runtime hands over the weeks for the people away straight after.
+        """
+        self.site = dataclasses.replace(
+            self.site,
+            devices={
+                rid: dataclasses.replace(dev, schedule=site.devices[rid].schedule)
+                if rid in site.devices
+                else dev
+                for rid, dev in self.site.devices.items()
+            },
+            household=site.household,
+            household_schedules=dict(site.household_schedules),
+            household_live=dict(site.household_live),
+        )
+
+    def set_household_schedules(
+        self,
+        schedules: dict[str, WeekSchedule],
+        live: dict[str, WeekSchedule] | None = None,
+    ) -> None:
+        """Use these weeks for the household's rooms from now on (away changed).
+
+        `schedules` are the valve's weeks: the schedule mirror and the Shelly fallback
+        read them through `site.schedule_for`. `live` are the weeks Radiate follows:
+        snapshots and overrides ending at the next change read them through
+        `site.live_schedule_for`. Without `live`, Radiate follows the valve's weeks.
+        The mirror writes a changed week to the TRV on the next apply, or only logs it
+        in dry run, like every other write.
+        """
+        known = {rid: week for rid, week in schedules.items() if rid in self.site.devices}
+        live_known = {
+            rid: week for rid, week in (live or known).items() if rid in self.site.devices
+        }
+        self.site = dataclasses.replace(
+            self.site,
+            household_schedules={**self.site.household_schedules, **known},
+            household_live={**self.site.household_live, **live_known},
+        )
 
     # --- inbound -----------------------------------------------------------------------
 
@@ -153,6 +218,7 @@ class LiveDriver:
                 inp.trv_heating = None if state is None else state == "heat"
                 opening = trv.number("valve_opening_degree")
                 inp.opening_echo = None if opening is None else round(opening)
+                inp.trv_rejected = self._rejected(rc.id)
             else:
                 inp.trv_available = False
             window = self.devices.get(dev.window)
@@ -161,7 +227,7 @@ class LiveDriver:
             if rc.id in fire:
                 inp.fire_switch = True
             if rc.controllable:
-                week = self.site.schedule_for(rc.id)
+                week = self.site.live_schedule_for(rc.id)
                 if rc.id in overrides:
                     inp.setpoint = overrides[rc.id]
                 else:
@@ -176,10 +242,17 @@ class LiveDriver:
             if age is not None and age <= OUTDOOR_MAX_AGE_S:
                 outdoor = out_dev.number("temperature")
 
+        # Without a reading, the relay is taken to be as last commanded. When it is read
+        # again, the core is told how long it went unseen: the watchdog may have
+        # switched it meanwhile (spec 5.7 hand-back).
         heating, store = self._last_heating, self._last_store
+        unseen = 0.0
         if self.boiler is not None and self.boiler.reachable and self.boiler.heating:
             heating = self.boiler.heating.output
             store = self.boiler.store.output if self.boiler.store else store
+            if self._relay_seen_at is not None:
+                unseen = now - self._relay_seen_at
+            self._relay_seen_at = now
         return Snapshot(
             now=now,
             minute_of_day=minute,
@@ -190,6 +263,9 @@ class LiveDriver:
             mode=mode,
             store_boost=store_boost,
             day=local.date().toordinal(),
+            # In dry run the relay is not Radiate's: the guard must not adopt it.
+            relay_follows_commands=not self.dry_run,
+            heating_relay_unseen_s=unseen,
         )
 
     async def apply(self, actions: Actions) -> None:
@@ -204,10 +280,12 @@ class LiveDriver:
             for write in writer.plan(action, echo, now, mirror):
                 self._send(write)
         self._last_heating, self._last_store = actions.heating_relay, actions.store_relay
-        # Safe mode with the burner off: stop commanding the relay and stop the
-        # heartbeat, so the Shelly watchdog runs its fallback schedule (spec 7).
-        handover = actions.safe_mode and not actions.heating_relay
-        if handover and not self._handover:
+        # Safe mode with no burn of Radiate's own: stop commanding the relay and stop
+        # the heartbeat, so the Shelly watchdog runs its fallback schedule (spec 7).
+        # The core decides; it keeps following the relay meanwhile, so it can hand back.
+        handover = actions.watchdog_handover
+        starting = handover and not self._handover
+        if starting:
             LOG.warning("safe mode: boiler handed to the Shelly watchdog")
         elif self._handover and not handover:
             LOG.info("safe mode over: Radiate controls the boiler again")
@@ -217,6 +295,12 @@ class LiveDriver:
                 await self.boiler.command(
                     actions.heating_relay, actions.store_relay, int(self._wall())
                 )
+            elif starting and not actions.heating_relay:
+                # Radiate's own burn has just ended: switch it off once, without a
+                # heartbeat, rather than leave it on until the watchdog takes over.
+                await self.boiler.command(
+                    False, actions.store_relay, int(self._wall()), heartbeat=False
+                )
             heat = fallback_heating_windows(
                 [self.site.schedule_for(r.id) for r in self.cfg.rooms if r.controllable],
                 weekday,
@@ -225,12 +309,7 @@ class LiveDriver:
 
     def _mirror(self, room_id: str) -> dict[str, str]:
         """The room's schedule in the frame its TRV compares setpoints with."""
-        week = self.site.schedule_for(room_id)
-        rc = self.cfg.room(room_id)
-        if rc.role is RoomRole.INTERNAL_SENSOR_ONLY:
-            # The TRV reads about room - bias; spec 4.6 and decide._trv_setpoint.
-            week = week.shifted(-rc.trv_bias_k)
-        return week.trvzb_payload()
+        return self.site.mirror_payload(room_id)
 
     def _send(self, write: Write) -> None:
         if write.delay_s > 0:
@@ -258,6 +337,16 @@ class LiveDriver:
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
 
+    def _rejected(self, room_id: str) -> tuple[str, ...]:
+        """Settings the room's TRV did not take after the reconciler's retries.
+
+        None in dry run: nothing was sent, so an echo that disagrees proves nothing.
+        """
+        w = self.writers.get(room_id)
+        if w is None or self.dry_run:
+            return ()
+        return tuple(sorted(w.failed))
+
     def _zigbee_up(self) -> bool:
         return self._connected() and self.devices.bridge_online is not False
 
@@ -282,9 +371,9 @@ class LiveDriver:
             trv = self.devices.get(dev.trv)
             if dev.trv and not is_available(trv, now, self.site.sensor_max_silence_s):
                 out.append(Reason("driver.trv_offline", f"{rc.name}: TRV not reachable", rc.id))
-            w = self.writers.get(rc.id)
-            if w is not None and w.failed:
-                keys = ", ".join(sorted(w.failed))
+            rejected = self._rejected(rc.id)
+            if rejected:
+                keys = ", ".join(rejected)
                 out.append(
                     Reason("driver.write_failed", f"{rc.name}: TRV did not accept {keys}", rc.id)
                 )

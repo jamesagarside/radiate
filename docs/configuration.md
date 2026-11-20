@@ -1,6 +1,6 @@
 # Configuration
 
-Radiate reads one YAML file that describes your house: rooms, the Zigbee2MQTT devices in each room, heating schedules, the boiler relay, and the hot-water store. Start from [`examples/reference-house.yaml`](../examples/reference-house.yaml) and change the device names to match yours.
+Radiate reads one YAML file that describes your house: rooms, the Zigbee2MQTT devices in each room, heating schedules, the boiler relay, and the hot-water store. To draft the file from the devices Zigbee2MQTT already knows, see [Start from your devices](#start-from-your-devices). To write it by hand, start from [`examples/reference-house.yaml`](../examples/reference-house.yaml) and change the device names to match yours.
 
 To check a file without touching any device:
 
@@ -9,6 +9,91 @@ radiate check-config radiate.yaml
 ```
 
 The command lists every room with its devices, marks the valves Radiate will actuate, and prints any notes. If the file has problems, it lists all of them with their location, for example `rooms[2].trv: required for a normal room`.
+
+To see each room's weekly schedule in words, including schedules built from a [household](#household) section:
+
+```bash
+radiate schedules radiate.yaml
+```
+
+Add `--trvzb` to print, as JSON, the Zigbee2MQTT `/set` payload that the schedule mirror writes to each TRV, keyed by the TRV's friendly name. An internal-sensor room's payload is in the TRV's own frame, so its temperatures are higher than the room's by the TRV bias. Neither form needs the secrets in the file to be set.
+
+## Start from your devices
+
+`radiate discover` drafts a configuration file from Zigbee2MQTT's device list, so you don't have to type every friendly name. It connects to the MQTT broker, reads the retained `zigbee2mqtt/bridge/devices` and `zigbee2mqtt/bridge/groups` messages, and groups the devices it recognises into rooms. It only reads: it never publishes to the broker and never writes to a device. It uses its own MQTT client ID, `radiate-discover`, so it doesn't disconnect a Radiate server that's already running.
+
+```bash
+export RADIATE_MQTT_PASSWORD=change-me
+radiate discover --host 192.0.2.20 --username radiate --out radiate.yaml
+```
+
+Then check the draft before you use it:
+
+1. Read the warnings at the top of the file, for example a TRVZB on old firmware.
+2. Check each room. Add `heat_source` to rooms with an open fire, a wood burner, or a range cooker.
+3. Place the devices listed at the end of the file by hand, or delete the list.
+4. Run `radiate check-config radiate.yaml`. It needs `RADIATE_MQTT_PASSWORD` set, because the draft refers to it as `${RADIATE_MQTT_PASSWORD}`.
+
+### What it recognises
+
+| Device | Recognised by | Becomes |
+|---|---|---|
+| TRV | Model `TRVZB`, or any device that exposes `valve_opening_degree` or `external_temperature_input` | The room's `trv`. A TRV other than the Sonoff TRVZB gets a warning: Radiate is written and tested for the TRVZB |
+| Temperature sensor | Model `SNZB-02B`, or any device that exposes `temperature` | The room's `sensor`, or `house.outdoor_sensor` if its name contains outdoor, outside, garden, exterior, or external (but not "room", so a garden room stays a room) |
+| Contact sensor | Exposes `contact` | The room's `window` |
+
+A thermostat that exposes neither valve feature is left out with a warning, because Radiate can't drive it. Discover skips the coordinator and disabled devices, and lists devices that Zigbee2MQTT doesn't support among the devices Radiate doesn't use.
+
+For each TRVZB, discover reads the firmware version from `software_build_id` and warns if it's older than 1.1.4 (no opening or closing degree), older than 1.2.1 (no `external_temperature_input`) in a room with its own sensor, or if Zigbee2MQTT doesn't report it.
+
+### How it finds rooms
+
+Discover tries these in order for each device:
+
+1. `area: NAME` or `room: NAME` in the device's description in Zigbee2MQTT. `area: Bedroom 1` gives the room `bedroom_1`.
+2. The friendly name, with the words that describe the device removed (such as `trv`, `valve`, `radiator`, `temp`, `temperature`, `sensor`, `window`, and the device's model) and any IEEE address. `trv_bedroom_1`, `temp_bedroom_1`, `Bedroom 1 TRV`, `TRV Bedroom 1`, and `bedroom_1/trv` all give `bedroom_1`. In a path such as `upstairs/bathroom/trv`, the deepest part that names a room is used, so the room is `bathroom`. If two devices of the same kind then share a room, discover uses the whole path for every device on that path, so `upstairs/bathroom/trv` and `downstairs/bathroom/trv` become `upstairs_bathroom` and `downstairs_bathroom`.
+3. The Zigbee2MQTT group the device belongs to, named the same way. This helps when a device still has its IEEE address as its name. Discover only uses a group with at most one TRV in it, so a group such as `All radiators` doesn't count as a room.
+
+A name that is only a number after the device words are removed, such as `TRV 1`, doesn't give a room. Radiate drives one TRV, one sensor and one window per room, so a second one in the same room is listed for you to place.
+
+### What the draft contains
+
+- One room for each TRV. A room with a TRV and a sensor is `normal`. A room with a TRV and no sensor is `internal_sensor_only`.
+- A room for each sensor with no TRV, commented out as a `passive` candidate. Uncomment it only if the room's radiator has no controllable valve, such as a bypass radiator left open. Discover can't tell an unvalved radiator from a room with no radiator.
+- `humidity: true` on bathrooms and shower rooms whose sensor reports humidity.
+- One `default` schedule for every room, `dry_run: true`, and `actuate: true` on one pilot valve: the first normal room with a TRVZB on current firmware, avoiding bathrooms, whose shower spikes make a poor first test.
+- The `mqtt` section from the options you gave, with the password as `${RADIATE_MQTT_PASSWORD}`. Without `--username` or a password, the credentials are commented out.
+- The `shelly` section as a comment, to fill in once the relay is wired.
+- Comments listing the warnings, the devices discover couldn't place, and the devices Radiate doesn't use.
+
+### Options
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--host` | `localhost` | MQTT broker |
+| `--port` | 1883 | Broker port |
+| `--username` | none | Broker user name |
+| `--password` | `RADIATE_MQTT_PASSWORD` | Broker password. Prefer the environment variable, which stays out of your shell history |
+| `--tls` | off | Connect with TLS |
+| `--base-topic` | `zigbee2mqtt` | Zigbee2MQTT's base topic |
+| `--timeout` | 10 | Seconds to wait for the device list |
+| `--from-file FILE` | | Read a saved `bridge/devices` payload instead of the broker |
+| `--groups-file FILE` | | Read a saved `bridge/groups` payload, with `--from-file` |
+| `--out FILE` | stdout | Write the draft to `FILE`. Discover never overwrites an existing file unless you add `--force` |
+
+### Work from a saved device list
+
+To run discover on a machine that can't reach the broker, save the retained messages with `mosquitto_sub`. The `-C 1` option exits after the first message, which is the retained one:
+
+```bash
+mosquitto_sub -h 192.0.2.20 -u radiate -P "$RADIATE_MQTT_PASSWORD" \
+  -t zigbee2mqtt/bridge/devices -C 1 > devices.json
+mosquitto_sub -h 192.0.2.20 -u radiate -P "$RADIATE_MQTT_PASSWORD" \
+  -t zigbee2mqtt/bridge/groups -C 1 > groups.json
+radiate discover --from-file devices.json --groups-file groups.json --out radiate.yaml
+```
+
+Unless you also pass `--host`, the draft has `host: localhost`. Change it to your broker's address.
 
 ## Bring Radiate in gradually
 
@@ -36,11 +121,22 @@ The server waits up to 40 seconds for MQTT and the first TRV readings, then runs
 
 - Learned room models, arrival lags, lockshield caps, and the boiler guard. A restart in the middle of a burn still honours the minimum burn time.
 - The house ID used in Elastic exports, so it stays the same across restarts.
-- The heating mode (`auto`, `off`, or `frost`).
+- The heating mode (`auto`, `off`, or `frost`), and the demand mode if you changed it through the API.
 - The Elastic export queue, up to 7 days, so an outage or restart loses no metrics.
 - Setpoint overrides from the UI, the API or the Home Assistant climate entity. An override ends at the room's next scheduled setpoint change unless it was set for a duration or until cleared, and one that ends while Radiate is stopped is dropped on restart.
+- The tick history: every tick's inputs and decisions for the last `house.history_days` days. See [Tick history and replay](#tick-history-and-replay).
 
 For Docker, the Home Assistant App and the other ways to run the server, see [deployment](deployment.md).
+
+## Tick history and replay
+
+Each minute the live server records the tick's snapshot (every room's readings, setpoints and relay states) and what Radiate decided: valve settings, relays, the boiler state, and the reason and alert codes. Reason messages aren't stored. The server also records how its engine state was built each time it starts, and a copy of the engine state every 6 hours.
+
+The history keeps `house.history_days` days, 14 by default, and Radiate deletes older entries every hour. Each tick takes about 0.7 kB, compressed, so the reference house uses about 1.2 MB a day and 17 MB for 14 days. The demo doesn't record.
+
+`radiate replay` shows what Radiate would have done during a dry run and why, and checks a code or configuration change against real days before you use it. If Radiate starts without usable saved state, it replays the history to learn its room models again. See [replay and bootstrap](deployment.md#replay-and-bootstrap).
+
+In dry run, Radiate only decides valve settings for the rooms it actuates, which is the pilot valve unless rooms set `actuate`. To see every room's valve settings in the history while nothing is written, set `actuate: true` on every room and keep `dry_run: true`.
 
 ## Secrets
 
@@ -60,8 +156,9 @@ mqtt:
 | `timezone` | `Europe/London` | Time zone for schedules and the store windows |
 | `dry_run` | `true` | Read devices, write nothing |
 | `outdoor_sensor` | none | Zigbee2MQTT name of an outdoor temperature sensor. Without one, the model assumes 5 °C |
-| `data_dir` | `./data` | Folder for `radiate.db` |
+| `data_dir` | `./data` | Folder for `radiate.db`, and for `household.yaml` when you set up the household in the web UI |
 | `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale |
+| `history_days` | 14 | Days of tick history kept in `radiate.db`, 0 to 90. Set 0 to turn recording off |
 
 ### mqtt
 
@@ -81,7 +178,18 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 
 ### boiler
 
-`min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none). Ranges are checked against spec section 5.1.
+`min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none), `demand_mode` (`eco`), `eco_limit_k` (1.5). Ranges are checked against spec section 5.1.
+
+`demand_mode` decides how calling rooms fire the boiler (spec section 5.3):
+
+| Value | Behaviour |
+|---|---|
+| `eco` (default) | Rooms fire the boiler together. The boiler starts when the calling rooms between them need at least 1.5 minimum burns of full radiator output (each room's gap divided by its learned heating gain), or when one room is more than `eco_limit_k` below its target. A small room on its own, such as a toilet, waits until it is colder or other rooms call too. Fewer, longer burns |
+| `comfort` | Any calling room more than `comfort_limit_k` below its target fires the boiler, as does a predicted burn of 1.5 minimum burns. Rooms stay closer to their targets, with more relay starts |
+
+In both modes frost protection and optimum start still fire the boiler. `eco_limit_k` is the most a calling room waits below its target in `eco` mode: 0.5 to 3 K, and at least `comfort_limit_k`.
+
+You can change the demand mode without a restart with the **Eco** and **Comfort** control in the web UI, the Demand mode select in Home Assistant, or the API (`POST /api/v1/settings` with `{"demand_mode": "comfort"}`). That choice is saved in `radiate.db` and overrides `demand_mode` in this file until you send `{"demand_mode": null}`. The web UI and Home Assistant send null when you pick the mode set in this file, so Radiate follows the file again.
 
 `nozzle_lph` is the burner nozzle rating in litres per hour, from the boiler's service sheet. With it, the daily accounting also estimates litres and kWh. Burner time comes from the heating relay, so the litres are an upper bound.
 
@@ -109,6 +217,199 @@ schedules:
     weekend: "08:00/20 22:30/16"
 ```
 
+If a [household](#household) section covers every room, you don't need a `schedules` section.
+
+### household
+
+Instead of writing schedules, you can describe the people in the house and how each room is used. Radiate builds an ordinary weekly schedule for every room listed under `household.rooms`, so the schedule mirror, the web UI and Home Assistant work the same way. A full example is [`examples/household.yaml`](../examples/household.yaml). Its people, times and rooms are an example: replace them with your own.
+
+```yaml
+household:
+  temperatures:               # house-wide, °C; these are the defaults
+    in_use: 19
+    occasional: 16
+    unused: 14
+    night: 14
+  people:
+    early_riser:
+      name: Early riser       # shown in the UI only
+      weekdays:
+        up: "06:30"
+        out: "07:30-18:00"
+        bed: "22:30"
+      weekend:
+        up: "08:30"
+        out: "10:00-18:00"
+        bed: "22:30"
+    home_worker:
+      weekdays:
+        up: "08:00"
+        work: "08:00-18:00"
+        bed: "22:30"
+  rooms:
+    bedroom_1:
+      use: in_use
+      kind: bedroom
+      people: [early_riser, home_worker]
+    bedroom_3:
+      use: in_use
+      kind: office
+      people: [home_worker]
+    kitchen:
+      use: in_use
+    lounge:
+      use: unused
+    toilet:
+      use: {weekdays: unused, weekend: occasional}
+      kind: all_day
+      temperature: 15
+```
+
+Put times in quotes. YAML reads an unquoted `22:30` as a number, and Radiate reports it.
+
+`temperatures` sets one temperature for each use level, and the night temperature every room drops to overnight. Values are 4 to 35 °C and are rounded to 0.5 °C. Below 12 °C, `check-config` notes that walls and window frames can get damp. You can still use a lower value.
+
+`people` maps a person ID (lower case letters, digits and `_`) to their routine and, optionally, their own timing:
+
+| Key | Meaning |
+|---|---|
+| `name` | Display name, shown in the UI only |
+| `weekdays` | Required. The routine for days that aren't weekend days |
+| `weekend` | The routine for weekend days. Defaults to the weekday routine |
+| `getting_up_min` | Replaces `timing.getting_up_min` for this person |
+| `bedtime_min` | Replaces `timing.bedtime_min` for this person |
+| `weekend_days` | Replaces `household.weekend_days` for this person, for example `[mon, tue]` for someone who works weekends |
+
+Each routine has these keys:
+
+| Key | Meaning |
+|---|---|
+| `up` | Required. When the person gets up, `HH:MM` |
+| `bed` | Required. When they go to bed, after `up` on the same day. `24:00` is allowed |
+| `out` | When they're out of the house: one `HH:MM-HH:MM` window or a list of them |
+| `work` | When they work from home, in the same form. Link them to an office room |
+
+`out` and `work` windows must fall between `up` and `bed` and must not overlap.
+
+`rooms` maps a room ID from the `rooms` section to how it's used:
+
+| Key | Meaning |
+|---|---|
+| `use` | Required. The use level: `in_use`, `occasional` or `unused`. For a different level at weekends, write `{weekdays: unused, weekend: occasional}` |
+| `kind` | `shared` (the default), `bedroom`, `office`, `while_home` or `all_day`. See [How schedules are built](#how-schedules-are-built) |
+| `people` | The person IDs who use the room. Required for a bedroom or an office. Defaults to everyone |
+| `temperature` | Replaces the use level's temperature in this room |
+| `night_temperature` | Replaces `temperatures.night` in this room, for example a warmer nursery |
+| `unused_temperature` | Replaces `temperatures.unused` in this room |
+| `preheat_min` | Replaces `timing.preheat_min` in this room, for example a slow room with a small radiator |
+
+A room in `household.rooms` can't also set `schedule` in the `rooms` section. Rooms not listed keep their `schedule`. A passive room has no valve, so it can't be listed.
+
+#### Set up in the web UI
+
+You can set up the household in the web UI instead of writing this section. Without a household, the web UI shows **Set up your household**; with one, **Change household setup** sits beside the People heading. Five short steps ask about the people, their routines, how each room is used and the temperatures, then show the week each room will follow.
+
+The web UI doesn't change the house file, which may be read-only or managed by the Home Assistant App. It saves the household in `household.yaml` in the data directory (`house.data_dir`, or `--data-dir`), in the same form as this section under a `household:` key, so you can paste it into a house file.
+
+When `household.yaml` exists, it replaces the house file's `household` section. The house file's other sections still apply, and a room the saved household leaves out follows its own `schedule`. To go back to the house file's setup, choose **Use the house file's setup instead** in the wizard, or delete the file and restart Radiate.
+
+`check-config` and `radiate schedules` read `household.yaml` from the same data directory as the server, so they agree with it. Give them `--data-dir` when the server runs with one:
+
+```bash
+radiate check-config radiate.yaml --data-dir /data
+radiate schedules radiate.yaml --data-dir /data
+```
+
+`check-config` says which household applies. If the saved household no longer fits the house file, for example because a room was removed, Radiate uses the house file's setup instead, `check-config` notes why, and the wizard shows it.
+
+#### Household settings
+
+Every setting below is optional. The defaults describe one way of living, so change any of them to suit your household. `check-config` reports a value outside its range.
+
+`weekend_days` lists the days that use each person's weekend routine and each room's weekend use level. It's `[sat, sun]` by default. Write days as `mon` to `sun` or in full. An empty list means every day uses the weekday routine. A person can set their own `weekend_days`; rooms always follow the house-wide list.
+
+`timing` sets how routines turn into warm periods. Values are whole minutes.
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `preheat_min` | 30 | 0 to 180 | How early each warm period starts in the valve's own copy of the schedule, so the room is warm in time when the valve runs it without Radiate |
+| `live_preheat` | `optimum_start` | `optimum_start` or `fixed` | How Radiate itself starts early. `optimum_start`: each warm period starts when the room is needed, and optimum start decides how early to heat from what Radiate has learned. `fixed`: Radiate follows the valve's copy, `preheat_min` early, as well as using optimum start |
+| `getting_up_min` | 30 | 0 to 180 | How long a bedroom or shared room counts as in use after someone gets up |
+| `bedtime_min` | 30 | 0 to 180 | How long a bedroom counts as in use before someone goes to bed |
+| `merge_gap_min` | 30 | 0 to 120 | Warm periods this close together, or closer, join into one |
+
+`away` sets how away and Home Assistant presence work. Values are whole minutes.
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `presence_delay_min` | 60 | 0 to 720 | How long Home Assistant must say a person is not home before they count as away |
+| `presence_stale_after_min` | 60 | 20 to 1440, or 0 for off | Presence that Home Assistant hasn't reported again within this time counts as unknown, not away |
+| `return_warmup_min` | 180 | 0 to 360 | How early Radiate can start warming rooms for someone who is due back. 0 means rooms start warming when they arrive |
+| `everyone_away` | `frost` | `frost` or `unused` | What happens when everyone is away. `frost`: every room is held at the frost threshold. `unused`: every household room stays at its unused temperature, for example for pets or a house that gets damp |
+
+`presence_delay_min` used to sit directly under `household`. If your file still has it there, `check-config` tells you to move it to `household.away`.
+
+#### How schedules are built
+
+Radiate works out when each room is in use, day by day:
+
+- A `bedroom` is in use for `getting_up_min` after each of its people gets up, and for `bedtime_min` before they go to bed.
+- An `office` is in use during its people's `work` hours.
+- A `shared` room is in use while any of its people is up, at home and not working. It's also in use for `getting_up_min` after they get up, even if they then go out or start work.
+- A `while_home` room is in use while any of its people is up and at home, working or not. Use it for a kitchen or dining room that should stay warm while someone works from home.
+- An `all_day` room is in use from the first of its people getting up until the last goes to bed, whether or not anyone is at home.
+- An `unused` room is never in use.
+
+Then:
+
+1. Periods of use `merge_gap_min` or less apart join into one. Radiate measures the gap after starting each period `preheat_min` early.
+2. During those periods the room gets its use level's temperature, or its own `temperature`. Outside them it gets the unused temperature between the first person getting up and the last going to bed, and the night temperature overnight.
+3. Each room gets two copies of its week:
+   - The valve's copy starts each period `preheat_min` early. The schedule mirror writes it to the TRV, and the Shelly fallback uses it, because a valve on its own can't start early by itself. The TRVZB holds six changes a day. If a day needs more, the valve's copy leaves out the shortest warm periods until it fits, and `check-config` and `radiate schedules` say which ones.
+   - Radiate's own copy starts each period when the room is needed: "warm by 06:30". Optimum start then decides how early to heat, from the room's learned heating rate and arrival lag, so the fixed preheat isn't added on top. This copy keeps every warm period. With `live_preheat: fixed`, Radiate follows the valve's copy instead.
+
+With the example above, Radiate's copy has the kitchen at 19 °C from 06:30 to 08:30 and from 18:00 to 22:30 on weekdays. The valve's copy has it at 19 °C from 06:00 to 08:30 and from 17:30 to 22:30. Both have it at 14 °C the rest of the time. `radiate schedules` prints the valve's copy of every room.
+
+A room with a range cooker or other steady heat source needs nothing special. Choose its use level and kind like any other room, and set `heat_source: continuous` in the `rooms` section so Radiate learns that heat as part of the room.
+
+#### Away
+
+When a person is away, Radiate rebuilds the household's schedules without their part of the routine. If the home worker travels, their office drops to the unused temperature and the bedroom stays warm for the early riser. Rooms with a hand-written `schedule` don't change. The schedule mirror writes the rebuilt weeks to the TRVs (in dry run, it logs them).
+
+A person counts as away in two ways:
+
+- Away until: someone sets it in the web UI, through the API, or with the Home Assistant service `radiate.set_away`. It counts straight away and clears itself at the given time. You don't need Home Assistant for this.
+- Presence: the Home Assistant integration reports a mapped `person` entity as home or not home. Not home counts as away once it has lasted `presence_delay_min`. Home counts at once.
+
+Away until wins over a home that Home Assistant reported before it was set, so you can set it before you leave. If Home Assistant sees the person arrive home after it was set, the away ends early.
+
+`presence_delay_min` is 60 minutes by default. An hour is longer than a trip to the shops or the school run, and shorter than a working day or an evening out. A room cools slowly, so turning it down for a short trip saves little heat and costs an extra boiler start to warm it again. Set it to 0 to count a person as away as soon as they leave.
+
+The integration reports each person's presence again every 15 minutes. If Home Assistant stops reporting, for example because it's down, presence older than `presence_stale_after_min` counts as unknown. An unknown person isn't away, so their rooms follow their routine. The API and the Home Assistant away entity show when presence has gone stale. Set `presence_stale_after_min` to 0 if something reports presence through the API without repeating it.
+
+When everyone is away and the heating mode is `auto`, the house holds every room at the frost threshold, like the `frost` mode, or at its unused temperature with `everyone_away: unused`. It goes back to the schedules as soon as someone is home. The heating mode you chose doesn't change, so `off` and `frost` still apply while everyone is away. Frost protection and the boiler guards work as usual.
+
+#### Coming back
+
+When someone has set an away until, Radiate knows when they're due back. From `return_warmup_min` before that time, Radiate treats the return as the next change in each room's schedule. Optimum start then starts heating each room as early as it needs, so a house that cooled during a long absence starts early, and a house that is still warm after a short one starts late. While everyone is away, rooms stay at frost protection until then, unless optimum start says a room must start heating. The person counts as away until the time they gave.
+
+Until Radiate has learned a room, optimum start can begin as early as `return_warmup_min` allows. A larger value can mean an earlier start for an unlearned room.
+
+With `live_preheat: fixed`, the person stops counting as away `preheat_min` before the time they gave, as the valve's copy expects.
+
+Presence on its own gives no return time. If Home Assistant still says the person is not home at the time they gave, presence keeps them away after it.
+
+Away state is saved in the state database, so it survives a restart.
+
+### learning
+
+How Radiate learns each room's model (spec sections 4.3 and 4.6).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `memory_days` | 730 | How long a room's model remembers, in days of learning, 1 to 3650. A long memory keeps one odd week from moving the model. Radiate also watches each model and re-learns it when a real change shows, such as a radiator bled or replaced, so a long memory doesn't stop it following the house |
+| `learn_on_trv_fallback` | `false` | While a room's own sensor is stale, Radiate uses its TRV reading plus `trv_bias_k`. With `false` it doesn't learn from that reading, because the TRV sits beside the radiator. Set `true` to keep learning |
+
 ### balancing
 
 A top-level key, default `true`. Set `balancing: false` to open every heating valve fully instead of sharing flow between them. The boiler guards, optimum start and learning still run. It exists to compare against balancing, for example in the simulator.
@@ -123,11 +424,11 @@ A top-level key, default `true`. Set `balancing: false` to open every heating va
 | `trv` | Zigbee2MQTT name of the TRVZB |
 | `sensor` | Zigbee2MQTT name of the room temperature sensor |
 | `window` | Zigbee2MQTT name of a contact sensor. `contact: false` means open |
-| `schedule` | Name of a schedule. Defaults to `default`, so every room except a `passive` one needs a schedule of that name or its own `schedule` key |
+| `schedule` | Name of a schedule. Defaults to `default`, so every room except a `passive` one needs a schedule of that name, its own `schedule` key, or an entry in `household.rooms` |
 | `heat_source` | `episodic` (open fire, wood burner) or `continuous` (range cooker) |
 | `humidity` | `true` to use the sensor's humidity for shower detection |
-| `actuate` | `true` to let Radiate write to this room's TRV |
-| `trv_bias_k` | Offset from the TRV's internal reading to room temperature, default -1.5 |
+| `actuate` | `true` to let Radiate write to this room's TRV (`RoomConfig.actuation_enabled` in code). Without any `actuate` keys, only the pilot valve is actuated |
+| `trv_bias_k` | Offset from the TRV's internal reading to room temperature, default -1.5. Used in an `internal_sensor_only` room, and in a `normal` room while its sensor is stale |
 
 ## Zigbee2MQTT notes
 

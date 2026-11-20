@@ -5,7 +5,6 @@
 ## Checklist
 
 - [ ] Tests added or updated; `pytest` passes
-- [ ] `tests/ha` passes (only if `custom_components/radiate` changed)
 - [ ] `ruff check` and `ruff format --check` pass
 - [ ] Simulator compared before and after with `radiate sim --days 5` (only if the core changed)
 - [ ] Docs updated where behaviour changed (spec, configuration, deployment, glossary)

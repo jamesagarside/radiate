@@ -20,7 +20,7 @@ The demo needs nothing else. To run a real house you also need:
 - An MQTT broker, such as Mosquitto, and Zigbee2MQTT publishing to it, with availability turned on.
 - Sonoff TRVZB valves on firmware 1.2.1 or later, and room temperature sensors, paired in Zigbee2MQTT.
 - Optionally, a Shelly 2PM Gen4 at the boiler: switch 0 for central heating demand, switch 1 for the hot-water store. Have a qualified engineer (OFTEC, for oil) do the boiler wiring.
-- A configuration file describing your house. Start from [`examples/reference-house.yaml`](../examples/reference-house.yaml) and see [configuration](configuration.md).
+- A configuration file describing your house. Draft it from your Zigbee2MQTT devices with `radiate discover` (see [Start from your devices](configuration.md#start-from-your-devices)), or start from [`examples/reference-house.yaml`](../examples/reference-house.yaml).
 
 ## From source with uv
 
@@ -40,9 +40,10 @@ Run the demo, a simulated house at 60 times real time:
 .venv/bin/radiate serve --demo --speed 60
 ```
 
-Run your own house. Check the file first; the server starts in dry run unless the file sets `house.dry_run: false`:
+Run your own house. Draft the file from Zigbee2MQTT's device list, then check it; the server starts in dry run unless the file sets `house.dry_run: false`:
 
 ```bash
+.venv/bin/radiate discover --host 192.0.2.20 --username radiate --out radiate.yaml
 .venv/bin/radiate check-config radiate.yaml
 .venv/bin/radiate serve --config radiate.yaml
 ```
@@ -54,6 +55,7 @@ Run your own house. Check the file first; the server starts in dry run unless th
 | `--demo` | | Drive the simulated reference house. Use exactly one of `--demo` and `--config` |
 | `--config FILE` | | Drive real devices described in `FILE` |
 | `--dry-run` | off | Force dry run whatever the file says |
+| `--data-dir DIR` | `house.data_dir` | Keep `radiate.db` in `DIR` instead |
 | `--speed N` | 60 | Demo only: simulated minutes per real minute |
 | `--host HOST` | `0.0.0.0` | Address to listen on |
 | `--port PORT` | 8099 | Port to listen on |
@@ -84,7 +86,13 @@ docker run --rm -p 8099:8099 radiate radiate serve --demo --speed 60
 
 ### Run your own house in Docker
 
-1. Put your configuration file in a folder on the host, for example `/srv/radiate/radiate.yaml`.
+1. Put your configuration file in a folder on the host, for example `/srv/radiate/radiate.yaml`. To draft it from your Zigbee2MQTT devices, run discover in the container with `RADIATE_MQTT_PASSWORD` set in your shell. It only reads from the broker, and the draft still needs the checks in [Start from your devices](configuration.md#start-from-your-devices):
+
+   ```bash
+   docker run --rm -v /srv/radiate:/out -e RADIATE_MQTT_PASSWORD \
+     radiate radiate discover --host 192.0.2.20 --username radiate --out /out/radiate.yaml
+   ```
+
 2. In the file, set `house.data_dir: /data` so state goes to a volume, and set `mqtt.host` to an address the container can reach. `localhost` inside the container is the container itself.
 3. Put secrets in an env file, for example `/srv/radiate/radiate.env`, and refer to them from the configuration file as `${NAME}`:
 
@@ -200,46 +208,17 @@ Each time it starts, the App announces itself to the Supervisor with its host na
 
 ## HACS integration
 
-The integration is a thin client of the server's API. It adds entities and services to Home Assistant but contains no control logic, so heating carries on if Home Assistant stops. It needs Home Assistant 2025.2 or later and [HACS](https://hacs.xyz/).
+The Home Assistant integration lives in its own repository, [radiate-ha](https://github.com/jamesagarside/radiate-ha), which lists its entities and services. It's a thin client of the server's API: it adds entities and services to Home Assistant but contains no control logic, so heating carries on if Home Assistant stops. It needs Home Assistant 2025.2 or later and [HACS](https://hacs.xyz/).
 
-1. In HACS, open the top-right menu, select **Custom repositories**, add `https://github.com/jamesagarside/radiate` with the type **Integration**, then download **Radiate**.
+1. In HACS, open the top-right menu, select **Custom repositories**, add `https://github.com/jamesagarside/radiate-ha` with the type **Integration**, then download **Radiate**.
 2. Restart Home Assistant.
 3. Add the integration:
    - With the App: accept the discovered **Radiate** under **Settings** > **Devices & services**.
    - With a standalone server: go to **Settings** > **Devices & services** > **Add integration** > **Radiate**, and enter the server URL, for example `http://192.0.2.20:8099`, plus the token if you set one.
 
-The integration polls the server every 30 seconds and creates the entities below. If an older server does not report a value, the integration leaves that entity out.
+If you added the old `https://github.com/jamesagarside/radiate` custom repository, remove it in HACS and add `radiate-ha` instead. The integration's domain hasn't changed, so its entities and settings carry over.
 
-For each room Radiate controls:
-
-- A climate entity. Setting its target temperature (5 to 28 °C in 0.5 °C steps) creates a setpoint override that ends at the room's next scheduled change and survives a server restart. Its attributes show the opening limit, learning state, latest reason, and the override's setpoint (`override_setpoint`), how it ends (`override_until`) and minutes left (`override_expires_in_min`).
-- Sensors: temperature, opening limit, heating gain, loss rate, arrival lag, model confidence and learning state.
-- A Stuck valve binary sensor (problem class). It turns on when the room stays cold through burns that warm other rooms, which usually means the valve needs checking.
-
-For each room with an open fire or stove (an episodic heat source):
-
-- A Fire lit switch. Turn it on when you light the fire so Radiate pauses the room's learning. The server forgets it when it restarts.
-- A Fire detected binary sensor, on while Radiate treats the fire as lit, either because of the switch or because the room is warming faster than the radiator explains.
-
-Rooms Radiate cannot control, such as a bypass radiator, get a temperature sensor only.
-
-For the house:
-
-- Boiler state, boiler firing, starts in the last hour, predicted burn and outdoor temperature.
-- Heating mode (`select.radiate_heating_mode`): **Auto**, **Frost** or **Off**. Choosing an option sets the mode, as `radiate.set_mode` does.
-- Hot-water store (`binary_sensor.radiate_hot_water_store`): on while the store relay is on, in a store window or during a boost. The relay enables the store; the boiler's own thermostat decides when it heats.
-- Hot-water boost (`binary_sensor.radiate_hot_water_boost`): on while a boost from `radiate.boost_store` runs.
-- Short-cycle extra off time, in minutes. Radiate adds this to the minimum off time for 24 hours after it sees short-cycling. Attributes give the hours left and the effective minimum off.
-- Burner hours today and starts today, plus oil used today (litres) and heat delivered today (kWh) when the configuration has a nozzle rating. They reset at local midnight. Until a burner-firing signal exists they count relay time, so litres and kWh are an upper bound.
-- Balance score for yesterday, 0 to 100. It is higher when rooms reached their setpoints closer together.
-- Alerts: the number of current alerts, with each one's code, message and room in the `alerts` attribute.
-
-Services:
-
-- `radiate.boost_store`: `minutes`, 0 to 180, default 60.
-- `radiate.set_mode`: `auto`, `frost` or `off`.
-- `radiate.set_override`: target one or more Radiate climate entities with a `temperature`. By default the override ends at the room's next scheduled change. Set `duration_min` (1 to 10080) to hold it for that long, or `until: cleared` to hold it until you clear it.
-- `radiate.clear_override`: returns the targeted rooms to their schedules.
+Home Assistant presence can drive [away](configuration.md#away): map each Radiate person to a `person` entity in the integration's options (**Settings** > **Devices & services** > **Radiate** > **Configure**). The integration reports each mapped person's state when it changes, and again every 15 minutes so the server knows Home Assistant is still reporting. `home` counts as home and any other state, such as `not_home` or a zone name, counts as not home. `unknown` and `unavailable` aren't reported. The server decides when not home counts as away, after the presence delay, and treats presence that stops arriving as unknown after `household.away.presence_stale_after_min`.
 
 ## Home Assistant dashboard
 
@@ -322,20 +301,54 @@ done
 
 `<data_dir>/radiate.db` is a SQLite database in WAL mode, so you also see `radiate.db-wal` and `radiate.db-shm` next to it. It holds:
 
-- Learned room models, arrival lags, lockshield caps, disturbance hold-offs and the boiler guard. A restart in the middle of a burn still honours minimum burn.
+- Learned room models, arrival lags, lockshield caps, disturbance hold-offs, stuck and leaking valve verdicts, the short-cycle adaptation, the day's accounting and the boiler guard. A restart in the middle of a burn still honours minimum burn.
 - The house ID used by Elastic and the Home Assistant integration.
-- The heating mode.
+- The heating mode, the demand mode setting, setpoint overrides, and away state: who is away until when, and the presence Home Assistant last reported.
 - The Elastic export queue.
+- The tick history: each tick's snapshot and decisions for the last `house.history_days` days (14 by default), about 1.2 MB a day for a 9-room house. See [configuration](configuration.md#tick-history-and-replay).
 
-Radiate saves engine state every 5 minutes and when it stops cleanly. Setpoint overrides are not saved.
+`<data_dir>/household.yaml` holds the household set up in the web UI, if any. It replaces the house file's `household` section, so pass the same data directory to `radiate check-config` and `radiate schedules` with `--data-dir` to see what the server uses. See [set up in the web UI](configuration.md#set-up-in-the-web-ui).
+
+Radiate saves engine state every 5 minutes and when it stops cleanly. The manual fire switch is not saved.
 
 If the database is lost or unreadable, Radiate starts from its priors and learns again. It also gets a new house ID, so Elastic sees a new house.
 
 ### Backups
 
-- Back up your configuration file and the data folder.
+- Back up your configuration file and the data folder. The backup includes the tick history, so you can replay those days elsewhere, and any household set up in the web UI.
 - For a consistent copy while the server runs, use `sqlite3 radiate.db ".backup radiate-backup.db"`. Otherwise stop the server and copy all three files.
 - Home Assistant backups include the App's `/data` and config folders.
+
+### Replay and bootstrap
+
+`radiate replay` runs the recorded ticks through the current code and configuration, and lists the ticks where the result differs from what Radiate decided at the time. Use it to see what Radiate would have done during a dry run, or to check a change before you use it. It reads `radiate.db` and changes nothing, so you can run it while the server runs.
+
+```bash
+radiate replay --config radiate.yaml
+radiate replay --config radiate.yaml --from 2026-11-18T06:00 --to 2026-11-18T09:00
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--from`, `--to` | the whole history | ISO date or time. Without a time zone, the house time zone applies |
+| `--state` | `saved` | `saved` starts from the engine state Radiate had, and takes it again at each restart. `fresh` starts from priors at `--from`, as a new install would |
+| `--limit N` | 50 | Differences to list; 0 lists all of them. The count always covers every tick |
+| `--json` | off | Print the report as JSON, for scripts |
+| `--data-dir DIR` | `house.data_dir` | Where `radiate.db` is |
+
+The report lists each differing tick with its changes (`recorded -> replayed`), then compares relay starts, burns, relay hours and alerts for the recorded and replayed decisions, and gives the room-hours spent below setpoint by more than the comfort limit.
+
+With the same code and configuration, a saved-state replay gives no differences. If the start entry of the period has been deleted by the retention, the replay begins from the nearest engine state copy instead, and differences in the first few minutes can come from that.
+
+Replay is open loop: the recorded temperatures are what happened under the recorded decisions. A replay with another configuration shows what Radiate would have decided. It can't show how warm the rooms would have been.
+
+If Radiate starts with no saved engine state, or with one from a format it can't read, it replays the history first to learn its room models again. This adds a few seconds to the start. To relearn the room models from the history on purpose, stop the server and run:
+
+```bash
+radiate bootstrap --config radiate.yaml
+```
+
+The command replaces each room's model, arrival lags and lockshield cap with the ones learned from the history, and keeps the boiler guard and every timer as saved. It refuses to run if Radiate saved its state in the last 15 minutes, because a running server would overwrite the result. Add `--force` to run it anyway.
 
 ### Upgrades
 

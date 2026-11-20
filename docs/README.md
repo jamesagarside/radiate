@@ -23,6 +23,7 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 
 - [ADR-0001](adr/0001-standalone-vs-vtherm-companion.md): Radiate is a standalone house controller, not a Versatile Thermostat companion.
 - [ADR-0002](adr/0002-deployment-topology.md): one engine packaged three ways, and the cloud never sits in the control loop.
+- [ADR-0003](adr/0003-separate-home-assistant-integration.md): the Home Assistant integration lives in its own Apache-2.0 repository, radiate-ha.
 - [ADR template](adr/template.md): copy it for a new decision.
 
 ## Proposals

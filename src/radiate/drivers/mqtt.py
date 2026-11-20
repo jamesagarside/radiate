@@ -2,6 +2,7 @@
 
 Thin on purpose: it connects, subscribes, feeds every message to a callback and
 publishes JSON. All mapping is in `radiate.drivers.z2m`. Reconnects with backoff.
+`read_retained` is the one-shot, read-only read used by `radiate discover`.
 """
 
 from __future__ import annotations
@@ -98,3 +99,59 @@ class MqttTransport:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+
+
+async def read_retained(
+    cfg: MqttConfig,
+    topics: list[str],
+    timeout_s: float,
+    *,
+    required: set[str] | None = None,
+    settle_s: float = 1.0,
+    client_factory: Callable[..., Any] | None = None,
+) -> dict[str, bytes]:
+    """Subscribe to `topics` and return the first message on each. Never publishes.
+
+    The broker sends retained messages straight after the subscription. Stops when
+    every topic has a message, `settle_s` after every `required` topic has one, or
+    after `timeout_s`, and returns what arrived. Connection errors propagate.
+    """
+    if client_factory is None:
+        import aiomqtt
+
+        client_factory = aiomqtt.Client
+    required = set(topics) if required is None else required
+    wanted = set(topics)
+    got: dict[str, bytes] = {}
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    settled = False
+    async with client_factory(
+        cfg.host,
+        cfg.port,
+        username=cfg.username,
+        password=cfg.password,
+        identifier=cfg.client_id,
+        tls_context=ssl.create_default_context() if cfg.tls else None,
+    ) as client:
+        for topic in topics:
+            await client.subscribe(topic, qos=0)
+        messages = aiter(client.messages)
+        while not wanted <= got.keys():
+            if not settled and required <= got.keys():
+                settled = True
+                deadline = min(deadline, loop.time() + settle_s)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                msg = await asyncio.wait_for(anext(messages), remaining)
+            except (TimeoutError, StopAsyncIteration):
+                break
+            topic = str(msg.topic)
+            payload = msg.payload
+            if isinstance(payload, str):
+                payload = payload.encode()
+            if topic in wanted and topic not in got and isinstance(payload, (bytes, bytearray)):
+                got[topic] = bytes(payload)
+    return got

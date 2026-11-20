@@ -27,6 +27,9 @@ def test_expected_files(site):
         "index.html",
         "static/app.css",
         "static/app.js",
+        "static/week.js",
+        "static/household.js",
+        "static/setup.js",
         "static/demo.css",
         "static/demo.js",
         "static/demo-worker.js",
@@ -43,7 +46,7 @@ def test_index_uses_the_demo_transport_and_relative_urls(site):
 
 
 def test_static_assets_have_no_root_relative_urls(site):
-    for name in ("app.js", "demo.js", "demo-worker.js"):
+    for name in ("app.js", "week.js", "household.js", "setup.js", "demo.js", "demo-worker.js"):
         text = (site / "static" / name).read_text()
         assert not re.search(r"""["'`]/(?:static|api)/""", text), name
 
@@ -78,6 +81,12 @@ s = DemoSession()
 s.step(5)
 state = json.loads(s.request("GET", "state"))
 assert state["status"] == 200 and len(state["body"]["rooms"]) == 9, state
+# The household setup works without PyYAML: the demo keeps its save in memory.
+raw = dict(people=dict(sam=dict(weekdays=dict(up="07:00", bed="23:00"))),
+           rooms=dict(lounge=dict(use="in_use")))
+saved = json.loads(s.request("PUT", "household", json.dumps(dict(household=raw))))
+assert saved["status"] == 200 and saved["body"]["source"] == "saved", saved
+assert "yaml" not in sys.modules
 leaked = [m for m, mod in sys.modules.items()
           if m.startswith("radiate") and {str(zip_path)!r} not in (getattr(mod, "__file__", "") or "")]
 assert not leaked, leaked

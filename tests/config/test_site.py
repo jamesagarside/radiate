@@ -5,7 +5,7 @@ import yaml
 
 from radiate.config import ConfigError, load_site, parse_day, parse_site, parse_week
 from radiate.config.schedule import ScheduleError
-from radiate.core.types import HeatSource, RoomRole
+from radiate.core.types import DemandMode, HeatSource, RoomRole
 from radiate.sim.reference import ROOMS, setpoint
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "reference-house.yaml"
@@ -161,6 +161,14 @@ def test_store_windows_and_boiler_units():
     assert site.house.boiler.min_burn_s == 600
 
 
+def test_history_days_default_range_and_off():
+    assert parse_site(minimal()).history_days == 14
+    assert parse_site(minimal(house={"history_days": 0})).history_days == 0
+    assert parse_site(minimal(house={"history_days": 3.5})).history_days == 3.5
+    with pytest.raises(ConfigError, match="house.history_days: must be 0 to 90"):
+        parse_site(minimal(house={"history_days": 120}))
+
+
 def test_unknown_schedule_and_timezone():
     data = minimal(house={"timezone": "Mars/Base"})
     data["rooms"][0]["schedule"] = "nope"
@@ -193,3 +201,28 @@ def test_shifted_schedule_stays_in_trvzb_steps():
     up = week.shifted(1.5)
     assert up.days[0].trvzb() == "00:00/17.5 06:30/19.5 22:30/17.5"
     assert parse_week("00:00/34").shifted(3).days[0].trvzb() == "00:00/35"
+
+
+def test_demand_mode():
+    boiler = parse_site(minimal()).house.boiler
+    assert boiler.demand_mode is DemandMode.ECO and boiler.eco_limit_k == 1.5
+    boiler = parse_site(minimal(boiler={"demand_mode": "comfort", "eco_limit_k": 2})).house.boiler
+    assert boiler.demand_mode is DemandMode.COMFORT and boiler.eco_limit_k == 2.0
+    with pytest.raises(ConfigError) as err:
+        parse_site(minimal(boiler={"demand_mode": "turbo", "eco_limit_k": 4}))
+    assert "boiler.demand_mode: must be eco or comfort" in err.value.problems
+    assert "boiler.eco_limit_k: must be 0.5 to 3" in err.value.problems
+    with pytest.raises(ConfigError, match="eco_limit_k: must be at least comfort_limit_k"):
+        parse_site(minimal(boiler={"comfort_limit_k": 1.2, "eco_limit_k": 1.0}))
+
+
+def test_learning_memory():
+    assert parse_site(minimal()).house.learning.memory_days == 730
+    assert parse_site(minimal()).house.learning.learn_on_trv_fallback is False
+    site = parse_site(minimal(learning={"memory_days": 90, "learn_on_trv_fallback": True}))
+    assert site.house.learning.memory_days == 90
+    assert site.house.learning.learn_on_trv_fallback is True
+    with pytest.raises(ConfigError) as err:
+        parse_site(minimal(learning={"memory_days": 0.5, "forget": True}))
+    assert "learning.memory_days: must be 1 to 3650" in err.value.problems
+    assert "learning.forget: unknown key" in err.value.problems
