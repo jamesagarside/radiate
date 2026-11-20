@@ -1,10 +1,9 @@
 # Proposal: household setup
 
-**Status:** compiler, away, household settings, a read-only week view and the setup wizard built. 20 November 2026. The `household` section of the house file and `radiate schedules` are described in [configuration](../configuration.md#household), its settings in [household settings](../configuration.md#household-settings), away in [configuration](../configuration.md#away), and where the wizard saves in [set up in the web UI](../configuration.md#set-up-in-the-web-ui).
+**Status:** compiler, away, household settings, the week view with room adjustments, and the setup wizard built. 20 November 2026. The `household` section of the house file and `radiate schedules` are described in [configuration](../configuration.md#household), its settings in [household settings](../configuration.md#household-settings), room adjustments in [room adjustments](../configuration.md#room-adjustments), away in [configuration](../configuration.md#away), and where the wizard saves in [set up in the web UI](../configuration.md#set-up-in-the-web-ui).
 
 Not built yet:
 
-- Dragging an edge in the week view to make a room-level adjustment.
 - Rooms from Home Assistant areas or Zigbee2MQTT devices. The wizard lists the rooms in the house file.
 - Checking the wizard visually in a browser. Its logic and markup are tested; the layout hasn't been seen on screen.
 
@@ -126,9 +125,18 @@ How it was built:
 - Saving never touches the house file. The household goes to `<data_dir>/household.yaml` and replaces the house file's `household` section; "Use the house file's setup instead" deletes it. The server recompiles and hands the new weeks to the driver, as when someone goes away.
 - Leaving part-way keeps a draft in the browser, and the wizard picks up from it next time.
 
-The week view is built, read-only, as the web UI's Schedules section. It reads `GET /api/v1/schedules` and draws each room's week as seven 24-hour bars, with the temperature written above each warm period, hour ticks, a now marker and each day in words. A room that someone being away has changed says so ("Bedroom 3 stays at 14° while Home worker is away.") and shows its usual week. Rooms with a hand-written schedule show it too. The bar comes from pure helpers in `web/week.js`, so the wizard can add draggable edges to the same component.
+The week view is built as the web UI's Schedules section. It reads `GET /api/v1/schedules` and draws each room's week as seven 24-hour bars, with the temperature written above each warm period, hour ticks, a now marker and each day in words. A room that someone being away has changed says so ("Bedroom 3 stays at 14° while Home worker is away.") and shows its usual week. Rooms with a hand-written schedule show it too. The bar comes from pure helpers in `web/week.js`, which the wizard's Result step reuses read-only.
 
 Afterwards, the same screens edit the answers. Dragging an edge in the week view creates a room-level adjustment that survives recompiling, so a person can say "the kitchen stays warm until 23:00" without rewriting routines.
+
+How it was built:
+
+- A room adjustment is part of the household section: `household.rooms.<id>.adjust`, a list of `days`, `keep` (`warm` or `cold`), `from` and `to`. The wizard keeps the list as it is when it saves.
+- The compiler applies adjustments in order after the routine rules, so a later one wins where two overlap. Their times are the live schedule's, "warm by" times; the valve schedule then adds the fixed preheat and is fitted to the TRVZB, so the note about warm periods left out of the valve still works. On a day the room is unused, keeping it warm uses the in-use temperature.
+- Away: adjustments apply whenever the room's normal week does. When everyone who uses the room is away, it drops to its unused level and its adjustments don't apply.
+- In the Schedules section, each warm period's start and end is a grip. Dragging it, or moving it with the arrow keys, moves the edge on every day of its run of identical days in 15 minute steps. The change is previewed through `POST /api/v1/household/preview`, then saved with `PUT /api/v1/household`. A later end or an earlier start keeps the room warm; the other way keeps it cold. Moving an edge back to where the routine had it removes the adjustment instead of adding another.
+- An "Adjust" form does the same without dragging, and each room lists its adjustments in words with "Remove" and "Reset to routine".
+- The first change to a household from the house file saves a copy in `<data_dir>/household.yaml`, as the wizard does, and the web UI says so before saving.
 
 **Copy and defaults** follow the [design standards](../standards/design.md): plain words ("Away until Tuesday", "Unused rooms"), sentence case, 24-hour times. Setting the unused or night temperature below 12 °C shows a note: "Below 12° walls and window frames can get damp, especially in older houses."
 
@@ -141,7 +149,7 @@ Afterwards, the same screens edit the answers. Dragging an edge in the week view
 | Print the result | `radiate schedules`, with `--trvzb` for the payload each TRV receives (built) |
 | Presence from `person` entities | The Home Assistant integration passes presence to the server through the API, alongside existing overrides (built) |
 | Away without Home Assistant | Server state in SQLite, like overrides, set from the web UI (built) |
-| Week view | `web/week.js`, read from `GET /api/v1/schedules` (built, read-only) |
+| Week view and room adjustments | `web/week.js`, read from `GET /api/v1/schedules`; adjustments saved with the household (built) |
 | Wizard | `web/setup.js` and `web/household.js`, through `GET`, `PUT` and `DELETE /api/v1/household` and `POST /api/v1/household/preview` in `radiate.server.setup` (built) |
 
 ## Worked example

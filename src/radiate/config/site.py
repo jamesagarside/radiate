@@ -35,11 +35,14 @@ from radiate.core.types import (
 )
 
 from .household import (
+    ADJUST_GROUPS,
     LIMITS,
     WEEKEND_DAYS,
+    Adjustment,
     AwaySettings,
     EveryoneAway,
     Household,
+    Keep,
     LivePreheat,
     Person,
     RoomKind,
@@ -775,10 +778,12 @@ def _room_link(
             "night_temperature",
             "unused_temperature",
             "preheat_min",
+            "adjust",
         },
         f"{at}.",
     )
     use = _use(ctx, item.get("use"), f"{at}.use")
+    adjust = _adjustments(ctx, item.get("adjust"), f"{at}.adjust")
     try:
         kind = RoomKind(ctx.get(item, "kind", str, "shared", f"{at}."))
     except ValueError:
@@ -818,7 +823,76 @@ def _room_link(
         night_c=temps["night_temperature"],
         unused_c=temps["unused_temperature"],
         preheat_min=preheat,
+        adjust=adjust,
     )
+
+
+_DAY_TOKENS = {d[:3] for d in DAY_ALIASES if len(DAY_ALIASES[d]) == 1}
+
+
+def _adjust_days(ctx: _Ctx, raw: Any, path: str) -> tuple[str, ...] | None:
+    """`weekdays`, `weekend`, `daily`, a day (`mon`, `monday`) or a list of them."""
+    hint = "use weekdays, weekend, daily or a day, mon to sun"
+    if raw is None:
+        ctx.err(path, f"required: {hint}")
+        return None
+    items = raw if isinstance(raw, list) else [raw]
+    if not items:
+        ctx.err(path, f"expected at least one day: {hint}")
+        return None
+    out: list[str] = []
+    for i, name in enumerate(items):
+        at = f"{path}[{i}]" if isinstance(raw, list) else path
+        token = str(name).lower()
+        if token in ADJUST_GROUPS:
+            out.append(token)
+        elif token in DAY_ALIASES and token[:3] in _DAY_TOKENS:
+            out.append(token[:3])
+        else:
+            ctx.err(at, f"{name!r} is not a day: {hint}")
+            return None
+    if len(set(out)) != len(out):
+        ctx.err(path, "a day is listed twice")
+        return None
+    return tuple(out)
+
+
+def _adjustments(ctx: _Ctx, raw: Any, path: str) -> tuple[Adjustment, ...]:
+    """A room's adjustments: keep it warm or cold from one time to another on some days."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        ctx.err(path, "expected a list of adjustments, each with days, keep, from and to")
+        return ()
+    lim = LIMITS["rooms.adjust"]
+    if len(raw) > lim.hi:
+        ctx.err(path, f"at most {lim.hi:g} adjustments a room")
+        return ()
+    out: list[Adjustment] = []
+    for i, item in enumerate(raw):
+        at = f"{path}[{i}]"
+        if not isinstance(item, dict):
+            ctx.err(at, "expected a mapping with days, keep, from and to")
+            continue
+        ctx.unknown(item, {"days", "keep", "from", "to"}, f"{at}.")
+        days = _adjust_days(ctx, item.get("days"), f"{at}.days")
+        keep: Keep | None = None
+        if item.get("keep") is None:
+            ctx.err(f"{at}.keep", "required: warm or cold")
+        else:
+            try:
+                keep = Keep(item["keep"])
+            except ValueError:
+                ctx.err(f"{at}.keep", "must be warm or cold")
+        start = _clock(ctx, item.get("from"), f"{at}.from")
+        end = _clock(ctx, item.get("to"), f"{at}.to", end=True)
+        if start is not None and end is not None and end <= start:
+            ctx.err(f"{at}.to", "must be after from, on the same day")
+            continue
+        if days is None or keep is None or start is None or end is None:
+            continue
+        out.append(Adjustment(days=days, keep=keep, from_min=start, to_min=end))
+    return tuple(out)
 
 
 def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig]) -> Household:

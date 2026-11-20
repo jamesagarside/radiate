@@ -332,6 +332,53 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .week-summary dt { font-weight: 600; }
 .week-summary dd { margin: 0; color: var(--muted); }
 
+/* Adjusting a room's week (week.js). Each warm period's edges are grips that follow
+   the pointer or the arrow keys exactly, so nothing moves on its own; the grips only
+   fade in. A change waits in a cool panel, like a held setpoint, until it is saved.
+   Adjusted time has a cool line along the bottom of the bar. */
+.week-saved:empty { display: none; }
+.week-adj { position: absolute; bottom: 0; height: 3px; border-radius: 2px; background: var(--cool); pointer-events: none; }
+.week-adj-swatch { width: 14px; height: 3px; border-radius: 2px; background: var(--cool); }
+.week-edge {
+  position: absolute; top: -3px; bottom: -3px; width: 6px; margin-left: -3px; z-index: 1;
+  border-radius: 3px; background: var(--surface); box-shadow: 0 0 0 1px var(--heat);
+  cursor: ew-resize; touch-action: none; transition: opacity 150ms ease;
+}
+/* A 24 px wide hit area around the 6 px grip. */
+.week-edge::before { content: ""; position: absolute; inset: -4px -9px; }
+.week[data-dragging] { user-select: none; -webkit-user-select: none; }
+.week-day[data-editing] .week-labels span:not(.week-drag-label) { visibility: hidden; }
+.week-drag-label { font-weight: 600; color: var(--text); }
+.week-pending {
+  display: grid; gap: 6px; justify-items: start; padding: 10px 12px; border-radius: 10px;
+  background: var(--cool-soft); color: var(--cool); font-size: 0.84rem; font-variant-numeric: tabular-nums;
+}
+.week-pending-then, .week-source { color: var(--muted); font-size: 0.8rem; }
+.week-pending-then:empty, .week-source:empty { display: none; }
+.week-error { color: var(--warn); font-size: 0.84rem; font-weight: 600; }
+.week-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.week-edit { display: grid; gap: 8px; }
+.week-adjust { display: grid; gap: 6px; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+.week-adjust h4 { margin: 0; font-size: 0.8rem; font-weight: 600; }
+.week-adjust ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.week-adjust li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.week-actions { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.week-adjust .link { font-size: 0.84rem; }
+.week-form { display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.week-fields { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.week-field { display: grid; gap: 2px; font-size: 0.78rem; font-weight: 600; min-width: 0; }
+.week-form select, .week-form input {
+  font: inherit; font-size: 0.9rem; padding: 5px 8px; border-radius: 10px; min-width: 0;
+  border: 1px solid var(--muted); background: var(--surface); color: var(--text);
+}
+.week-form .time { width: 5.5em; font-variant-numeric: tabular-nums; }
+.week-form [aria-invalid="true"] { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+/* With a mouse the grips appear over the card, so a glance at the week stays quiet. */
+@media (hover: hover) and (pointer: fine) {
+  .week-edge { opacity: 0; }
+  .week:hover .week-edge, .week-edge:focus-visible, .week-day[data-editing] .week-edge { opacity: 1; }
+}
+
 /* People section heading with the "Change household setup" link beside it. */
 .section-row { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
 .section-row .link { font-size: 0.84rem; margin-bottom: 10px; }
@@ -471,6 +518,9 @@ body[data-link="stale"] .status { color: var(--warn); }
   .notice-more summary { padding-block: 12px; }
   .step { width: 44px; height: 44px; }
   .link { padding-block: 13px; margin-block: -13px; }
+  .week-form select, .week-form input { min-height: 44px; }
+  /* 44 px by 50 px around the grip. */
+  .week-edge::before { inset: -14px -19px; }
 }
 
 @media (max-width: 560px) {

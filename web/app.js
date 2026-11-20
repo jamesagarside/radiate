@@ -7,6 +7,7 @@
 // demo (<html data-transport="demo">) swaps in demo.js, which runs the same engine in
 // a Web Worker, needs no token and never loses its link. Both share this one UI.
 
+import { normaliseTime } from "./household.js";
 import { createSetup } from "./setup.js";
 import { weekView } from "./week.js";
 
@@ -539,12 +540,54 @@ function renderPeople(away) {
 // 10 minutes. Each state moves the now marker. An older server without the route
 // answers 404 and the section stays hidden.
 const WEEK_REFRESH_MS = 10 * 60 * 1000;
-const week = weekView({ list: $("week-list"), legendEl: $("week-legend"), frostEl: $("week-frost") });
-const weekSync = { key: null, minute: null, at: 0, loading: false, gone: false, shown: false };
+const week = weekView({ list: $("week-list"), legendEl: $("week-legend"), frostEl: $("week-frost"), hintEl: $("week-hint") });
+const weekSync = { key: null, minute: null, at: 0, loading: false, again: false, gone: false, shown: false };
+let weekEditing = false;
+
+// Room adjustments (week.js): dragging an edge or the Adjust form changes the
+// household section, through the setup's routes. Offered when the server offers the
+// setup; an AuthError asks to sign in, like everything else.
+async function householdCall(method, path, body) {
+  try {
+    return await transport.call(method, path, body);
+  } catch (err) {
+    if (err instanceof AuthError) askForToken();
+    throw err;
+  }
+}
+const weekEditor = {
+  async household() {
+    const res = await householdCall("GET", "household");
+    if (res.status !== 200) throw new Error(`household: HTTP ${res.status}`);
+    return res.body;
+  },
+  async preview(section) {
+    const res = await householdCall("POST", "household/preview", { household: section });
+    if (res.status !== 200) throw new Error(`household/preview: HTTP ${res.status}`);
+    return res.body;
+  },
+  save: (section) => householdCall("PUT", "household", { household: section }),
+  async saved(message) {
+    const note = $("week-saved");
+    // Always in the page and empty when quiet, so screen readers hear each message.
+    note.textContent = message;
+    clearTimeout(note.timer);
+    note.timer = setTimeout(() => { note.textContent = ""; }, 15000);
+    weekSync.key = null;
+    await loadWeek();
+    try { house = await transport.house(); } catch { /* the next render retries */ }
+    renderSetupEntry();
+  },
+  time: normaliseTime,
+};
 
 async function loadWeek() {
-  if (weekSync.loading || weekSync.gone || !transport.get) return;
+  if (weekSync.gone || !transport.get) return;
+  // Asked while a fetch is under way (a save, say): fetch again once it is back, as
+  // the one under way may be from before the change.
+  if (weekSync.loading) { weekSync.again = true; return; }
   weekSync.loading = true;
+  weekSync.again = false;
   weekSync.at = Date.now();
   try {
     const view = await transport.get("schedules");
@@ -558,6 +601,7 @@ async function loadWeek() {
     else weekSync.at = Date.now() - WEEK_REFRESH_MS + 30000; // try again in 30 s
   }
   weekSync.loading = false;
+  if (weekSync.again) await loadWeek();
 }
 
 function syncWeek(s) {
@@ -944,6 +988,12 @@ async function renderSetupEntry() {
   const has = Boolean(house?.household);
   $("setup-cta").hidden = !offered || has;
   $("setup-change").hidden = !offered || !has;
+  if (offered && !weekEditing) {
+    weekEditing = true;
+    week.setEditor(weekEditor);
+    weekSync.key = null; // draw the weeks again, now with edges to drag
+    loadWeek();
+  }
 }
 
 async function openSetup(e) {
