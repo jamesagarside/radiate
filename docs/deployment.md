@@ -233,6 +233,8 @@ Rooms Radiate cannot control, such as a bypass radiator, get a temperature senso
 
 For the house:
 
+- A Demand mode select (`select.radiate_demand_mode`, unique ID `<house id>_house_demand_mode`) with the options **Eco** and **Comfort**. Eco, the default, runs fewer and longer burns: a room on its own can wait until other rooms need heat too, so they share a burn. Comfort fires the boiler as soon as any room is noticeably cold. The change applies from the server's next tick and survives a restart. Choosing the mode set in the configuration file (`boiler.demand_mode`, shown in the `default_mode` attribute) makes the server follow that file again. The web UI's Eco and Comfort control does the same.
+- Pooled demand (`sensor.radiate_pooled_demand`, unique ID `<house id>_house_pooled_demand`), a diagnostic sensor in minutes: how long the calling rooms need the radiators at full output between them. In eco mode a room waits until this reaches 1.5 times the minimum burn, or until it's more than the eco limit below its target.
 - Boiler state, boiler firing, starts in the last hour, predicted burn and outdoor temperature.
 - Short-cycle extra off time, in minutes. Radiate adds this to the minimum off time for 24 hours after it sees short-cycling. Attributes give the hours left and the effective minimum off.
 - Burner hours today and starts today, plus oil used today (litres) and heat delivered today (kWh) when the configuration has a nozzle rating. They reset at local midnight. Until a burner-firing signal exists they count relay time, so litres and kWh are an upper bound.

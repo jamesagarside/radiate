@@ -181,7 +181,7 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 
 In both modes frost protection and optimum start still fire the boiler. `eco_limit_k` is the most a calling room waits below its target in `eco` mode: 0.5 to 3 K, and at least `comfort_limit_k`.
 
-You can change the demand mode without a restart through the API (`POST /api/v1/settings` with `{"demand_mode": "comfort"}`). That choice is saved in `radiate.db` and overrides `demand_mode` in this file until you send `{"demand_mode": null}`.
+You can change the demand mode without a restart with the **Eco** and **Comfort** control in the web UI, the Demand mode select in Home Assistant, or the API (`POST /api/v1/settings` with `{"demand_mode": "comfort"}`). That choice is saved in `radiate.db` and overrides `demand_mode` in this file until you send `{"demand_mode": null}`. The web UI and Home Assistant send null when you pick the mode set in this file, so Radiate follows the file again.
 
 `nozzle_lph` is the burner nozzle rating in litres per hour, from the boiler's service sheet. With it, the daily accounting also estimates litres and kWh. Burner time comes from the heating relay, so the litres are an upper bound.
 

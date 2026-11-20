@@ -10,11 +10,11 @@ Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the 
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 111 |
+| Done | 82 | 114 |
 | Partial | 26 | 21 |
 | Missing | 37 | 22 |
 
-Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), the learner bootstraps from that history, and `radiate discover` drafts the configuration from Zigbee2MQTT. On 20 November 2026 the owner's three behaviour choices went in (spec 0.3): a configurable learning memory, two years by default, with change detection; `eco` and `comfort` demand modes, `eco` by default and changeable at runtime through `/api/v1/settings`; and no learning from the TRV reading while a room's own sensor is stale.
+Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), the learner bootstraps from that history, and `radiate discover` drafts the configuration from Zigbee2MQTT. On 20 November 2026 the owner's three behaviour choices went in (spec 0.3): a configurable learning memory, two years by default, with change detection; `eco` and `comfort` demand modes, `eco` by default and changeable at runtime through `/api/v1/settings`; and no learning from the TRV reading while a room's own sensor is stale. The same day the demand mode got an Eco and Comfort control in the web UI and a select in Home Assistant, and each room in `state` gained `reason_code`.
 
 Top remaining gaps, most important first:
 
@@ -22,7 +22,6 @@ Top remaining gaps, most important first:
 2. **Valve recalibration service** (section 7): blocked, the TRVZB has no calibration command in Zigbee2MQTT (see the row below).
 3. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, bootstrap from the Home Assistant recorder (sections 4.1 to 4.3, 5.5).
 4. **TRV bias refinement** for internal-sensor rooms (section 4.6): tried and dropped, see the row below.
-5. **Settings in the web UI and Home Assistant**: the demand mode can be changed through the API only; the UI and integration don't show it yet.
 
 ## 2. House model
 
@@ -156,7 +155,8 @@ Top remaining gaps, most important first:
 | `GET /api/v1/house`, `/state`, `/decisions?since=` | done | `server/app.py` | |
 | `POST /rooms/{id}/setpoint` | done | `server/app.py`, `server/runtime.py` `set_override` | Ends at the next schedule change by default, or after `duration_min`, or `until: cleared`; saved in SQLite; `override` in `describe()` |
 | `POST /rooms/{id}/fire`, `/store/boost`, `/mode` | done | `server/app.py` | Manual fire flag is not persisted; `fire_switch` in `describe()` |
-| `GET` and `POST /api/v1/settings` (demand mode) | done | `server/bridge.py` `set_settings`, `server/app.py`, `server/runtime.py` | Saved in the state database; `settings` and `boiler.pooled_demand_min` in `describe()`. Not in the web UI or Home Assistant yet |
+| `GET` and `POST /api/v1/settings` (demand mode) | done | `server/bridge.py` `set_settings`, `server/app.py`, `server/runtime.py` | Saved in the state database; `settings` and `boiler.pooled_demand_min` in `describe()` |
+| Reason code per room | done | `server/runtime.py` `describe` | `rooms[].reason_code` next to `rooms[].reason`, for example `demand.pooled` |
 | `WS /api/v1/stream` | done | `server/app.py` | |
 | Local token auth, ingress auth | done | `server/app.py` | |
 | HA: climate per room | done | `custom_components/radiate/climate.py` | Setting the target creates an override; override setpoint, `until` and minutes left as attributes |
@@ -166,6 +166,7 @@ Top remaining gaps, most important first:
 | HA: boiler state, starts | done | `custom_components/radiate/sensor.py` | Starts today and in the last hour; relay starts, not physical burner starts |
 | HA: burner hours, litres today, balance score | done | `custom_components/radiate/sensor.py` | Burner hours, starts, litres and kWh today (`total_increasing`, reset at local midnight; litres and kWh only with a nozzle rating) and yesterday's balance score |
 | HA: stuck valve, short-cycling, alerts | done | `custom_components/radiate/binary_sensor.py`, `sensor.py` | Problem binary sensor per room from `valve.untrusted`; short-cycle extra off time; alert count with codes and messages from `alert_details`. No repairs issues |
+| HA: demand mode select, pooled demand | done | `custom_components/radiate/select.py`, `sensor.py` | `select.radiate_demand_mode` (eco or comfort) posts `settings`, sending null for the configured default; `sensor.radiate_pooled_demand` is diagnostic. Neither is created for a server without the keys |
 | HA services `boost_store`, `set_mode` | done | `custom_components/radiate/__init__.py` | |
 | HA services `set_override`, `clear_override` | done | `custom_components/radiate/climate.py` | Entity services on Radiate climate entities; `until` and `duration_min` as in `POST /rooms/{id}/setpoint` |
 | HA service `recalibrate_valve` | missing | | Blocked: no TRVZB calibration command to send (see "Manual recalibration service") |
@@ -194,6 +195,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Boiler strip with 24 h burn timeline and countdowns | done | `web/app.js` | Countdown uses the effective minimum off; short-cycling note under the guard bar |
 | Why the burner is on | done | `web/app.js` `statusLine` | Names burn extensions ("Topping up") and heat sinks separately, from `rooms[].extend` |
 | Setpoint control and hold | done | `web/app.js`, `server/bridge.py` | Stepper per room, 0.5 °C steps, 5 to 28 °C; shows the hold and resumes the schedule. Server and demo |
+| Demand mode control | done | `web/app.js` `renderDemand`, `web/index.html` | Eco and Comfort beside the heating mode, a one-line note on what the mode does ("Default:" while it follows the configuration file), and a "Waiting for a burn" badge and status line for a room waiting in eco (`demand.pooled`). Hidden for servers without `settings`. Server and demo |
 | Daily accounting and stuck valves in the UI | done | `web/app.js` | Burner hours and starts today, yesterday's balance score ("Not a full day of data" for a partial day), a line on a room whose valve may be stuck |
 | Setup wizard | partial | `config/discover.py`, `drivers/mqtt.py` `read_retained`, `cli.py` | `radiate discover` drafts the YAML from Zigbee2MQTT device names, descriptions and groups, with TRVZB firmware warnings. No UI wizard yet; heat sources, bypass radiators and the boiler relay are still marked by hand. Untested against a real broker |
 
