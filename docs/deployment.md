@@ -167,7 +167,7 @@ The App runs the Radiate server in a container managed by the Home Assistant Sup
 
 1. In Home Assistant, go to **Settings** > **Apps**, open the app store, and select **Repositories** from the top-right menu.
 2. Add `https://github.com/jamesagarside/radiate`. The repository's `repository.yaml` and `app/radiate/` folder define the App.
-3. Install **Radiate**. The Supervisor builds the image on your machine from `app/radiate/Dockerfile`, which installs Radiate from the `main` branch on GitHub. This takes a few minutes.
+3. Install **Radiate**. The Supervisor builds the image on your machine from `app/radiate/Dockerfile`, which installs the Radiate release that matches the App's version from GitHub. This takes a few minutes. When a new release comes out, Home Assistant offers it as an App update.
 4. Start the App and open **Radiate** in the sidebar. It starts in demo mode.
 
 ### Options
