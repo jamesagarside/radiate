@@ -1,0 +1,511 @@
+{
+ "now": 196260.0,
+ "minute_of_day": 391,
+ "mode": "auto",
+ "outdoor": 2.2,
+ "boiler": {
+  "state": "firing",
+  "relay": true,
+  "burn_elapsed_s": 10740.0,
+  "state_elapsed_s": 10740.0,
+  "starts_last_hour": 0,
+  "adopted": false,
+  "watchdog_handover": false,
+  "predicted_burn_min": 150,
+  "pooled_demand_min": 248.4,
+  "supply": 0.601,
+  "min_off_s": 600,
+  "short_cycle": null
+ },
+ "store": {
+  "relay": true,
+  "boost": false
+ },
+ "rooms": [
+  {
+   "id": "bedroom_1",
+   "name": "Bedroom 1",
+   "role": "normal",
+   "heat_source": null,
+   "temperature": 17.5,
+   "humidity": null,
+   "setpoint": 21.5,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": {
+    "setpoint": 21.5,
+    "until": "duration",
+    "expires_in_min": 89
+   },
+   "fire_switch": false,
+   "target": 21.5,
+   "opening": 100,
+   "calling": true,
+   "topup": false,
+   "extend": false,
+   "preheating": false,
+   "fire": false,
+   "learning": "setpoint_change",
+   "model": {
+    "a": 2.821,
+    "b": 0.042,
+    "d": 0.005,
+    "confidence": 0.97,
+    "samples": 2604,
+    "arrival_lag_min": 22.0,
+    "lockshield": 100
+   },
+   "reason": null,
+   "reason_code": null,
+   "valve": {
+    "untrusted": false,
+    "misses": 0,
+    "leaking": false,
+    "leak_burns": 0,
+    "rejected": []
+   }
+  },
+  {
+   "id": "bedroom_2",
+   "name": "Bedroom 2",
+   "role": "normal",
+   "heat_source": null,
+   "temperature": 17.2,
+   "humidity": null,
+   "setpoint": 20.0,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": null,
+   "fire_switch": false,
+   "target": 20.0,
+   "opening": 100,
+   "calling": true,
+   "topup": false,
+   "extend": false,
+   "preheating": false,
+   "fire": false,
+   "learning": null,
+   "model": {
+    "a": 2.693,
+    "b": 0.0357,
+    "d": -0.034,
+    "confidence": 0.97,
+    "samples": 2619,
+    "arrival_lag_min": 28.0,
+    "lockshield": 100
+   },
+   "reason": null,
+   "reason_code": null,
+   "valve": {
+    "untrusted": false,
+    "misses": 0,
+    "leaking": false,
+    "leak_burns": 0,
+    "rejected": []
+   }
+  },
+  {
+   "id": "bedroom_3",
+   "name": "Bedroom 3",
+   "role": "normal",
+   "heat_source": null,
+   "temperature": 18.2,
+   "humidity": null,
+   "setpoint": 20.0,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": null,
+   "fire_switch": false,
+   "target": 20.0,
+   "opening": 100,
+   "calling": true,
+   "topup": false,
+   "extend": false,
+   "preheating": false,
+   "fire": false,
+   "learning": null,
+   "model": {
+    "a": 1.737,
+    "b": 0.0286,
+    "d": 0.061,
+    "confidence": 0.97,
+    "samples": 2681,
+    "arrival_lag_min": 34.0,
+    "lockshield": 100
+   },
+   "reason": null,
+   "reason_code": null,
+   "valve": {
+    "untrusted": false,
+    "misses": 0,
+    "leaking": false,
+    "leak_burns": 0,
+    "rejected": []
+   }
+  },
+  {
+   "id": "bathroom",
+   "name": "Bathroom",
+   "role": "normal",
+   "heat_source": null,
+   "temperature": 19.5,
+   "humidity": 55,
+   "setpoint": 21.0,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": null,
+   "fire_switch": false,
+   "target": 21.0,
+   "opening": 45,
+   "calling": true,
+   "topup": false,
+   "extend": false,
+   "preheating": false,
+   "fire": false,
+   "learning": null,
+   "model": {
+    "a": 2.686,
+    "b": 0.0268,
+    "d": -0.057,
+    "confidence": 0.96,
+    "samples": 2454,
+    "arrival_lag_min": 27.0,
+    "lockshield": 100
+   },
+   "reason": null,
+   "reason_code": null,
+   "valve": {
+    "untrusted": false,
+    "misses": 0,
+    "leaking": false,
+    "leak_burns": 0,
+    "rejected": []
+   }
+  },
+  {
+   "id": "dining",
+   "name": "Dining room",
+   "role": "normal",
+   "heat_source": null,
+   "temperature": 19.6,
+   "humidity": null,
+   "setpoint": 20.0,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": null,
+   "fire_switch": false,
+   "target": 20.0,
+   "opening": 21,
+   "calling": true,
+   "topup": false,
+   "extend": false,
+   "preheating": false,
+   "fire": false,
+   "learning": "unexplained_heat",
+   "model": {
+    "a": 4.614,
+    "b": 0.0402,
+    "d": -0.075,
+    "confidence": 0.95,
+    "samples": 1942,
+    "arrival_lag_min": 11.0,
+    "lockshield": 100
+   },
+   "reason": null,
+   "reason_code": null,
+   "valve": {
+    "untrusted": false,
+    "misses": 0,
+    "leaking": false,
+    "leak_burns": 0,
+    "rejected": []
+   }
+  },
+  {
+   "id": "lounge",
+   "name": "Lounge",
+   "role": "normal",
+   "heat_source": "episodic",
+   "temperature": 11.7,
+   "humidity": null,
+   "setpoint": 21.0,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": null,
+   "fire_switch": true,
+   "target": 21.0,
+   "opening": 0,
+   "calling": false,
+   "topup": false,
+   "extend": false,
+   "preheating": false,
+   "fire": true,
+   "learning": "fire",
+   "model": {
+    "a": 1.5,
+    "b": 0.08,
+    "d": 0.0,
+    "confidence": 0.0,
+    "samples": 0,
+    "arrival_lag_min": 22.0,
+    "lockshield": 60
+   },
+   "reason": "Lounge: learning paused (fire)",
+   "reason_code": "learning.paused",
+   "valve": {
+    "untrusted": false,
+    "misses": 0,
+    "leaking": false,
+    "leak_burns": 0,
+    "rejected": []
+   }
+  },
+  {
+   "id": "kitchen",
+   "name": "Kitchen",
+   "role": "normal",
+   "heat_source": "continuous",
+   "temperature": 19.9,
+   "humidity": null,
+   "setpoint": 20.0,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": null,
+   "fire_switch": false,
+   "target": 20.0,
+   "opening": 100,
+   "calling": false,
+   "topup": false,
+   "extend": false,
+   "preheating": false,
+   "fire": false,
+   "learning": "setpoint_change",
+   "model": {
+    "a": 1.525,
+    "b": 0.0521,
+    "d": 0.71,
+    "confidence": 0.85,
+    "samples": 2260,
+    "arrival_lag_min": 15.0,
+    "lockshield": 100
+   },
+   "reason": null,
+   "reason_code": null,
+   "valve": {
+    "untrusted": false,
+    "misses": 0,
+    "leaking": false,
+    "leak_burns": 0,
+    "rejected": []
+   }
+  },
+  {
+   "id": "toilet",
+   "name": "Toilet",
+   "role": "internal_sensor_only",
+   "heat_source": null,
+   "temperature": 18.6,
+   "humidity": null,
+   "setpoint": 18.0,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": null,
+   "fire_switch": false,
+   "target": 18.0,
+   "opening": 100,
+   "calling": false,
+   "topup": false,
+   "extend": false,
+   "preheating": false,
+   "fire": false,
+   "learning": "unexplained_heat",
+   "model": {
+    "a": 11.979,
+    "b": 0.0503,
+    "d": 0.039,
+    "confidence": 0.5,
+    "samples": 1769,
+    "arrival_lag_min": 11.0,
+    "lockshield": 100
+   },
+   "reason": null,
+   "reason_code": null,
+   "valve": {
+    "untrusted": false,
+    "misses": 0,
+    "leaking": false,
+    "leak_burns": 0,
+    "rejected": []
+   }
+  },
+  {
+   "id": "stairs",
+   "name": "Stairs",
+   "role": "passive",
+   "heat_source": null,
+   "temperature": 17.1,
+   "humidity": null,
+   "setpoint": 20.0,
+   "next_setpoint": 16.0,
+   "next_in_min": 119,
+   "override": null,
+   "fire_switch": false
+  }
+ ],
+ "accounting": {
+  "today": {
+   "day": 2,
+   "partial": false,
+   "basis": "relay",
+   "burner_hours": 2.97,
+   "starts": 1,
+   "max_starts_in_hour": 1,
+   "burns": {
+    "count": 0,
+    "mean_min": null,
+    "min_min": null,
+    "max_min": null,
+    "histogram": {
+     "under_10": 0,
+     "10_to_20": 0,
+     "20_to_30": 0,
+     "30_to_60": 0,
+     "60_to_120": 0,
+     "over_120": 0
+    }
+   },
+   "litres": 1.78,
+   "kwh": 15.7,
+   "balance": {
+    "starts_measured": 0,
+    "arrival_spread_min": null,
+    "score": null
+   },
+   "comfort_minutes_below": {
+    "bathroom": 2.0,
+    "bedroom_1": 31.0,
+    "bedroom_2": 46.0,
+    "bedroom_3": 2.0,
+    "toilet": 47.0
+   }
+  },
+  "yesterday": {
+   "day": 1,
+   "partial": false,
+   "basis": "relay",
+   "burner_hours": 12.12,
+   "starts": 4,
+   "max_starts_in_hour": 1,
+   "burns": {
+    "count": 4,
+    "mean_min": 181.8,
+    "min_min": 52.0,
+    "max_min": 298.0,
+    "histogram": {
+     "under_10": 0,
+     "10_to_20": 0,
+     "20_to_30": 0,
+     "30_to_60": 1,
+     "60_to_120": 1,
+     "over_120": 2
+    }
+   },
+   "litres": 7.27,
+   "kwh": 64.0,
+   "balance": {
+    "starts_measured": 4,
+    "arrival_spread_min": 52.0,
+    "score": 56.7
+   },
+   "comfort_minutes_below": {
+    "bathroom": 88.0,
+    "bedroom_1": 139.0,
+    "bedroom_2": 160.0,
+    "bedroom_3": 155.0,
+    "toilet": 145.0
+   }
+  }
+ },
+ "timeline": {
+  "burns": [
+   [
+    -172800.0,
+    -165720.0
+   ],
+   [
+    -147420.0,
+    -127380.0
+   ],
+   [
+    -125400.0,
+    -115620.0
+   ],
+   [
+    -97200.0,
+    -79320.0
+   ],
+   [
+    -59400.0,
+    -43500.0
+   ],
+   [
+    -40440.0,
+    -37320.0
+   ],
+   [
+    -35640.0,
+    -28920.0
+   ],
+   [
+    -10800.0,
+    0.0
+   ]
+  ],
+  "store": [
+   [
+    -172800.0,
+    -169320.0
+   ],
+   [
+    -135120.0,
+    -120720.0
+   ],
+   [
+    -88320.0,
+    -82920.0
+   ],
+   [
+    -48720.0,
+    -34320.0
+   ],
+   [
+    -1920.0,
+    0.0
+   ]
+  ],
+  "window_s": 86400
+ },
+ "alerts": [],
+ "alert_details": [],
+ "telemetry": {
+  "burner": true,
+  "burner_starts": 77,
+  "burner_hours": 15.97,
+  "boiler_water_c": 73.9,
+  "store_c": 63.2,
+  "stairs_c": 17.1,
+  "simulated": true
+ },
+ "settings": {
+  "demand_mode": "eco",
+  "demand_mode_default": "eco",
+  "demand_modes": [
+   "eco",
+   "comfort"
+  ],
+  "comfort_limit_k": 0.5,
+  "eco_limit_k": 1.5,
+  "learning_memory_days": 730.0,
+  "learn_on_trv_fallback": false
+ }
+}
