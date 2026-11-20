@@ -46,7 +46,7 @@ Pure: no I/O and no clock. Times are minutes of the day.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
 
 from .schedule import DAYS, MAX_C, MAX_TRANSITIONS, MIN_C, DaySchedule, WeekSchedule, hhmm
@@ -99,6 +99,15 @@ class EveryoneAway(StrEnum):
     UNUSED = "unused"  # keep every room at its unused temperature
 
 
+class Keep(StrEnum):
+    WARM = "warm"  # warm through the window, at the room's warm temperature
+    COLD = "cold"  # not warm through the window: unused by day, night overnight
+
+
+# The day groups a room adjustment can name, besides single days (`mon` to `sun`).
+ADJUST_GROUPS = ("daily", "weekdays", "weekend")
+
+
 @dataclass(frozen=True, slots=True)
 class Limit:
     """The allowed range of a numeric setting, for validation and for the API."""
@@ -121,7 +130,61 @@ LIMITS: dict[str, Limit] = {
     # Six hours bounds how early an unlearned room model can start the boiler.
     "away.return_warmup_min": Limit(0, 360, "min"),
     "temperatures": Limit(MIN_C, MAX_C, "°C"),
+    # Room adjustments per room. The TRVZB holds six changes a day, so more than this
+    # says more about a routine that needs changing than about the room.
+    "rooms.adjust": Limit(0, 10, "adjustments"),
 }
+
+
+@dataclass(frozen=True, slots=True)
+class Adjustment:
+    """A room-level change to the week its routines give it: keep the room warm, or
+    cold, from one time to another on some days. It survives recompiling.
+
+    Times are in the week Radiate follows (the live schedule), as the week view shows
+    it: with optimum start, when the room should be warm by. The valve schedule starts
+    each warm period by the fixed preheat, as for any other.
+    """
+
+    days: tuple[str, ...]  # "daily", "weekdays", "weekend" or "mon" to "sun"; any of them
+    keep: Keep
+    from_min: int
+    to_min: int  # after from_min, up to 1440
+
+    def on(self, weekday: int, weekend_days: frozenset[int]) -> bool:
+        """Whether it applies on `weekday` (Monday = 0), given the weekend days."""
+        for token in self.days:
+            if token == "daily":
+                return True
+            if token == "weekend" and weekday in weekend_days:
+                return True
+            if token == "weekdays" and weekday not in weekend_days:
+                return True
+            if token == DAYS[weekday][:3]:
+                return True
+        return False
+
+    def describe(self) -> str:
+        """In words: `Kept warm 22:30 to 23:00 on weekdays`."""
+        return (
+            f"Kept {self.keep.value} {hhmm(self.from_min)} to {hhmm(self.to_min)} "
+            f"{_adjust_days_text(self.days)}"
+        )
+
+
+def _adjust_days_text(days: tuple[str, ...]) -> str:
+    if "daily" in days:
+        return "every day"
+    parts = []
+    for token in days:
+        if token == "weekdays":
+            parts.append("weekdays")
+        elif token == "weekend":
+            parts.append("weekends")
+        else:
+            parts.append(f"{DAYS[[d[:3] for d in DAYS].index(token)].capitalize()}s")
+    text = parts[0] if len(parts) < 2 else f"{', '.join(parts[:-1])} and {parts[-1]}"
+    return f"at {text}" if days == ("weekend",) else f"on {text}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +267,7 @@ class RoomLink:
     night_c: float | None = None  # replaces the night temperature in this room
     unused_c: float | None = None  # replaces the unused temperature in this room
     preheat_min: int | None = None  # replaces the household's preheat in this room
+    adjust: tuple[Adjustment, ...] = ()  # applied in order: a later one wins on overlap
 
     def use(self, day_type: str) -> UseLevel:
         return self.use_weekend if day_type == "weekend" else self.use_weekdays
@@ -253,6 +317,11 @@ class CompiledHousehold:
     notes: tuple[str, ...] = ()  # warm periods left out of the valve's week, in words
     live: dict[str, WeekSchedule] = field(default_factory=dict)  # what Radiate follows
     dropped: tuple[DroppedPeriod, ...] = ()  # the same as `notes`, one per period
+    # Per room, Monday first: the live week's warm periods, for the week view's edges.
+    periods: dict[str, tuple[tuple[Interval, ...], ...]] = field(default_factory=dict)
+    # Per room, Monday first: what room adjustments changed in the live week, as
+    # (start, end, keep): warm time they added and warm time they took away.
+    adjusted: dict[str, tuple[tuple[tuple[int, int, Keep], ...], ...]] = field(default_factory=dict)
 
 
 def compile_household(
@@ -266,21 +335,33 @@ def compile_household(
     `away` holds the ids of people treated as away: their part of every routine is
     dropped. `preheat_min` replaces the rooms' preheat, for every room or per room id;
     by default each room uses its own `preheat_min` or the household's.
+
+    Room adjustments apply after the routine rules and before the valve's week is
+    fitted to the TRVZB, so a warm period they add can still be left out of the valve's
+    week, with a note. They apply whenever the room's normal week does: when everyone
+    who uses the room is away, it drops to its unused level and they don't apply.
     """
     known = {p.id for p in household.people}
     unknown = sorted(away - known)
     if unknown:
         raise ValueError(f"unknown people in away: {', '.join(unknown)}")
     present = tuple(p for p in household.people if p.id not in away)
+    present_ids = {p.id for p in present}
     schedules: dict[str, WeekSchedule] = {}
     live: dict[str, WeekSchedule] = {}
+    periods: dict[str, tuple[tuple[Interval, ...], ...]] = {}
+    adjusted: dict[str, tuple[tuple[tuple[int, int, Keep], ...], ...]] = {}
     dropped_periods: list[DroppedPeriod] = []
     for room in household.rooms:
         preheat = _room_preheat(household, room, preheat_min)
-        cache: dict[tuple, tuple[DaySchedule, DaySchedule, list]] = {}
+        users = known if room.people is None else set(room.people)
+        adjust = room.adjust if users & present_ids else ()
+        cache: dict[tuple, _Day] = {}
         groups: dict[tuple, list[int]] = {}
         valve_days: list[DaySchedule] = []
         live_days: list[DaySchedule] = []
+        room_periods: list[tuple[Interval, ...]] = []
+        room_adjusted: list[tuple[tuple[int, int, Keep], ...]] = []
         for weekday in range(7):
             weekend = weekday in household.weekend_days
             level = room.use_weekend if weekend else room.use_weekdays
@@ -293,20 +374,25 @@ def compile_household(
                 )
                 for p in present
             )
-            key = (level, people)
+            today = tuple(a for a in adjust if a.on(weekday, household.weekend_days))
+            key = (level, people, today)
             if key not in cache:
-                cache[key] = _compile_day(room, level, people, household, preheat)
-            valve, live_day, dropped = cache[key]
-            valve_days.append(valve)
-            live_days.append(live_day)
-            if dropped:
+                cache[key] = _compile_day(room, level, people, household, preheat, today)
+            day = cache[key]
+            valve_days.append(day.valve)
+            live_days.append(day.live)
+            room_periods.append(day.periods)
+            room_adjusted.append(day.adjusted)
+            if day.dropped:
                 groups.setdefault((weekend, key), []).append(weekday)
         schedules[room.room_id] = WeekSchedule(tuple(valve_days))
         live[room.room_id] = WeekSchedule(tuple(live_days))
+        periods[room.room_id] = tuple(room_periods)
+        adjusted[room.room_id] = tuple(room_adjusted)
         label = room.name or room.room_id
         for (_, key), days in groups.items():
             when = _days_label(days, household.weekend_days)
-            for sp, (a, b) in cache[key][2]:
+            for sp, (a, b) in cache[key].dropped:
                 text = (
                     f"{label}, {when}: the valve's own schedule leaves out {_deg(sp)} "
                     f"{hhmm(a)} to {hhmm(b)} to fit its limit of {MAX_TRANSITIONS} changes "
@@ -320,7 +406,14 @@ def compile_household(
         notes=tuple(d.text for d in dropped_periods),
         live=live,
         dropped=tuple(dropped_periods),
+        periods=periods,
+        adjusted=adjusted,
     )
+
+
+def without_adjustments(household: Household) -> Household:
+    """The household with every room adjustment left out: the week its routines give."""
+    return replace(household, rooms=tuple(replace(r, adjust=()) for r in household.rooms))
 
 
 def round_half(value: float) -> float:
@@ -385,6 +478,7 @@ def household_view(household: Household) -> dict:
                 "night_temperature": round_half(_or(r.night_c, temps.night_c)),
                 "unused_temperature": round_half(_or(r.unused_c, temps.unused_c)),
                 "preheat_min": _or(r.preheat_min, t.preheat_min),
+                "adjust": [adjustment_item(a) for a in r.adjust],
                 "inherited": [k for k, v in own.items() if v is None],
             }
         )
@@ -424,6 +518,18 @@ def options_view() -> dict[str, list[str]]:
         "weekend_days": list(DAYS),
         "rooms.use": [v.value for v in UseLevel],
         "rooms.kind": [v.value for v in RoomKind],
+        "rooms.adjust.keep": [v.value for v in Keep],
+        "rooms.adjust.days": [*ADJUST_GROUPS, *(d[:3] for d in DAYS)],
+    }
+
+
+def adjustment_item(adj: Adjustment) -> dict:
+    """A room adjustment as in the house file: `days` is one name or a list of them."""
+    return {
+        "days": adj.days[0] if len(adj.days) == 1 else list(adj.days),
+        "keep": adj.keep.value,
+        "from": hhmm(adj.from_min),
+        "to": hhmm(adj.to_min),
     }
 
 
@@ -525,6 +631,8 @@ def household_section(household: Household) -> dict:
         ):
             if value is not None:
                 item[key] = _num(value)
+        if r.adjust:
+            item["adjust"] = [adjustment_item(a) for a in r.adjust]
         rooms[r.room_id] = item
     out["rooms"] = rooms
     return out
@@ -586,13 +694,23 @@ def _num(value: float) -> int | float:
 _Today = tuple[str, Routine, int, int]
 
 
+@dataclass(frozen=True, slots=True)
+class _Day:
+    valve: DaySchedule
+    live: DaySchedule
+    dropped: list[tuple[float, Interval]]  # warm periods the valve's day leaves out
+    periods: tuple[Interval, ...]  # the live day's warm periods
+    adjusted: tuple[tuple[int, int, Keep], ...]  # what adjustments changed in the live day
+
+
 def _compile_day(
     room: RoomLink,
     level: UseLevel,
     present: tuple[_Today, ...],
     household: Household,
     preheat: int,
-) -> tuple[DaySchedule, DaySchedule, list[tuple[float, Interval]]]:
+    adjust: tuple[Adjustment, ...] = (),
+) -> _Day:
     """The valve's day, the live day, and the warm periods the valve's day leaves out."""
     temps, timing = household.temperatures, household.timing
     fixed = timing.live_preheat is LivePreheat.FIXED
@@ -606,7 +724,9 @@ def _compile_day(
         valve_day = (max(0, first_up - preheat), last_bed)
         live_day = valve_day if fixed else (first_up, last_bed)
 
-    warm_c = round_half(_or(room.temperature_c, temps.level(level)))
+    # Kept warm on a day the room is unused: the in-use temperature, or its own.
+    warm_level = UseLevel.IN_USE if level is UseLevel.UNUSED and adjust else level
+    warm_c = round_half(_or(room.temperature_c, temps.level(warm_level)))
     if level is UseLevel.UNUSED:
         use: list[Interval] = []
     else:
@@ -618,6 +738,15 @@ def _compile_day(
     live_warm = [(start if fixed else needed, end) for start, needed, end in groups]
 
     valve_warm = [(start, end) for start, _, end in groups]
+    changes: tuple[tuple[int, int, Keep], ...] = ()
+    if adjust:
+        routine = live_warm
+        live_warm = _apply(live_warm, adjust)
+        # The valve starts each warm period by the fixed preheat, as for any other.
+        valve_warm = (
+            live_warm if fixed else _union([(max(0, a - preheat), b) for a, b in live_warm])
+        )
+        changes = _changes(routine, live_warm)
     dropped: list[tuple[float, Interval]] = []
     transitions = _transitions(valve_warm, warm_c, valve_day, night, unused)
     while len(transitions) > MAX_TRANSITIONS and valve_warm:
@@ -627,11 +756,54 @@ def _compile_day(
         dropped.append((warm_c, shortest))
         transitions = _transitions(valve_warm, warm_c, valve_day, night, unused)
     live = _transitions(live_warm, warm_c, live_day, night, unused)
-    return (
-        DaySchedule(tuple(transitions)),
-        DaySchedule(tuple(live)),
-        sorted(dropped, key=lambda d: d[1]),
+    return _Day(
+        valve=DaySchedule(tuple(transitions)),
+        live=DaySchedule(tuple(live)),
+        dropped=sorted(dropped, key=lambda d: d[1]),
+        periods=tuple(live_warm),
+        adjusted=changes,
     )
+
+
+def _union(spans: Iterable[Interval]) -> list[Interval]:
+    """Sorted, with overlapping and touching intervals joined."""
+    out: list[Interval] = []
+    for a, b in sorted(spans):
+        if out and a <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
+def _minus(spans: Iterable[Interval], hole: Interval) -> list[Interval]:
+    out: list[Interval] = []
+    for a, b in spans:
+        out.extend(iv for iv in ((a, min(b, hole[0])), (max(a, hole[1]), b)) if iv[1] > iv[0])
+    return out
+
+
+def _apply(warm: list[Interval], adjust: tuple[Adjustment, ...]) -> list[Interval]:
+    """The warm periods with each adjustment applied in order: a later one wins."""
+    out = _union(warm)
+    for adj in adjust:
+        window = (adj.from_min, adj.to_min)
+        out = _union([*out, window]) if adj.keep is Keep.WARM else _minus(out, window)
+    return out
+
+
+def _changes(before: list[Interval], after: list[Interval]) -> tuple[tuple[int, int, Keep], ...]:
+    """Warm time added (`warm`) and taken away (`cold`) between two lists of periods."""
+
+    def diff(a: list[Interval], b: list[Interval]) -> list[Interval]:
+        out = _union(a)
+        for hole in b:
+            out = _minus(out, hole)
+        return out
+
+    added = [(a, b, Keep.WARM) for a, b in diff(after, before)]
+    removed = [(a, b, Keep.COLD) for a, b in diff(before, after)]
+    return tuple(sorted(added + removed))
 
 
 def _in_use(kind: RoomKind, routines: list[tuple[Routine, int, int]]) -> list[Interval]:
