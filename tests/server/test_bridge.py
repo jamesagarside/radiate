@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from radiate.core import Reason
 from radiate.server import bridge
 from radiate.server.bridge import DemoSession, RequestError, handle, run_sync
 from radiate.server.demo import DemoDriver
@@ -109,3 +110,14 @@ def test_demo_session_speaks_json():
     assert bad == {"status": 400, "body": "mode must be auto, off or frost"}
     done = json.loads(s.request("POST", "settings", json.dumps({"demand_mode": "comfort"})))
     assert done["status"] == 200 and done["body"]["settings"]["demand_mode"] == "comfort"
+
+
+def test_rooms_carry_their_reason_code(rt):
+    message = "Toilet: calling, waiting for more rooms to share a burn (eco)"
+    rt.last_actions.reasons.append(Reason("demand.pooled", message, "toilet"))
+    rooms = {r["id"]: r for r in handle(rt, "GET", "state")["rooms"]}
+    assert rooms["toilet"]["reason"] == message
+    assert rooms["toilet"]["reason_code"] == "demand.pooled"
+    for room in rooms.values():
+        if "reason" in room:
+            assert (room["reason"] is None) == (room["reason_code"] is None)
