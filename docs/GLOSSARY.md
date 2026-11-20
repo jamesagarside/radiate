@@ -130,6 +130,11 @@ Code: `CompiledHousehold.schedules` and `CompiledHousehold.live`, `SiteConfig.sc
 A warm period left out of a room's valve schedule to fit the TRVZB's limit. Radiate still heats it while running.
 Code: `DroppedPeriod` (`room_id`, `day_type`, `days`, `start_min`, `end_min`, `setpoint_c`, `text`), `CompiledHousehold.dropped`, `CompiledHousehold.notes`.
 
+**Room adjustment**:
+A change to one household room's week that its routines don't give: keep it warm, or keep it cold, from one time to another on some days (`weekdays`, `weekend`, `daily` or named days). Adjustments apply in order after the routine rules, so a later one wins where two overlap. Their times are the live schedule's; the valve schedule adds the fixed preheat and is then fitted to the TRVZB. They don't apply while everyone who uses the room is away. Made by dragging the edge of a warm period in the week view, or with its Adjust form, and saved with the household, so they survive recompiling. At most 10 a room.
+Code: `Adjustment` (`days`, `keep`, `from_min`, `to_min`), `Keep`, `RoomLink.adjust`, `without_adjustments`, `CompiledHousehold.periods` and `CompiledHousehold.adjusted` in `radiate.config.household`; `LIMITS["rooms.adjust"]`; config key `household.rooms.<id>.adjust`; API `adjust`, `routine`, `days[].periods` and `days[].adjusted` in `GET /api/v1/schedules`; `addAdjustment` and `editRoom` in `web/week.js`.
+_Avoid_: override (a temporary setpoint for a room, which ends by itself), exception, schedule edit.
+
 **Away**:
 A person treated as not at home, so their part of every routine is dropped when compiling. A person counts as away through an away until, or through presence that has said not home for the presence delay. When the set of people away changes, the runtime recompiles the household.
 Code: `effective_away`, `status` in `radiate.config.away`; `compile_household(away=...)`; `Runtime.away`, `Runtime.presence`. API `GET /api/v1/people`, `away` in `state`.

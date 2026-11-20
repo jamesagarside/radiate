@@ -302,6 +302,7 @@ Each routine has these keys:
 | `night_temperature` | Replaces `temperatures.night` in this room, for example a warmer nursery |
 | `unused_temperature` | Replaces `temperatures.unused` in this room |
 | `preheat_min` | Replaces `timing.preheat_min` in this room, for example a slow room with a small radiator |
+| `adjust` | Room adjustments: times to keep this room warm or cold whatever the routines say. See [Room adjustments](#room-adjustments) |
 
 A room in `household.rooms` can't also set `schedule` in the `rooms` section. Rooms not listed keep their `schedule`. A passive room has no valve, so it can't be listed.
 
@@ -371,6 +372,47 @@ Then:
 With the example above, Radiate's copy has the kitchen at 19 °C from 06:30 to 08:30 and from 18:00 to 22:30 on weekdays. The valve's copy has it at 19 °C from 06:00 to 08:30 and from 17:30 to 22:30. Both have it at 14 °C the rest of the time. `radiate schedules` prints the valve's copy of every room.
 
 A room with a range cooker or other steady heat source needs nothing special. Choose its use level and kind like any other room, and set `heat_source: continuous` in the `rooms` section so Radiate learns that heat as part of the room.
+
+#### Room adjustments
+
+A room adjustment keeps one room warm, or cold, from one time to another on some days, whatever the routines say. Use it for something the routines don't describe, such as "the kitchen stays warm until 23:00 on weekdays". It stays when the routines change, so you don't need to rewrite a routine for one room.
+
+```yaml
+household:
+  rooms:
+    kitchen:
+      use: in_use
+      adjust:
+        - days: weekdays
+          keep: warm
+          from: "22:30"
+          to: "23:00"
+        - days: [sat, sun]
+          keep: cold
+          from: "08:30"
+          to: "09:00"
+```
+
+With the example household, the kitchen is then warm until 23:00 on weekdays, and from 09:00, not 08:30, at weekends.
+
+| Key | Meaning |
+|---|---|
+| `days` | Required. `weekdays`, `weekend`, `daily`, a day (`mon` to `sun`, or in full), or a list of them, such as `[mon, wed]`. `weekdays` and `weekend` follow `household.weekend_days` |
+| `keep` | Required. `warm`: the room is warm from `from` to `to`. `cold`: it isn't warm then, so it's at the unused temperature by day and the night temperature overnight |
+| `from` | Required. When it starts, `HH:MM` |
+| `to` | Required. When it ends, after `from` on the same day. `24:00` is allowed |
+
+A room can have up to 10 adjustments.
+
+How they apply:
+
+- After the routine rules, in the order listed. Where two overlap, the later one wins.
+- The times are in Radiate's own copy of the week, the one the web UI shows: "warm by" times. The valve's copy starts each warm period `preheat_min` early, as usual. With `live_preheat: fixed` the two copies are the same, so the times are when heating starts.
+- A room kept warm gets its use level's temperature, or its own `temperature`. On a day the room is `unused`, it gets the in-use temperature.
+- Before the valve's copy is fitted to the TRVZB's six changes a day. A warm period an adjustment adds can still be left out of the valve's copy, and `check-config` says so. Radiate still heats it while running.
+- While everyone who uses the room is away, the room drops to its unused temperature and its adjustments don't apply. While some of its people are home, they apply as usual.
+
+In the web UI, you can make an adjustment in the Schedules section instead. Drag the start or end of a warm period, or select **Adjust** under the room. Each room lists its adjustments, with **Remove** and **Reset to routine**. The first change to a household from the house file saves a copy of it in `household.yaml` in the data directory, as the setup does. See [Set up in the web UI](#set-up-in-the-web-ui).
 
 #### Away
 
