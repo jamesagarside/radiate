@@ -155,9 +155,20 @@ async def _start_live(site, session):
 
 
 def _sim(args: argparse.Namespace) -> None:
+    import dataclasses
+
+    from radiate.core import DemandMode
+    from radiate.sim.reference import house_config
     from radiate.sim.runner import compare
 
-    baseline, radiate = compare(days=args.days, warmup_days=args.warmup, seed=args.seed)
+    cfg = house_config()
+    boiler = dataclasses.replace(cfg.boiler, demand_mode=DemandMode(args.demand_mode))
+    baseline, radiate = compare(
+        days=args.days,
+        warmup_days=args.warmup,
+        seed=args.seed,
+        cfg=dataclasses.replace(cfg, boiler=boiler),
+    )
     b, r = baseline.summary(), radiate.summary()
     width = max(len(k) for k in b)
     print(f"{'':{width}}  {'smart TRVs':>11}  {'Radiate':>8}")
@@ -408,6 +419,12 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--days", type=int, default=5)
     m.add_argument("--warmup", type=int, default=2)
     m.add_argument("--seed", type=int, default=1)
+    m.add_argument(
+        "--demand-mode",
+        choices=("eco", "comfort"),
+        default="eco",
+        help="how calling rooms fire the boiler (default eco)",
+    )
     m.set_defaults(func=_sim)
     c = sub.add_parser("check-config", help="validate a house configuration file")
     c.add_argument("path")

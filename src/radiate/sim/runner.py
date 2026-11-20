@@ -429,8 +429,10 @@ def _measure(
             tracking[key]["_done"] = 1.0
 
 
-def compare(days: int = 5, warmup_days: int = 2, seed: int = 1) -> tuple[Result, Result]:
+def compare(
+    days: int = 5, warmup_days: int = 2, seed: int = 1, cfg: HouseConfig | None = None
+) -> tuple[Result, Result]:
     return (
         run("baseline", days, warmup_days, seed),
-        run("radiate", days, warmup_days, seed),
+        run("radiate", days, warmup_days, seed, cfg=cfg),
     )

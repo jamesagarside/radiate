@@ -15,6 +15,11 @@ def test_serve_accepts_every_option_the_app_passes():
     assert args.demo and args.dry_run and args.data_dir is None
 
 
+def test_sim_takes_a_demand_mode():
+    assert build_parser().parse_args(["sim"]).demand_mode == "eco"
+    assert build_parser().parse_args(["sim", "--demand-mode", "comfort"]).demand_mode == "comfort"
+
+
 def test_app_entry_point_builds_valid_arguments(tmp_path, monkeypatch):
     """Run app/radiate/run.py up to exec and parse what it would run."""
     import importlib.util
