@@ -152,6 +152,7 @@ Top remaining gaps, most important first:
 | `GET /api/v1/house`, `/state`, `/decisions?since=` | done | `server/app.py` | |
 | `POST /rooms/{id}/setpoint` | done | `server/app.py`, `server/runtime.py` `set_override` | Ends at the next schedule change by default, or after `duration_min`, or `until: cleared`; saved in SQLite; `override` in `describe()` |
 | `POST /rooms/{id}/fire`, `/store/boost`, `/mode` | done | `server/app.py` | Manual fire flag is not persisted; `fire_switch` in `describe()` |
+| `GET /people`, `POST /people/{id}/away`, `/people/{id}/presence` | done | `server/app.py`, `server/bridge.py`, `server/runtime.py` | Away until and Home Assistant presence per person; saved in SQLite; `away` in `describe()`, `people` in `house()` |
 | `WS /api/v1/stream` | done | `server/app.py` | |
 | Local token auth, ingress auth | done | `server/app.py` | |
 | HA: climate per room | done | `custom_components/radiate/climate.py` | Setting the target creates an override; override setpoint, `until` and minutes left as attributes |
@@ -164,6 +165,7 @@ Top remaining gaps, most important first:
 | HA: heating mode select, hot-water store and boost | done | `custom_components/radiate/select.py`, `binary_sensor.py` | Select posts `mode`; binary sensors from `store.relay` and `store.boost`, no device class. The server reports no boost end time |
 | HA services `boost_store`, `set_mode` | done | `custom_components/radiate/__init__.py` | |
 | HA services `set_override`, `clear_override` | done | `custom_components/radiate/climate.py` | Entity services on Radiate climate entities; `until` and `duration_min` as in `POST /rooms/{id}/setpoint` |
+| HA: presence, away sensors, `set_away`, `clear_away` | done | `custom_components/radiate/presence.py`, `options_flow.py` | Options step maps Radiate people to `person` entities; state changes posted to `people/{id}/presence`; an away binary sensor per person |
 | HA service `recalibrate_valve` | missing | | |
 
 ## 9. Elastic export
@@ -193,7 +195,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Daily accounting and stuck valves in the UI | done | `web/app.js` | Burner hours and starts today, yesterday's balance score ("Not a full day of data" for a partial day), a line on a room whose valve may be stuck |
 | Household compiler | done | `config/household.py`, `config/site.py`, `radiate schedules` | People, routines, use levels and room links in the `household` section compile to one `WeekSchedule` per room. Fixed 30-minute preheat; learned arrival lags not fed in yet. See [household setup](proposals/household-setup.md) |
 | Setup wizard and week view | missing | | Proposed in [household setup](proposals/household-setup.md). The wizard writes the `household` section |
-| Away | missing | | The compiler takes the people who are away; presence from Home Assistant `person` entities, an away control and away state in the server are not built |
+| Away | done | `config/away.py`, `server/runtime.py`, `server/bridge.py`, `drivers/live.py`, `web/app.js`, `custom_components/radiate/presence.py` | Away until (set in the web UI, the API or `radiate.set_away`) and Home Assistant presence after `household.presence_delay_min` (60 min). Saved in SQLite. A change recompiles the household and the live driver, mirror and Shelly fallback use the new weeks. Everyone away holds frost in `auto` until 30 minutes before the first return; `off` and `frost` still win. Not visually checked in a browser yet; the return lead is the fixed 30-minute preheat, so a house cooled towards frost can be cool on arrival |
 | Home Assistant dashboard | done | `export/dashboard.py`, `radiate dashboard` | Built-in Lovelace cards from the house file. Rooms view: trends over `--hours`, humidity, valve control and activity, batteries. Analysis view: a date picker over long-term statistics, per-room min, mean and max. Reads Zigbee2MQTT entities, and by default the integration's too: boiler state and its timeline, alerts, today's burner hours and starts, the heating mode with buttons to change it, the hot-water store and boost with a boost button, each room's climate entity, opening limit and fire switch. `--no-radiate` leaves the integration out |
 
 ## 11. Simulator
@@ -217,7 +219,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Auto-tuning (from model learning) | done | `core/estimator.py` | |
 | Tolerance band, overshoot protection | done | `core/decide.py` | Hysteresis latch, TRV closes at setpoint |
 | Optimum start | done | `core/decide.py` `_preheat_due` | |
-| Presets (comfort, eco, away) | partial | `server/app.py` `/mode` | `auto`, `off`, `frost` only |
+| Presets (comfort, eco, away) | partial | `server/app.py` `/mode` | `auto`, `off`, `frost` only. Away is per person (household setup), not a mode |
 | Summer or outdoor cut-off | missing | | |
 | Central mode (house off, frost) | done | `core/decide.py` | |
 | Learned state persistence | done | `core/persist.py` | |

@@ -125,6 +125,7 @@ Instead of writing schedules, you can describe the people in the house and how e
 
 ```yaml
 household:
+  presence_delay_min: 60      # minutes out before Home Assistant presence counts as away
   temperatures:               # house-wide, °C; these are the defaults
     in_use: 19
     occasional: 16
@@ -217,6 +218,23 @@ Then:
 4. The TRVZB holds six changes a day. If a day needs more, Radiate drops the shortest warm periods until it fits, and `check-config` and `radiate schedules` say which periods were dropped.
 
 With the example above, the kitchen is at 19 °C from 06:00 to 08:30 and from 17:30 to 22:30 on weekdays, and 14 °C the rest of the time. Run `radiate schedules` to see every room.
+
+#### Away
+
+When a person is away, Radiate rebuilds the household's schedules without their part of the routine. If the home worker travels, their office drops to the unused temperature and the bedroom stays warm for the early riser. Rooms with a hand-written `schedule` don't change. The schedule mirror writes the rebuilt weeks to the TRVs (in dry run, it logs them).
+
+A person counts as away in two ways:
+
+- Away until: someone sets it in the web UI, through the API, or with the Home Assistant service `radiate.set_away`. It counts straight away, and it stops counting 30 minutes before the given time, so their rooms are warm when they arrive. It clears itself at that time. You don't need Home Assistant for this.
+- Presence: the Home Assistant integration reports a mapped `person` entity as home or not home. Not home counts as away once it has lasted `presence_delay_min`. Home counts at once.
+
+Away until wins over a home that Home Assistant reported before it was set, so you can set it before you leave. If Home Assistant sees the person arrive home after it was set, the away ends early.
+
+`presence_delay_min` is 0 to 720 minutes, 60 by default. An hour is longer than a trip to the shops or the school run, and shorter than a working day or an evening out. A room cools slowly, so turning it down for a short trip saves little heat and costs an extra boiler start to warm it again. Set it to 0 to count a person as away as soon as they leave.
+
+When everyone is away and the heating mode is `auto`, the house holds every room at the frost threshold, like the `frost` mode. It goes back to the schedules as soon as someone is home, or 30 minutes before the first person is due back. The heating mode you chose doesn't change, so `off` and `frost` still apply while everyone is away. Frost protection and the boiler guards work as usual.
+
+Away state is saved in the state database, so it survives a restart.
 
 ### balancing
 

@@ -1,6 +1,6 @@
 # Proposal: household setup
 
-**Status:** compiler built; wizard and away not yet. 20 November 2026. The `household` section of the house file and `radiate schedules` are described in [configuration](../configuration.md#household).
+**Status:** compiler and away built; wizard not yet. 20 November 2026. The `household` section of the house file and `radiate schedules` are described in [configuration](../configuration.md#household), and away in [configuration](../configuration.md#away).
 
 Radiate should ask how a household lives and build the heating schedules from the answers. People shouldn't write schedules, and they shouldn't set a temperature for every room and time slot.
 
@@ -79,6 +79,14 @@ The output is the same `WeekSchedule` the house file produces today, so `radiate
 
 Presence never bypasses the boiler guards or the frost threshold, and it never sits in the control loop through the cloud (ADR-0002).
 
+How it was built:
+
+- `radiate.config.away` decides who counts as away, as a pure function of each person's state and the wall clock. Away until counts at once and stops counting 30 minutes (the preheat) before the return. Home Assistant `not_home` counts after the presence delay. Away until wins over a `home` reported before it was set, so a person can set it before leaving; arriving home after it was set ends it.
+- The runtime keeps each person's away until and presence in SQLite. When the set of people away changes, it recompiles the household and hands the weeks to the live driver, so the schedule mirror and the Shelly fallback follow.
+- Everyone away doesn't switch the heating mode. The runtime runs the core in `frost` while everyone is away and the chosen mode is `auto`, so a mode of `off` or `frost` still wins and `auto` returns by itself. With presence only, there is no return time, so it lasts until someone is home.
+- The Home Assistant integration maps Radiate people to `person` entities in its options, reports their state as it changes, and adds an away binary sensor per person and the services `radiate.set_away` and `radiate.clear_away`. The server makes every decision.
+- The web UI has a People section with an "Away until" control per person.
+
 ## Setup in the UI
 
 Setup is a short wizard in the web UI, also reachable from Home Assistant through ingress:
@@ -100,8 +108,8 @@ Afterwards, the same screens edit the answers. Dragging an edge in the week view
 | People, routines, levels and room links | `household` section of the house file (built), written by the wizard (not built) |
 | Compile to `WeekSchedule`s | `radiate.config.household`, pure, tested on the reference house (built). It takes the people who are away as an argument, ready for presence |
 | Print the result | `radiate schedules`, with `--trvzb` for the payload each TRV receives (built) |
-| Presence from `person` entities | The Home Assistant integration passes presence to the server through the API, alongside existing overrides |
-| Away without Home Assistant | Server state in SQLite, like overrides |
+| Presence from `person` entities | The Home Assistant integration passes presence to the server through the API, alongside existing overrides (built) |
+| Away without Home Assistant | Server state in SQLite, like overrides, set from the web UI (built) |
 | Wizard and week view | `web/` |
 
 ## Worked example
@@ -128,9 +136,13 @@ Every room is at 14° outside the times shown. All of it matches the schedules s
 
 When the home worker travels, Bedroom 3 drops to 14° on weekdays. Bedroom 1 stays warm for the early riser, from 06:00 to 07:00 instead of 08:30, and the shared rooms end their morning at 07:30. Weekends are unchanged, because both people have the same weekend routine.
 
+## Resolved questions
+
+- **Does Home Assistant presence need a delay before it counts someone as away?** Yes: 60 minutes by default, set with `household.presence_delay_min` (0 to 720). An hour is longer than a trip to the shops or the school run, and shorter than a working day or an evening out. A room cools slowly, so turning it down for a short trip saves little heat and costs an extra boiler start to warm it again. Arriving home counts at once.
+
 ## Open questions
 
 - Should the kitchen and dining room stay warm through the day when someone works from home, or only when they are "used"? A per-room "warm while anyone is home" option may cover it.
 - How should the compiler treat rooms with a continuous heat source, such as a kitchen with a range cooker? They may not need scheduling at all.
-- Does Home Assistant presence need a delay before it counts someone as away, so a short trip to the shops does not cool their office?
+- After a long absence at frost, 30 minutes of warning before the first return may not be enough to warm the house. Optimum start can't help, because the core runs in `frost` until then. Learned arrival lags, or a longer lead for everyone away, could fix it.
 - Optimum start already heats a room early so it reaches its next setpoint on time. The 30-minute preheat moves that setpoint 30 minutes earlier, so under Radiate a room can be warm about 30 minutes before anyone needs it. The preheat still matters for the schedule mirror, which has no optimum start. Should the runtime use the schedule without the preheat, and the mirror use it with?

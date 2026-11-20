@@ -333,7 +333,7 @@ Order inside `decide`:
 
 ### 8.1 Server API (v1)
 
-Request and response bodies are JSON. A body that is not a JSON object returns 400, as does an invalid setpoint or mode; an unknown room returns 404.
+Request and response bodies are JSON. A body that is not a JSON object returns 400, as does an invalid setpoint, mode or time; an unknown room or person returns 404.
 
 | Method and path | Body | Purpose |
 |---|---|---|
@@ -345,6 +345,9 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 | `POST /api/v1/rooms/{id}/fire` | `{"lit": true}` | Manual fire flag |
 | `POST /api/v1/store/boost` | `{"minutes": 60}` | Boost the store for 0 to 180 minutes; 0 cancels |
 | `POST /api/v1/mode` | `{"mode": "auto"}` | `auto`, `off` or `frost` |
+| `GET /api/v1/people` | | The household's people and their away state: `everyone`, `frost` (everyone away is holding the house at frost protection), `presence_delay_min`, `today` (local date) and `people`, each with `id`, `name`, `away`, `reason` (`away_until` or `presence`), `until` and `presence` (`state`, `since`). The same object is `away` in `state`; `house` lists `people` with `id` and `name` |
+| `POST /api/v1/people/{id}/away` | `{"until": "2026-11-24T18:00"}` | Away until a local date and time, or a date for the start of that day. An offset is allowed. Must be in the future and within 60 days. `{"until": null}` clears it. Saved across restarts |
+| `POST /api/v1/people/{id}/presence` | `{"state": "not_home", "since": "2026-11-24T08:10:00+00:00"}` | Presence from Home Assistant: `home`, `not_home`, or `null` to forget it. `since` is when the state changed (optional, never later than now) |
 | `GET /api/v1/stream` | | WebSocket: the state on connect and after every tick |
 
 Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` needs `Authorization: Bearer <token>`. Browsers cannot set headers on a WebSocket, so `stream` also accepts the token as its first message, `{"token": "<token>"}`; it waits up to 10 s and closes with code 4401 if the token is missing or wrong. In the HA App, requests from the Supervisor's ingress address (`RADIATE_INGRESS_IP`) that carry an `X-Ingress-Path` header are trusted without a token. The web UI at `/` and `/static/` is not protected.
@@ -357,7 +360,8 @@ Thin client (ADR-0002): it reads `house` and `state` and posts to the routes in 
 - Per room with an episodic heat source: a "Fire lit" switch that posts `rooms/{id}/fire` and shows `fire_switch`, and a "Fire detected" binary sensor for fire as Radiate sees it, from detection or the switch.
 - Rooms Radiate cannot control get a temperature sensor only.
 - House: a heating mode select that posts `mode`, binary sensors for the hot-water store (`store.relay`) and a store boost (`store.boost`), boiler state, boiler firing, starts in the last hour, predicted burn, outdoor temperature, short-cycle extra off time (with when it ends and the effective minimum off), and an alerts count with each alert's code, message and room as attributes. From `accounting`: burner hours and starts today, litres and kWh today when a nozzle rating is set (all reset at local midnight), and yesterday's balance score.
-- Services: `radiate.boost_store`, `radiate.set_mode`, `radiate.set_override` (a climate entity, `temperature`, optional `until` and `duration_min`, as in 8.1), `radiate.clear_override` and `radiate.recalibrate_valve` (not built yet).
+- Per household person: an "away" binary sensor, on while Radiate counts them away, with `reason`, `away_until`, `presence` and `presence_since` as attributes. An options step maps each person to a Home Assistant `person` entity; the integration posts its state to `people/{id}/presence` when it changes (`home` is home, any other state is not home, `unknown` and `unavailable` are not sent).
+- Services: `radiate.boost_store`, `radiate.set_mode`, `radiate.set_override` (a climate entity, `temperature`, optional `until` and `duration_min`, as in 8.1), `radiate.clear_override`, `radiate.set_away` (`person`, `until`), `radiate.clear_away` (`person`) and `radiate.recalibrate_valve` (not built yet).
 
 ---
 

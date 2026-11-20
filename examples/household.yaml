@@ -36,6 +36,7 @@ trv:
   schedule_mirror: true
 
 household:
+  presence_delay_min: 60      # out this long in Home Assistant before counting as away
   temperatures:               # house-wide, °C (these are the defaults)
     in_use: 19
     occasional: 16

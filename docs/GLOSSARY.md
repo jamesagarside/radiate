@@ -93,8 +93,24 @@ How a household room's people use it, which decides when it is warm: `shared` (w
 Code: `RoomKind`, `RoomLink.kind`, config key `household.rooms.<id>.kind`. The room's people are `RoomLink.people`.
 
 **Away**:
-A person treated as not at home, so their part of every routine is dropped when compiling. Only the compiler's `away` argument exists so far; presence from Home Assistant and an away control are not built.
-Code: `compile_household(away=...)`.
+A person treated as not at home, so their part of every routine is dropped when compiling. A person counts as away through an away until, or through presence that has said not home for the presence delay. When the set of people away changes, the runtime recompiles the household.
+Code: `effective_away`, `status` in `radiate.config.away`; `compile_household(away=...)`; `Runtime.away`, `Runtime.presence`. API `GET /api/v1/people`, `away` in `state`.
+
+**Away until**:
+A person's own statement that they are away until a local date and time, set in the web UI, the API or Home Assistant. It counts at once, stops counting the household preheat (30 minutes) before the given time so their rooms are warm on arrival, and clears itself at that time. It wins over a home that presence reported before it was set; arriving home after it was set ends it.
+Code: `Presence.away_until`, `Runtime.set_away`, `Runtime.clear_away`, `RETURN_LEAD_S`, API `POST /api/v1/people/{id}/away`, HA services `radiate.set_away`, `radiate.clear_away`.
+
+**Presence**:
+Whether Home Assistant reports a person as home or not home, and since when. The integration maps a Radiate person to a `person` entity and reports it; `unknown` and `unavailable` are not reported.
+Code: `Presence.state`, `Presence.since`, `Runtime.report_presence`, API `POST /api/v1/people/{id}/presence`, `custom_components/radiate/presence.py`.
+
+**Presence delay**:
+How long presence must say not home before the person counts as away, so short trips do not cool their rooms. 60 minutes by default.
+Minutes. Code: `PRESENCE_DELAY_MIN`, `Household.presence_delay_min`, config key `household.presence_delay_min`.
+
+**Everyone away**:
+Every person in the household counts as away. In the `auto` heating mode, the runtime then runs the core in `frost` until someone is home or due back. The chosen heating mode is not changed, so `off` and `frost` still apply.
+Code: `Runtime.everyone_away`, `Runtime.effective_mode`, `away.frost` in `state`; reasons `away.everyone`, `away.ended`.
 
 ## Valve actuation
 
@@ -413,8 +429,8 @@ The boiler start forced by a room below the frost threshold.
 Code: `frost`, `hard_frost` in `decide`.
 
 **Mode**:
-The house-wide heating mode: `auto` (follow schedules), `frost` (hold every room at the frost threshold), or `off` (no heating, frost protection still active).
-Code: `Mode`, API `POST /api/v1/mode`, HA service `radiate.set_mode`, HA select `mode`.
+The house-wide heating mode: `auto` (follow schedules), `frost` (hold every room at the frost threshold), or `off` (no heating, frost protection still active). The mode a person chose is `Runtime.mode`; while everyone is away, the core runs in the effective mode, `frost` in place of `auto`.
+Code: `Mode`, `Runtime.mode`, `Runtime.effective_mode`, API `POST /api/v1/mode`, HA service `radiate.set_mode`, HA select `mode` (shows the mode the person chose).
 
 **Store**:
 The hot-water store inside the boiler, enabled by its own relay channel on a schedule.
@@ -511,7 +527,7 @@ The server object that owns configuration, engine state and a driver, runs ticks
 Code: `Runtime` in `radiate.server.runtime`.
 
 **State database**:
-The SQLite file that holds engine state, the house ID, the mode and the Elastic export queue.
+The SQLite file that holds engine state, the house ID, the mode, overrides, away state and the Elastic export queue.
 Code: `radiate.server.store.Store`, file `<data_dir>/radiate.db`.
 _Avoid_: "store" on its own, which means the hot-water store.
 
