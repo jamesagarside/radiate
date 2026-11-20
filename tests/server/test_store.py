@@ -1,4 +1,4 @@
-from radiate.core.types import BoilerState
+from radiate.core.types import BoilerState, DemandMode
 from radiate.export.elastic import ElasticExporter
 from radiate.server.demo import DemoDriver
 from radiate.server.runtime import Runtime
@@ -93,3 +93,23 @@ async def test_runtime_restores_house_id_mode_and_models(tmp_path):
     assert rt2.mode.value == "frost"
     assert rt2.state.rooms["dining"].est.theta == a_before
     assert rt2.state.boiler.state in set(BoilerState)
+
+
+async def test_runtime_restores_the_demand_mode(tmp_path):
+    store = Store(tmp_path / "r.db")
+    rt = Runtime(house_config(), DemoDriver(), store=store)
+    rt.restore()
+    rt.set_demand_mode(DemandMode.COMFORT)  # saved straight away, no stop needed
+
+    rt2 = Runtime(house_config(), DemoDriver(), store=store)
+    rt2.restore()
+    assert rt2.demand_mode is DemandMode.COMFORT
+    rt2.set_demand_mode(None)
+    rt3 = Runtime(house_config(), DemoDriver(), store=store)
+    rt3.restore()
+    assert rt3.demand_mode is None and rt3.effective_demand_mode is DemandMode.ECO
+    # Settings saved before demand modes existed, or junk, follow the configuration.
+    store.put("runtime", {"mode": "auto", "overrides": {}, "demand_mode": "turbo"})
+    rt4 = Runtime(house_config(), DemoDriver(), store=store)
+    rt4.restore()
+    assert rt4.demand_mode is None

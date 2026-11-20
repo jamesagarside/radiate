@@ -29,12 +29,20 @@ WALL0 = 1_800_000_000.0
 
 
 def sim_entries(
-    cfg, minutes, *, offset=0.0, wall0=WALL0, segment=1, checkpoint_at=None, restart_at=None
+    cfg,
+    minutes,
+    *,
+    offset=0.0,
+    wall0=WALL0,
+    segment=1,
+    checkpoint_at=None,
+    restart_at=None,
+    demand_mode=None,
 ):
     """A recorded run of the simulated house: a start entry from priors, then ticks.
     `offset` shifts the monotonic clock, as a separate process would. `restart_at`:
     after that many ticks the controller restarts, as the runtime does: state saved,
-    a new clock, state loaded, a new start entry."""
+    a new clock, state loaded, a new start entry. `demand_mode`: chosen at runtime."""
     house = build_house(7, start_temp=16.5)
     house.now = 5.5 * 3600
     dist, dstate = Disturbances(fire_days=frozenset(range(365))), {}
@@ -57,6 +65,7 @@ def sim_entries(
             )
         snap = _snapshot(house, reports, int((house.now % 86400) // 60))
         snap.now += offset
+        snap.demand_mode = demand_mode
         actions = decide(cfg, snap, st)
         _apply(house, actions)
         wall = wall0 + (i + 1) * 60
@@ -219,6 +228,28 @@ def test_tally_counts_burns_relay_hours_alerts_and_comfort():
     assert s["heating_relay_h"] == round(10 / 60, 2)
     assert s["alerts"] == {"boiler.no_heat": {"onsets": 1, "minutes": 3}}
     assert s["below_setpoint_h"] == {"dining": 0.5}
+
+
+def test_the_demand_mode_is_recorded_so_replay_decides_the_same_way():
+    import dataclasses
+
+    from radiate.core.types import DemandMode
+
+    cfg = house_config()  # eco by default
+    entries, _ = sim_entries(cfg, 120, demand_mode=DemandMode.COMFORT)
+    assert entries[1].data["snapshot"]["demand_mode"] == "comfort"
+    ticks = list(Replayer(cfg).run(entries))
+    assert len(ticks) == 120 and [t for t in ticks if t.differences] == []
+    assert ticks[0].snapshot.demand_mode is DemandMode.COMFORT
+    # A recording from before demand modes has no such key: it still decodes, and is
+    # replayed in the configured mode.
+    for e in entries[1:]:
+        del e.data["snapshot"]["demand_mode"]
+    boiler = dataclasses.replace(cfg.boiler, demand_mode=DemandMode.COMFORT)
+    comfort = dataclasses.replace(cfg, boiler=boiler)
+    ticks = list(Replayer(comfort).run(entries))
+    assert len(ticks) == 120 and [t for t in ticks if t.differences] == []
+    assert ticks[0].snapshot.demand_mode is None
 
 
 def test_handback_fields_round_trip_through_json():

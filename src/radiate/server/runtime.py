@@ -20,7 +20,7 @@ from radiate import __version__
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.persist import dump_state, first_start_state, load_state
-from radiate.core.types import BoilerState, RoomRole
+from radiate.core.types import BoilerState, DemandMode, RoomRole
 
 LOG = logging.getLogger(__name__)
 
@@ -77,6 +77,8 @@ class Runtime:
     tick_s: float = 60.0
     state: EngineState = field(init=False)
     mode: Mode = Mode.AUTO
+    # Demand mode chosen through the API (spec 5.3); None follows `boiler.demand_mode`.
+    demand_mode: DemandMode | None = None
     overrides: dict[str, float] = field(default_factory=dict)  # setpoints the driver applies
     override_meta: dict[str, Override] = field(default_factory=dict)  # when each one ends
     fire: set[str] = field(default_factory=set)
@@ -103,7 +105,7 @@ class Runtime:
     # --- persistence ---------------------------------------------------------------------
 
     def restore(self) -> list[str]:
-        """Load the house id, mode and engine state from the store, if any.
+        """Load the house id, mode, settings and engine state from the store, if any.
 
         With a history (the driver's `history_days`), this also starts recording, and
         when there is no usable saved engine state it warms the learner by replaying
@@ -121,6 +123,10 @@ class Runtime:
         if saved_rt is not None and isinstance(saved_rt[0], dict):
             with contextlib.suppress(ValueError):
                 self.mode = Mode(saved_rt[0].get("mode", "auto"))
+            saved_demand = saved_rt[0].get("demand_mode")
+            if saved_demand is not None:
+                with contextlib.suppress(ValueError):
+                    self.demand_mode = DemandMode(saved_demand)
             self._restore_overrides(saved_rt[0].get("overrides"), wall - saved_rt[1])
         now = self.driver.clock()
         data, elapsed = None, 0.0
@@ -188,7 +194,39 @@ class Runtime:
                 "until": meta.until if meta else "cleared",
                 "remaining_s": left,
             }
-        self.store.put("runtime", {"mode": self.mode.value, "overrides": overrides})
+        self.store.put(
+            "runtime",
+            {
+                "mode": self.mode.value,
+                "overrides": overrides,
+                "demand_mode": self.demand_mode.value if self.demand_mode else None,
+            },
+        )
+
+    # --- settings ------------------------------------------------------------------------
+
+    @property
+    def effective_demand_mode(self) -> DemandMode:
+        return self.demand_mode or self.cfg.boiler.demand_mode
+
+    def set_demand_mode(self, mode: DemandMode | None) -> None:
+        """Choose the demand mode (spec 5.3), or None to follow the configuration file.
+        Saved straight away and used from the next tick."""
+        self.demand_mode = mode
+        self._save_runtime(self.driver.clock())
+
+    def settings(self) -> dict:
+        """Settings a person can see, and `demand_mode` they can change at runtime."""
+        b, learning = self.cfg.boiler, self.cfg.learning
+        return {
+            "demand_mode": self.effective_demand_mode.value,
+            "demand_mode_default": b.demand_mode.value,
+            "demand_modes": [m.value for m in DemandMode],
+            "comfort_limit_k": b.comfort_limit_k,
+            "eco_limit_k": b.eco_limit_k,
+            "learning_memory_days": learning.memory_days,
+            "learn_on_trv_fallback": learning.learn_on_trv_fallback,
+        }
 
     def _restore_overrides(self, data: object, elapsed_s: float) -> None:
         if not isinstance(data, dict):
@@ -277,6 +315,8 @@ class Runtime:
         snap = await self.driver.snapshot(
             self.mode, self.overrides, now < self.store_boost_until, self.fire
         )
+        # Always explicit, so the tick history records the mode each tick was decided in.
+        snap.demand_mode = self.effective_demand_mode
         actions = decide(self.cfg, snap, self.state)
         recorder = self.recorder
         compact = recorder.compact(actions) if recorder is not None else None
@@ -454,6 +494,8 @@ class Runtime:
                 # Safe mode: the relay is left to the Shelly watchdog.
                 "watchdog_handover": acts.watchdog_handover if acts else False,
                 "predicted_burn_min": round(st.allocation.t_star_h * 60) if st.allocation else 0,
+                # Minutes of full radiator output the calling rooms need (spec 5.3).
+                "pooled_demand_min": round(st.pooled_demand_s / 60, 1),
                 "supply": round(st.supply, 3),
                 # Effective minimum off, raised while short-cycling was seen (spec 7).
                 "min_off_s": sc.min_off_s(self.cfg.boiler.min_off_s),
@@ -483,6 +525,7 @@ class Runtime:
             if acts
             else [],
             "telemetry": self.driver.telemetry(),
+            "settings": self.settings(),
         }
 
 

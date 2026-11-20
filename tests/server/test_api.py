@@ -65,6 +65,21 @@ async def test_setpoint_override_and_validation(client):
     assert "bedroom_1" not in client.rt.overrides
 
 
+async def test_settings(client):
+    r = await client.get("/api/v1/settings", headers=H)
+    assert r.status == 200 and (await r.json())["demand_mode"] == "eco"
+    assert (await client.post("/api/v1/settings", json={"demand_mode": "comfort"})).status == 401
+    r = await client.post("/api/v1/settings", json={"demand_mode": "comfort"}, headers=H)
+    assert r.status == 200
+    assert (await r.json()) == {"ok": True, "settings": client.rt.settings()}
+    state = await (await client.get("/api/v1/state", headers=H)).json()
+    assert state["settings"]["demand_mode"] == "comfort"
+    assert isinstance(state["boiler"]["pooled_demand_min"], float)
+    for body in ({"demand_mode": "turbo"}, {"colour": "red"}):
+        assert (await client.post("/api/v1/settings", json=body, headers=H)).status == 400
+    assert (await client.post("/api/v1/settings", data="{bad", headers=H)).status == 400
+
+
 async def test_fire_switch_reaches_the_core(client):
     await client.post("/api/v1/rooms/lounge/fire", json={"lit": True}, headers=H)
     await client.rt.step()
