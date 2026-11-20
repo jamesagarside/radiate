@@ -408,11 +408,11 @@ class Runtime:
         snap, acts, st = self.last_snapshot, self.last_actions, self.state
         now = self.driver.clock()
         rooms = []
-        reasons_by_room: dict[str, str] = {}
+        reasons_by_room: dict[str, Reason] = {}
         if acts:
             for r in acts.reasons:
                 if r.room_id:
-                    reasons_by_room[r.room_id] = r.message
+                    reasons_by_room[r.room_id] = r
         for rc in self.cfg.rooms:
             inp = snap.rooms.get(rc.id) if snap else None
             item = {
@@ -457,7 +457,9 @@ class Runtime:
                         "arrival_lag_min": round(rs.arrival_lag_s / 60, 1),
                         "lockshield": rs.lockshield,
                     },
-                    reason=reasons_by_room.get(rc.id),
+                    reason=reason.message if (reason := reasons_by_room.get(rc.id)) else None,
+                    # The code of that reason, such as `demand.pooled` (spec 5.3).
+                    reason_code=reason.code if reason else None,
                     # Valve checks (spec 7). `untrusted`: stuck or leaking. `misses`:
                     # burns in a row with no warming when open. `leak_burns`: of the
                     # last 5 judged burns, those in which it warmed while shut.
