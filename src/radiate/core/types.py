@@ -34,6 +34,13 @@ class BoilerState(StrEnum):
     REST = "rest"  # minimum off time running
 
 
+class DemandMode(StrEnum):
+    """How calling rooms fire the boiler (spec 5.3)."""
+
+    ECO = "eco"  # pooled demand: a room on its own waits for others or a wider limit
+    COMFORT = "comfort"  # any calling room past the comfort limit fires the boiler
+
+
 @dataclass(frozen=True, slots=True)
 class RoomConfig:
     id: str
@@ -60,6 +67,18 @@ class BoilerConfig:
     hard_frost_c: float = 5.0
     output_kw: float = 13.0
     nozzle_lph: float | None = None
+    demand_mode: DemandMode = DemandMode.ECO  # the default; the runtime can change it
+    eco_limit_k: float = 1.5  # eco: the most a calling room waits below its target
+
+
+@dataclass(frozen=True, slots=True)
+class LearningConfig:
+    """Room model learning (spec 4.3, 4.6)."""
+
+    memory_days: float = 730.0  # RLS memory, in days of learning updates
+    # Learn from the TRV reading while a normal room's own sensor is stale. Off: the
+    # `sensor_stale` gate pauses learning until the sensor is back (spec 4.6).
+    learn_on_trv_fallback: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +93,7 @@ class HouseConfig:
     rooms: tuple[RoomConfig, ...]
     boiler: BoilerConfig = field(default_factory=BoilerConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
+    learning: LearningConfig = field(default_factory=LearningConfig)
     balancing: bool = True  # False: every heating valve fully open (for comparison)
     supply_kappa: float = 0.15  # supply factor sensitivity to total opening
     bypass_equivalent: float = 0.4  # always-open path, in fully-open-radiator equivalents
@@ -110,6 +130,9 @@ class RoomInput:
     preheat_max_s: float | None = None
     window_open: bool | None = None
     fire_switch: bool | None = None
+    # TRV settings the device did not accept after the reconciler's retries (spec 4.5),
+    # for example ("valve_opening_degree",). Empty when every write landed.
+    trv_rejected: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -125,6 +148,18 @@ class Snapshot:
     # Local calendar day (any integer that changes at local midnight, for example
     # `date.toordinal()`), for daily accounting. None: inferred from `minute_of_day`.
     day: int | None = None
+    # Hand-back (spec 5.7). False when relay commands are not sent (dry run): the
+    # observed relay is then someone else's and the boiler guard keeps its own state.
+    relay_follows_commands: bool = True
+    # How long the heating relay has been in its observed state, if the driver knows.
+    # None: unknown, so a change Radiate did not make is taken as happening now.
+    heating_relay_age_s: float | None = None
+    # How long the driver went without reading the heating relay before this snapshot
+    # (Shelly unreachable). After a few minutes the watchdog may have switched it.
+    heating_relay_unseen_s: float = 0.0
+    # The demand mode chosen at runtime (spec 5.3). None: `BoilerConfig.demand_mode`.
+    # In the snapshot so the tick history records it and replay decides the same way.
+    demand_mode: DemandMode | None = None
 
 
 @dataclass(slots=True)
@@ -156,6 +191,9 @@ class Actions:
     # No TRV reachable (spec 7). Once the relay is off, drivers stop commanding the
     # boiler and stop the heartbeat, so the Shelly watchdog's schedule takes over.
     safe_mode: bool = False
+    # Safe mode with no burn of Radiate's own running: drivers send no relay commands
+    # and no heartbeat, so the Shelly watchdog runs the boiler (spec 5.7, 7).
+    watchdog_handover: bool = False
     # Set on the first tick of a new local day: the summary of the day that closed
     # (burner hours, starts, burns, litres, balance score; `core.accounting`).
     day_summary: dict | None = None

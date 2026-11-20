@@ -1,0 +1,3661 @@
+[
+ {
+  "ieee_address": "0x00124b0000000001",
+  "type": "Coordinator",
+  "network_address": 0,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "Coordinator",
+  "definition": null,
+  "endpoints": {},
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true
+ },
+ {
+  "ieee_address": "0x00124b0000001001",
+  "type": "EndDevice",
+  "network_address": 4097,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "trv_bedroom_1",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "TRVZB",
+   "vendor": "SONOFF",
+   "description": "Zigbee thermostatic radiator valve",
+   "options": [],
+   "exposes": [
+    {
+     "type": "climate",
+     "features": [
+      {
+       "type": "numeric",
+       "name": "occupied_heating_setpoint",
+       "label": "Occupied heating setpoint",
+       "property": "occupied_heating_setpoint",
+       "access": 7,
+       "unit": "°C",
+       "value_min": 4,
+       "value_max": 35,
+       "value_step": 0.5
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature",
+       "label": "Local temperature",
+       "property": "local_temperature",
+       "access": 5,
+       "unit": "°C"
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature_calibration",
+       "label": "Local temperature calibration",
+       "property": "local_temperature_calibration",
+       "access": 7,
+       "unit": "°C",
+       "value_min": -12.7,
+       "value_max": 12.7,
+       "value_step": 0.2
+      },
+      {
+       "type": "enum",
+       "name": "system_mode",
+       "label": "System mode",
+       "property": "system_mode",
+       "access": 7,
+       "values": [
+        "off",
+        "auto",
+        "heat"
+       ]
+      },
+      {
+       "type": "enum",
+       "name": "running_state",
+       "label": "Running state",
+       "property": "running_state",
+       "access": 5,
+       "values": [
+        "idle",
+        "heat"
+       ]
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "timer_mode_target_temp",
+     "label": "Timer mode target temp",
+     "property": "timer_mode_target_temp",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "numeric",
+     "name": "temporary_mode_duration",
+     "label": "Temporary mode duration",
+     "property": "temporary_mode_duration",
+     "access": 7,
+     "unit": "minutes",
+     "value_min": 0,
+     "value_max": 1440
+    },
+    {
+     "type": "enum",
+     "name": "temporary_mode_select",
+     "label": "Temporary mode select",
+     "property": "temporary_mode_select",
+     "access": 7,
+     "values": [
+      "boost",
+      "timer"
+     ]
+    },
+    {
+     "type": "binary",
+     "name": "child_lock",
+     "label": "Child lock",
+     "property": "child_lock",
+     "access": 7,
+     "value_on": "LOCK",
+     "value_off": "UNLOCK"
+    },
+    {
+     "type": "binary",
+     "name": "open_window",
+     "label": "Open window",
+     "property": "open_window",
+     "access": 7,
+     "value_on": "ON",
+     "value_off": "OFF"
+    },
+    {
+     "type": "numeric",
+     "name": "frost_protection_temperature",
+     "label": "Frost protection temperature",
+     "property": "frost_protection_temperature",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "enum",
+     "name": "temperature_sensor_select",
+     "label": "Temperature sensor select",
+     "property": "temperature_sensor_select",
+     "access": 7,
+     "values": [
+      "local_temperature",
+      "remote_temperature",
+      "remote_source_offline"
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "external_temperature_input",
+     "label": "External temperature input",
+     "property": "external_temperature_input",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 0,
+     "value_max": 99.9,
+     "value_step": 0.1
+    },
+    {
+     "type": "numeric",
+     "name": "idle_steps",
+     "label": "Idle steps",
+     "property": "idle_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "closing_steps",
+     "label": "Closing steps",
+     "property": "closing_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_limit_voltage",
+     "label": "Valve opening limit voltage",
+     "property": "valve_opening_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_limit_voltage",
+     "label": "Valve closing limit voltage",
+     "property": "valve_closing_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_motor_running_voltage",
+     "label": "Valve motor running voltage",
+     "property": "valve_motor_running_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_degree",
+     "label": "Valve opening degree",
+     "property": "valve_opening_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_degree",
+     "label": "Valve closing degree",
+     "property": "valve_closing_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_sunday",
+     "label": "Weekly schedule sunday",
+     "property": "weekly_schedule_sunday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_monday",
+     "label": "Weekly schedule monday",
+     "property": "weekly_schedule_monday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_tuesday",
+     "label": "Weekly schedule tuesday",
+     "property": "weekly_schedule_tuesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_wednesday",
+     "label": "Weekly schedule wednesday",
+     "property": "weekly_schedule_wednesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_thursday",
+     "label": "Weekly schedule thursday",
+     "property": "weekly_schedule_thursday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_friday",
+     "label": "Weekly schedule friday",
+     "property": "weekly_schedule_friday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_saturday",
+     "label": "Weekly schedule saturday",
+     "property": "weekly_schedule_saturday",
+     "access": 2
+    },
+    {
+     "type": "binary",
+     "name": "smart_temperature_control",
+     "label": "Smart temperature control",
+     "property": "smart_temperature_control",
+     "access": 7,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "TRVZB",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.3.0"
+ },
+ {
+  "ieee_address": "0x00124b0000001002",
+  "type": "EndDevice",
+  "network_address": 4098,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "trv_bedroom_2",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "TRVZB",
+   "vendor": "SONOFF",
+   "description": "Zigbee thermostatic radiator valve",
+   "options": [],
+   "exposes": [
+    {
+     "type": "climate",
+     "features": [
+      {
+       "type": "numeric",
+       "name": "occupied_heating_setpoint",
+       "label": "Occupied heating setpoint",
+       "property": "occupied_heating_setpoint",
+       "access": 7,
+       "unit": "°C",
+       "value_min": 4,
+       "value_max": 35,
+       "value_step": 0.5
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature",
+       "label": "Local temperature",
+       "property": "local_temperature",
+       "access": 5,
+       "unit": "°C"
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature_calibration",
+       "label": "Local temperature calibration",
+       "property": "local_temperature_calibration",
+       "access": 7,
+       "unit": "°C",
+       "value_min": -12.7,
+       "value_max": 12.7,
+       "value_step": 0.2
+      },
+      {
+       "type": "enum",
+       "name": "system_mode",
+       "label": "System mode",
+       "property": "system_mode",
+       "access": 7,
+       "values": [
+        "off",
+        "auto",
+        "heat"
+       ]
+      },
+      {
+       "type": "enum",
+       "name": "running_state",
+       "label": "Running state",
+       "property": "running_state",
+       "access": 5,
+       "values": [
+        "idle",
+        "heat"
+       ]
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "timer_mode_target_temp",
+     "label": "Timer mode target temp",
+     "property": "timer_mode_target_temp",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "numeric",
+     "name": "temporary_mode_duration",
+     "label": "Temporary mode duration",
+     "property": "temporary_mode_duration",
+     "access": 7,
+     "unit": "minutes",
+     "value_min": 0,
+     "value_max": 1440
+    },
+    {
+     "type": "enum",
+     "name": "temporary_mode_select",
+     "label": "Temporary mode select",
+     "property": "temporary_mode_select",
+     "access": 7,
+     "values": [
+      "boost",
+      "timer"
+     ]
+    },
+    {
+     "type": "binary",
+     "name": "child_lock",
+     "label": "Child lock",
+     "property": "child_lock",
+     "access": 7,
+     "value_on": "LOCK",
+     "value_off": "UNLOCK"
+    },
+    {
+     "type": "binary",
+     "name": "open_window",
+     "label": "Open window",
+     "property": "open_window",
+     "access": 7,
+     "value_on": "ON",
+     "value_off": "OFF"
+    },
+    {
+     "type": "numeric",
+     "name": "frost_protection_temperature",
+     "label": "Frost protection temperature",
+     "property": "frost_protection_temperature",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "enum",
+     "name": "temperature_sensor_select",
+     "label": "Temperature sensor select",
+     "property": "temperature_sensor_select",
+     "access": 7,
+     "values": [
+      "local_temperature",
+      "remote_temperature",
+      "remote_source_offline"
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "external_temperature_input",
+     "label": "External temperature input",
+     "property": "external_temperature_input",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 0,
+     "value_max": 99.9,
+     "value_step": 0.1
+    },
+    {
+     "type": "numeric",
+     "name": "idle_steps",
+     "label": "Idle steps",
+     "property": "idle_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "closing_steps",
+     "label": "Closing steps",
+     "property": "closing_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_limit_voltage",
+     "label": "Valve opening limit voltage",
+     "property": "valve_opening_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_limit_voltage",
+     "label": "Valve closing limit voltage",
+     "property": "valve_closing_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_motor_running_voltage",
+     "label": "Valve motor running voltage",
+     "property": "valve_motor_running_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_degree",
+     "label": "Valve opening degree",
+     "property": "valve_opening_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_degree",
+     "label": "Valve closing degree",
+     "property": "valve_closing_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_sunday",
+     "label": "Weekly schedule sunday",
+     "property": "weekly_schedule_sunday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_monday",
+     "label": "Weekly schedule monday",
+     "property": "weekly_schedule_monday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_tuesday",
+     "label": "Weekly schedule tuesday",
+     "property": "weekly_schedule_tuesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_wednesday",
+     "label": "Weekly schedule wednesday",
+     "property": "weekly_schedule_wednesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_thursday",
+     "label": "Weekly schedule thursday",
+     "property": "weekly_schedule_thursday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_friday",
+     "label": "Weekly schedule friday",
+     "property": "weekly_schedule_friday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_saturday",
+     "label": "Weekly schedule saturday",
+     "property": "weekly_schedule_saturday",
+     "access": 2
+    },
+    {
+     "type": "binary",
+     "name": "smart_temperature_control",
+     "label": "Smart temperature control",
+     "property": "smart_temperature_control",
+     "access": 7,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "TRVZB",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.3.0"
+ },
+ {
+  "ieee_address": "0x00124b0000001003",
+  "type": "EndDevice",
+  "network_address": 4099,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "trv_bedroom_3",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "TRVZB",
+   "vendor": "SONOFF",
+   "description": "Zigbee thermostatic radiator valve",
+   "options": [],
+   "exposes": [
+    {
+     "type": "climate",
+     "features": [
+      {
+       "type": "numeric",
+       "name": "occupied_heating_setpoint",
+       "label": "Occupied heating setpoint",
+       "property": "occupied_heating_setpoint",
+       "access": 7,
+       "unit": "°C",
+       "value_min": 4,
+       "value_max": 35,
+       "value_step": 0.5
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature",
+       "label": "Local temperature",
+       "property": "local_temperature",
+       "access": 5,
+       "unit": "°C"
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature_calibration",
+       "label": "Local temperature calibration",
+       "property": "local_temperature_calibration",
+       "access": 7,
+       "unit": "°C",
+       "value_min": -12.7,
+       "value_max": 12.7,
+       "value_step": 0.2
+      },
+      {
+       "type": "enum",
+       "name": "system_mode",
+       "label": "System mode",
+       "property": "system_mode",
+       "access": 7,
+       "values": [
+        "off",
+        "auto",
+        "heat"
+       ]
+      },
+      {
+       "type": "enum",
+       "name": "running_state",
+       "label": "Running state",
+       "property": "running_state",
+       "access": 5,
+       "values": [
+        "idle",
+        "heat"
+       ]
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "timer_mode_target_temp",
+     "label": "Timer mode target temp",
+     "property": "timer_mode_target_temp",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "numeric",
+     "name": "temporary_mode_duration",
+     "label": "Temporary mode duration",
+     "property": "temporary_mode_duration",
+     "access": 7,
+     "unit": "minutes",
+     "value_min": 0,
+     "value_max": 1440
+    },
+    {
+     "type": "enum",
+     "name": "temporary_mode_select",
+     "label": "Temporary mode select",
+     "property": "temporary_mode_select",
+     "access": 7,
+     "values": [
+      "boost",
+      "timer"
+     ]
+    },
+    {
+     "type": "binary",
+     "name": "child_lock",
+     "label": "Child lock",
+     "property": "child_lock",
+     "access": 7,
+     "value_on": "LOCK",
+     "value_off": "UNLOCK"
+    },
+    {
+     "type": "binary",
+     "name": "open_window",
+     "label": "Open window",
+     "property": "open_window",
+     "access": 7,
+     "value_on": "ON",
+     "value_off": "OFF"
+    },
+    {
+     "type": "numeric",
+     "name": "frost_protection_temperature",
+     "label": "Frost protection temperature",
+     "property": "frost_protection_temperature",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "enum",
+     "name": "temperature_sensor_select",
+     "label": "Temperature sensor select",
+     "property": "temperature_sensor_select",
+     "access": 7,
+     "values": [
+      "local_temperature",
+      "remote_temperature",
+      "remote_source_offline"
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "external_temperature_input",
+     "label": "External temperature input",
+     "property": "external_temperature_input",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 0,
+     "value_max": 99.9,
+     "value_step": 0.1
+    },
+    {
+     "type": "numeric",
+     "name": "idle_steps",
+     "label": "Idle steps",
+     "property": "idle_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "closing_steps",
+     "label": "Closing steps",
+     "property": "closing_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_limit_voltage",
+     "label": "Valve opening limit voltage",
+     "property": "valve_opening_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_limit_voltage",
+     "label": "Valve closing limit voltage",
+     "property": "valve_closing_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_motor_running_voltage",
+     "label": "Valve motor running voltage",
+     "property": "valve_motor_running_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_degree",
+     "label": "Valve opening degree",
+     "property": "valve_opening_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_degree",
+     "label": "Valve closing degree",
+     "property": "valve_closing_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_sunday",
+     "label": "Weekly schedule sunday",
+     "property": "weekly_schedule_sunday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_monday",
+     "label": "Weekly schedule monday",
+     "property": "weekly_schedule_monday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_tuesday",
+     "label": "Weekly schedule tuesday",
+     "property": "weekly_schedule_tuesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_wednesday",
+     "label": "Weekly schedule wednesday",
+     "property": "weekly_schedule_wednesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_thursday",
+     "label": "Weekly schedule thursday",
+     "property": "weekly_schedule_thursday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_friday",
+     "label": "Weekly schedule friday",
+     "property": "weekly_schedule_friday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_saturday",
+     "label": "Weekly schedule saturday",
+     "property": "weekly_schedule_saturday",
+     "access": 2
+    },
+    {
+     "type": "binary",
+     "name": "smart_temperature_control",
+     "label": "Smart temperature control",
+     "property": "smart_temperature_control",
+     "access": 7,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "TRVZB",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.3.0"
+ },
+ {
+  "ieee_address": "0x00124b0000001004",
+  "type": "EndDevice",
+  "network_address": 4100,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "trv_bathroom",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "TRVZB",
+   "vendor": "SONOFF",
+   "description": "Zigbee thermostatic radiator valve",
+   "options": [],
+   "exposes": [
+    {
+     "type": "climate",
+     "features": [
+      {
+       "type": "numeric",
+       "name": "occupied_heating_setpoint",
+       "label": "Occupied heating setpoint",
+       "property": "occupied_heating_setpoint",
+       "access": 7,
+       "unit": "°C",
+       "value_min": 4,
+       "value_max": 35,
+       "value_step": 0.5
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature",
+       "label": "Local temperature",
+       "property": "local_temperature",
+       "access": 5,
+       "unit": "°C"
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature_calibration",
+       "label": "Local temperature calibration",
+       "property": "local_temperature_calibration",
+       "access": 7,
+       "unit": "°C",
+       "value_min": -12.7,
+       "value_max": 12.7,
+       "value_step": 0.2
+      },
+      {
+       "type": "enum",
+       "name": "system_mode",
+       "label": "System mode",
+       "property": "system_mode",
+       "access": 7,
+       "values": [
+        "off",
+        "auto",
+        "heat"
+       ]
+      },
+      {
+       "type": "enum",
+       "name": "running_state",
+       "label": "Running state",
+       "property": "running_state",
+       "access": 5,
+       "values": [
+        "idle",
+        "heat"
+       ]
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "timer_mode_target_temp",
+     "label": "Timer mode target temp",
+     "property": "timer_mode_target_temp",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "numeric",
+     "name": "temporary_mode_duration",
+     "label": "Temporary mode duration",
+     "property": "temporary_mode_duration",
+     "access": 7,
+     "unit": "minutes",
+     "value_min": 0,
+     "value_max": 1440
+    },
+    {
+     "type": "enum",
+     "name": "temporary_mode_select",
+     "label": "Temporary mode select",
+     "property": "temporary_mode_select",
+     "access": 7,
+     "values": [
+      "boost",
+      "timer"
+     ]
+    },
+    {
+     "type": "binary",
+     "name": "child_lock",
+     "label": "Child lock",
+     "property": "child_lock",
+     "access": 7,
+     "value_on": "LOCK",
+     "value_off": "UNLOCK"
+    },
+    {
+     "type": "binary",
+     "name": "open_window",
+     "label": "Open window",
+     "property": "open_window",
+     "access": 7,
+     "value_on": "ON",
+     "value_off": "OFF"
+    },
+    {
+     "type": "numeric",
+     "name": "frost_protection_temperature",
+     "label": "Frost protection temperature",
+     "property": "frost_protection_temperature",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "enum",
+     "name": "temperature_sensor_select",
+     "label": "Temperature sensor select",
+     "property": "temperature_sensor_select",
+     "access": 7,
+     "values": [
+      "local_temperature",
+      "remote_temperature",
+      "remote_source_offline"
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "external_temperature_input",
+     "label": "External temperature input",
+     "property": "external_temperature_input",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 0,
+     "value_max": 99.9,
+     "value_step": 0.1
+    },
+    {
+     "type": "numeric",
+     "name": "idle_steps",
+     "label": "Idle steps",
+     "property": "idle_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "closing_steps",
+     "label": "Closing steps",
+     "property": "closing_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_limit_voltage",
+     "label": "Valve opening limit voltage",
+     "property": "valve_opening_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_limit_voltage",
+     "label": "Valve closing limit voltage",
+     "property": "valve_closing_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_motor_running_voltage",
+     "label": "Valve motor running voltage",
+     "property": "valve_motor_running_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_degree",
+     "label": "Valve opening degree",
+     "property": "valve_opening_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_degree",
+     "label": "Valve closing degree",
+     "property": "valve_closing_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_sunday",
+     "label": "Weekly schedule sunday",
+     "property": "weekly_schedule_sunday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_monday",
+     "label": "Weekly schedule monday",
+     "property": "weekly_schedule_monday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_tuesday",
+     "label": "Weekly schedule tuesday",
+     "property": "weekly_schedule_tuesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_wednesday",
+     "label": "Weekly schedule wednesday",
+     "property": "weekly_schedule_wednesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_thursday",
+     "label": "Weekly schedule thursday",
+     "property": "weekly_schedule_thursday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_friday",
+     "label": "Weekly schedule friday",
+     "property": "weekly_schedule_friday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_saturday",
+     "label": "Weekly schedule saturday",
+     "property": "weekly_schedule_saturday",
+     "access": 2
+    },
+    {
+     "type": "binary",
+     "name": "smart_temperature_control",
+     "label": "Smart temperature control",
+     "property": "smart_temperature_control",
+     "access": 7,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "TRVZB",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.3.0"
+ },
+ {
+  "ieee_address": "0x00124b0000001005",
+  "type": "EndDevice",
+  "network_address": 4101,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "trv_dining",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "TRVZB",
+   "vendor": "SONOFF",
+   "description": "Zigbee thermostatic radiator valve",
+   "options": [],
+   "exposes": [
+    {
+     "type": "climate",
+     "features": [
+      {
+       "type": "numeric",
+       "name": "occupied_heating_setpoint",
+       "label": "Occupied heating setpoint",
+       "property": "occupied_heating_setpoint",
+       "access": 7,
+       "unit": "°C",
+       "value_min": 4,
+       "value_max": 35,
+       "value_step": 0.5
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature",
+       "label": "Local temperature",
+       "property": "local_temperature",
+       "access": 5,
+       "unit": "°C"
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature_calibration",
+       "label": "Local temperature calibration",
+       "property": "local_temperature_calibration",
+       "access": 7,
+       "unit": "°C",
+       "value_min": -12.7,
+       "value_max": 12.7,
+       "value_step": 0.2
+      },
+      {
+       "type": "enum",
+       "name": "system_mode",
+       "label": "System mode",
+       "property": "system_mode",
+       "access": 7,
+       "values": [
+        "off",
+        "auto",
+        "heat"
+       ]
+      },
+      {
+       "type": "enum",
+       "name": "running_state",
+       "label": "Running state",
+       "property": "running_state",
+       "access": 5,
+       "values": [
+        "idle",
+        "heat"
+       ]
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "timer_mode_target_temp",
+     "label": "Timer mode target temp",
+     "property": "timer_mode_target_temp",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "numeric",
+     "name": "temporary_mode_duration",
+     "label": "Temporary mode duration",
+     "property": "temporary_mode_duration",
+     "access": 7,
+     "unit": "minutes",
+     "value_min": 0,
+     "value_max": 1440
+    },
+    {
+     "type": "enum",
+     "name": "temporary_mode_select",
+     "label": "Temporary mode select",
+     "property": "temporary_mode_select",
+     "access": 7,
+     "values": [
+      "boost",
+      "timer"
+     ]
+    },
+    {
+     "type": "binary",
+     "name": "child_lock",
+     "label": "Child lock",
+     "property": "child_lock",
+     "access": 7,
+     "value_on": "LOCK",
+     "value_off": "UNLOCK"
+    },
+    {
+     "type": "binary",
+     "name": "open_window",
+     "label": "Open window",
+     "property": "open_window",
+     "access": 7,
+     "value_on": "ON",
+     "value_off": "OFF"
+    },
+    {
+     "type": "numeric",
+     "name": "frost_protection_temperature",
+     "label": "Frost protection temperature",
+     "property": "frost_protection_temperature",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "enum",
+     "name": "temperature_sensor_select",
+     "label": "Temperature sensor select",
+     "property": "temperature_sensor_select",
+     "access": 7,
+     "values": [
+      "local_temperature",
+      "remote_temperature",
+      "remote_source_offline"
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "external_temperature_input",
+     "label": "External temperature input",
+     "property": "external_temperature_input",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 0,
+     "value_max": 99.9,
+     "value_step": 0.1
+    },
+    {
+     "type": "numeric",
+     "name": "idle_steps",
+     "label": "Idle steps",
+     "property": "idle_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "closing_steps",
+     "label": "Closing steps",
+     "property": "closing_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_limit_voltage",
+     "label": "Valve opening limit voltage",
+     "property": "valve_opening_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_limit_voltage",
+     "label": "Valve closing limit voltage",
+     "property": "valve_closing_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_motor_running_voltage",
+     "label": "Valve motor running voltage",
+     "property": "valve_motor_running_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_degree",
+     "label": "Valve opening degree",
+     "property": "valve_opening_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_degree",
+     "label": "Valve closing degree",
+     "property": "valve_closing_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_sunday",
+     "label": "Weekly schedule sunday",
+     "property": "weekly_schedule_sunday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_monday",
+     "label": "Weekly schedule monday",
+     "property": "weekly_schedule_monday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_tuesday",
+     "label": "Weekly schedule tuesday",
+     "property": "weekly_schedule_tuesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_wednesday",
+     "label": "Weekly schedule wednesday",
+     "property": "weekly_schedule_wednesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_thursday",
+     "label": "Weekly schedule thursday",
+     "property": "weekly_schedule_thursday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_friday",
+     "label": "Weekly schedule friday",
+     "property": "weekly_schedule_friday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_saturday",
+     "label": "Weekly schedule saturday",
+     "property": "weekly_schedule_saturday",
+     "access": 2
+    },
+    {
+     "type": "binary",
+     "name": "smart_temperature_control",
+     "label": "Smart temperature control",
+     "property": "smart_temperature_control",
+     "access": 7,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "TRVZB",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.3.0"
+ },
+ {
+  "ieee_address": "0x00124b0000001006",
+  "type": "EndDevice",
+  "network_address": 4102,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "trv_lounge",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "TRVZB",
+   "vendor": "SONOFF",
+   "description": "Zigbee thermostatic radiator valve",
+   "options": [],
+   "exposes": [
+    {
+     "type": "climate",
+     "features": [
+      {
+       "type": "numeric",
+       "name": "occupied_heating_setpoint",
+       "label": "Occupied heating setpoint",
+       "property": "occupied_heating_setpoint",
+       "access": 7,
+       "unit": "°C",
+       "value_min": 4,
+       "value_max": 35,
+       "value_step": 0.5
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature",
+       "label": "Local temperature",
+       "property": "local_temperature",
+       "access": 5,
+       "unit": "°C"
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature_calibration",
+       "label": "Local temperature calibration",
+       "property": "local_temperature_calibration",
+       "access": 7,
+       "unit": "°C",
+       "value_min": -12.7,
+       "value_max": 12.7,
+       "value_step": 0.2
+      },
+      {
+       "type": "enum",
+       "name": "system_mode",
+       "label": "System mode",
+       "property": "system_mode",
+       "access": 7,
+       "values": [
+        "off",
+        "auto",
+        "heat"
+       ]
+      },
+      {
+       "type": "enum",
+       "name": "running_state",
+       "label": "Running state",
+       "property": "running_state",
+       "access": 5,
+       "values": [
+        "idle",
+        "heat"
+       ]
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "timer_mode_target_temp",
+     "label": "Timer mode target temp",
+     "property": "timer_mode_target_temp",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "numeric",
+     "name": "temporary_mode_duration",
+     "label": "Temporary mode duration",
+     "property": "temporary_mode_duration",
+     "access": 7,
+     "unit": "minutes",
+     "value_min": 0,
+     "value_max": 1440
+    },
+    {
+     "type": "enum",
+     "name": "temporary_mode_select",
+     "label": "Temporary mode select",
+     "property": "temporary_mode_select",
+     "access": 7,
+     "values": [
+      "boost",
+      "timer"
+     ]
+    },
+    {
+     "type": "binary",
+     "name": "child_lock",
+     "label": "Child lock",
+     "property": "child_lock",
+     "access": 7,
+     "value_on": "LOCK",
+     "value_off": "UNLOCK"
+    },
+    {
+     "type": "binary",
+     "name": "open_window",
+     "label": "Open window",
+     "property": "open_window",
+     "access": 7,
+     "value_on": "ON",
+     "value_off": "OFF"
+    },
+    {
+     "type": "numeric",
+     "name": "frost_protection_temperature",
+     "label": "Frost protection temperature",
+     "property": "frost_protection_temperature",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "enum",
+     "name": "temperature_sensor_select",
+     "label": "Temperature sensor select",
+     "property": "temperature_sensor_select",
+     "access": 7,
+     "values": [
+      "local_temperature",
+      "remote_temperature",
+      "remote_source_offline"
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "external_temperature_input",
+     "label": "External temperature input",
+     "property": "external_temperature_input",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 0,
+     "value_max": 99.9,
+     "value_step": 0.1
+    },
+    {
+     "type": "numeric",
+     "name": "idle_steps",
+     "label": "Idle steps",
+     "property": "idle_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "closing_steps",
+     "label": "Closing steps",
+     "property": "closing_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_limit_voltage",
+     "label": "Valve opening limit voltage",
+     "property": "valve_opening_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_limit_voltage",
+     "label": "Valve closing limit voltage",
+     "property": "valve_closing_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_motor_running_voltage",
+     "label": "Valve motor running voltage",
+     "property": "valve_motor_running_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_degree",
+     "label": "Valve opening degree",
+     "property": "valve_opening_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_degree",
+     "label": "Valve closing degree",
+     "property": "valve_closing_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_sunday",
+     "label": "Weekly schedule sunday",
+     "property": "weekly_schedule_sunday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_monday",
+     "label": "Weekly schedule monday",
+     "property": "weekly_schedule_monday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_tuesday",
+     "label": "Weekly schedule tuesday",
+     "property": "weekly_schedule_tuesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_wednesday",
+     "label": "Weekly schedule wednesday",
+     "property": "weekly_schedule_wednesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_thursday",
+     "label": "Weekly schedule thursday",
+     "property": "weekly_schedule_thursday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_friday",
+     "label": "Weekly schedule friday",
+     "property": "weekly_schedule_friday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_saturday",
+     "label": "Weekly schedule saturday",
+     "property": "weekly_schedule_saturday",
+     "access": 2
+    },
+    {
+     "type": "binary",
+     "name": "smart_temperature_control",
+     "label": "Smart temperature control",
+     "property": "smart_temperature_control",
+     "access": 7,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "TRVZB",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.3.0"
+ },
+ {
+  "ieee_address": "0x00124b0000001007",
+  "type": "EndDevice",
+  "network_address": 4103,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "trv_kitchen",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "TRVZB",
+   "vendor": "SONOFF",
+   "description": "Zigbee thermostatic radiator valve",
+   "options": [],
+   "exposes": [
+    {
+     "type": "climate",
+     "features": [
+      {
+       "type": "numeric",
+       "name": "occupied_heating_setpoint",
+       "label": "Occupied heating setpoint",
+       "property": "occupied_heating_setpoint",
+       "access": 7,
+       "unit": "°C",
+       "value_min": 4,
+       "value_max": 35,
+       "value_step": 0.5
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature",
+       "label": "Local temperature",
+       "property": "local_temperature",
+       "access": 5,
+       "unit": "°C"
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature_calibration",
+       "label": "Local temperature calibration",
+       "property": "local_temperature_calibration",
+       "access": 7,
+       "unit": "°C",
+       "value_min": -12.7,
+       "value_max": 12.7,
+       "value_step": 0.2
+      },
+      {
+       "type": "enum",
+       "name": "system_mode",
+       "label": "System mode",
+       "property": "system_mode",
+       "access": 7,
+       "values": [
+        "off",
+        "auto",
+        "heat"
+       ]
+      },
+      {
+       "type": "enum",
+       "name": "running_state",
+       "label": "Running state",
+       "property": "running_state",
+       "access": 5,
+       "values": [
+        "idle",
+        "heat"
+       ]
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "timer_mode_target_temp",
+     "label": "Timer mode target temp",
+     "property": "timer_mode_target_temp",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "numeric",
+     "name": "temporary_mode_duration",
+     "label": "Temporary mode duration",
+     "property": "temporary_mode_duration",
+     "access": 7,
+     "unit": "minutes",
+     "value_min": 0,
+     "value_max": 1440
+    },
+    {
+     "type": "enum",
+     "name": "temporary_mode_select",
+     "label": "Temporary mode select",
+     "property": "temporary_mode_select",
+     "access": 7,
+     "values": [
+      "boost",
+      "timer"
+     ]
+    },
+    {
+     "type": "binary",
+     "name": "child_lock",
+     "label": "Child lock",
+     "property": "child_lock",
+     "access": 7,
+     "value_on": "LOCK",
+     "value_off": "UNLOCK"
+    },
+    {
+     "type": "binary",
+     "name": "open_window",
+     "label": "Open window",
+     "property": "open_window",
+     "access": 7,
+     "value_on": "ON",
+     "value_off": "OFF"
+    },
+    {
+     "type": "numeric",
+     "name": "frost_protection_temperature",
+     "label": "Frost protection temperature",
+     "property": "frost_protection_temperature",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "enum",
+     "name": "temperature_sensor_select",
+     "label": "Temperature sensor select",
+     "property": "temperature_sensor_select",
+     "access": 7,
+     "values": [
+      "local_temperature",
+      "remote_temperature",
+      "remote_source_offline"
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "external_temperature_input",
+     "label": "External temperature input",
+     "property": "external_temperature_input",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 0,
+     "value_max": 99.9,
+     "value_step": 0.1
+    },
+    {
+     "type": "numeric",
+     "name": "idle_steps",
+     "label": "Idle steps",
+     "property": "idle_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "closing_steps",
+     "label": "Closing steps",
+     "property": "closing_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_limit_voltage",
+     "label": "Valve opening limit voltage",
+     "property": "valve_opening_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_limit_voltage",
+     "label": "Valve closing limit voltage",
+     "property": "valve_closing_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_motor_running_voltage",
+     "label": "Valve motor running voltage",
+     "property": "valve_motor_running_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_degree",
+     "label": "Valve opening degree",
+     "property": "valve_opening_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_degree",
+     "label": "Valve closing degree",
+     "property": "valve_closing_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_sunday",
+     "label": "Weekly schedule sunday",
+     "property": "weekly_schedule_sunday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_monday",
+     "label": "Weekly schedule monday",
+     "property": "weekly_schedule_monday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_tuesday",
+     "label": "Weekly schedule tuesday",
+     "property": "weekly_schedule_tuesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_wednesday",
+     "label": "Weekly schedule wednesday",
+     "property": "weekly_schedule_wednesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_thursday",
+     "label": "Weekly schedule thursday",
+     "property": "weekly_schedule_thursday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_friday",
+     "label": "Weekly schedule friday",
+     "property": "weekly_schedule_friday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_saturday",
+     "label": "Weekly schedule saturday",
+     "property": "weekly_schedule_saturday",
+     "access": 2
+    },
+    {
+     "type": "binary",
+     "name": "smart_temperature_control",
+     "label": "Smart temperature control",
+     "property": "smart_temperature_control",
+     "access": 7,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "TRVZB",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.3.0"
+ },
+ {
+  "ieee_address": "0x00124b0000001008",
+  "type": "EndDevice",
+  "network_address": 4104,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "trv_toilet",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "TRVZB",
+   "vendor": "SONOFF",
+   "description": "Zigbee thermostatic radiator valve",
+   "options": [],
+   "exposes": [
+    {
+     "type": "climate",
+     "features": [
+      {
+       "type": "numeric",
+       "name": "occupied_heating_setpoint",
+       "label": "Occupied heating setpoint",
+       "property": "occupied_heating_setpoint",
+       "access": 7,
+       "unit": "°C",
+       "value_min": 4,
+       "value_max": 35,
+       "value_step": 0.5
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature",
+       "label": "Local temperature",
+       "property": "local_temperature",
+       "access": 5,
+       "unit": "°C"
+      },
+      {
+       "type": "numeric",
+       "name": "local_temperature_calibration",
+       "label": "Local temperature calibration",
+       "property": "local_temperature_calibration",
+       "access": 7,
+       "unit": "°C",
+       "value_min": -12.7,
+       "value_max": 12.7,
+       "value_step": 0.2
+      },
+      {
+       "type": "enum",
+       "name": "system_mode",
+       "label": "System mode",
+       "property": "system_mode",
+       "access": 7,
+       "values": [
+        "off",
+        "auto",
+        "heat"
+       ]
+      },
+      {
+       "type": "enum",
+       "name": "running_state",
+       "label": "Running state",
+       "property": "running_state",
+       "access": 5,
+       "values": [
+        "idle",
+        "heat"
+       ]
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "timer_mode_target_temp",
+     "label": "Timer mode target temp",
+     "property": "timer_mode_target_temp",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "numeric",
+     "name": "temporary_mode_duration",
+     "label": "Temporary mode duration",
+     "property": "temporary_mode_duration",
+     "access": 7,
+     "unit": "minutes",
+     "value_min": 0,
+     "value_max": 1440
+    },
+    {
+     "type": "enum",
+     "name": "temporary_mode_select",
+     "label": "Temporary mode select",
+     "property": "temporary_mode_select",
+     "access": 7,
+     "values": [
+      "boost",
+      "timer"
+     ]
+    },
+    {
+     "type": "binary",
+     "name": "child_lock",
+     "label": "Child lock",
+     "property": "child_lock",
+     "access": 7,
+     "value_on": "LOCK",
+     "value_off": "UNLOCK"
+    },
+    {
+     "type": "binary",
+     "name": "open_window",
+     "label": "Open window",
+     "property": "open_window",
+     "access": 7,
+     "value_on": "ON",
+     "value_off": "OFF"
+    },
+    {
+     "type": "numeric",
+     "name": "frost_protection_temperature",
+     "label": "Frost protection temperature",
+     "property": "frost_protection_temperature",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 4,
+     "value_max": 35,
+     "value_step": 0.5
+    },
+    {
+     "type": "enum",
+     "name": "temperature_sensor_select",
+     "label": "Temperature sensor select",
+     "property": "temperature_sensor_select",
+     "access": 7,
+     "values": [
+      "local_temperature",
+      "remote_temperature",
+      "remote_source_offline"
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "external_temperature_input",
+     "label": "External temperature input",
+     "property": "external_temperature_input",
+     "access": 7,
+     "unit": "°C",
+     "value_min": 0,
+     "value_max": 99.9,
+     "value_step": 0.1
+    },
+    {
+     "type": "numeric",
+     "name": "idle_steps",
+     "label": "Idle steps",
+     "property": "idle_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "closing_steps",
+     "label": "Closing steps",
+     "property": "closing_steps",
+     "access": 5
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_limit_voltage",
+     "label": "Valve opening limit voltage",
+     "property": "valve_opening_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_limit_voltage",
+     "label": "Valve closing limit voltage",
+     "property": "valve_closing_limit_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_motor_running_voltage",
+     "label": "Valve motor running voltage",
+     "property": "valve_motor_running_voltage",
+     "access": 5,
+     "unit": "mV"
+    },
+    {
+     "type": "numeric",
+     "name": "valve_opening_degree",
+     "label": "Valve opening degree",
+     "property": "valve_opening_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "valve_closing_degree",
+     "label": "Valve closing degree",
+     "property": "valve_closing_degree",
+     "access": 7,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_sunday",
+     "label": "Weekly schedule sunday",
+     "property": "weekly_schedule_sunday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_monday",
+     "label": "Weekly schedule monday",
+     "property": "weekly_schedule_monday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_tuesday",
+     "label": "Weekly schedule tuesday",
+     "property": "weekly_schedule_tuesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_wednesday",
+     "label": "Weekly schedule wednesday",
+     "property": "weekly_schedule_wednesday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_thursday",
+     "label": "Weekly schedule thursday",
+     "property": "weekly_schedule_thursday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_friday",
+     "label": "Weekly schedule friday",
+     "property": "weekly_schedule_friday",
+     "access": 2
+    },
+    {
+     "type": "text",
+     "name": "weekly_schedule_saturday",
+     "label": "Weekly schedule saturday",
+     "property": "weekly_schedule_saturday",
+     "access": 2
+    },
+    {
+     "type": "binary",
+     "name": "smart_temperature_control",
+     "label": "Smart temperature control",
+     "property": "smart_temperature_control",
+     "access": 7,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "TRVZB",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.1.5"
+ },
+ {
+  "ieee_address": "0x00124b0000001009",
+  "type": "EndDevice",
+  "network_address": 4105,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "temp_bedroom_1",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b000000100a",
+  "type": "EndDevice",
+  "network_address": 4106,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "temp_bedroom_2",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b000000100b",
+  "type": "EndDevice",
+  "network_address": 4107,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "temp_bedroom_3",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b000000100c",
+  "type": "EndDevice",
+  "network_address": 4108,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "temp_bathroom",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b000000100d",
+  "type": "EndDevice",
+  "network_address": 4109,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "temp_dining",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b000000100e",
+  "type": "EndDevice",
+  "network_address": 4110,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "temp_lounge",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b000000100f",
+  "type": "EndDevice",
+  "network_address": 4111,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "temp_kitchen",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b0000001010",
+  "type": "EndDevice",
+  "network_address": 4112,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "temp_stairs",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b0000001011",
+  "type": "EndDevice",
+  "network_address": 4113,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "outdoor_temperature",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-02B",
+   "vendor": "SONOFF",
+   "description": "Temperature and humidity sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "numeric",
+     "name": "temperature",
+     "label": "Temperature",
+     "property": "temperature",
+     "access": 1,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity",
+     "label": "Humidity",
+     "property": "humidity",
+     "access": 1,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "dew_point",
+     "label": "Dew point",
+     "property": "dew_point",
+     "access": 0,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "vpd",
+     "label": "Vpd",
+     "property": "vpd",
+     "access": 0,
+     "unit": "kPa"
+    },
+    {
+     "type": "numeric",
+     "name": "temperature_calibration",
+     "label": "Temperature calibration",
+     "property": "temperature_calibration",
+     "access": 7,
+     "unit": "°C"
+    },
+    {
+     "type": "numeric",
+     "name": "humidity_calibration",
+     "label": "Humidity calibration",
+     "property": "humidity_calibration",
+     "access": 7,
+     "unit": "%"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-02B",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.4"
+ },
+ {
+  "ieee_address": "0x00124b0000001012",
+  "type": "EndDevice",
+  "network_address": 4114,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "window_bedroom_1",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "SNZB-04P",
+   "vendor": "SONOFF",
+   "description": "Contact sensor",
+   "options": [],
+   "exposes": [
+    {
+     "type": "binary",
+     "name": "contact",
+     "label": "Contact",
+     "property": "contact",
+     "access": 1,
+     "value_on": false,
+     "value_off": true
+    },
+    {
+     "type": "numeric",
+     "name": "battery",
+     "label": "Battery",
+     "property": "battery",
+     "access": 1,
+     "unit": "%",
+     "value_min": 0,
+     "value_max": 100
+    },
+    {
+     "type": "binary",
+     "name": "battery_low",
+     "label": "Battery low",
+     "property": "battery_low",
+     "access": 1,
+     "value_on": true,
+     "value_off": false
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Battery",
+  "date_code": "20240101",
+  "model_id": "SNZB-04P",
+  "manufacturer": "SONOFF",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true,
+  "software_build_id": "1.0.0"
+ },
+ {
+  "ieee_address": "0x00124b0000001013",
+  "type": "Router",
+  "network_address": 4115,
+  "supported": true,
+  "disabled": false,
+  "friendly_name": "plug_hall_lamp",
+  "description": "",
+  "endpoints": {
+   "1": {
+    "bindings": [],
+    "configured_reportings": [],
+    "clusters": {
+     "input": [
+      "genBasic"
+     ],
+     "output": []
+    },
+    "scenes": []
+   }
+  },
+  "definition": {
+   "source": "native",
+   "model": "PLUG-01",
+   "vendor": "Example",
+   "description": "Smart plug",
+   "options": [],
+   "exposes": [
+    {
+     "type": "switch",
+     "features": [
+      {
+       "type": "binary",
+       "name": "state",
+       "label": "State",
+       "property": "state",
+       "access": 7,
+       "value_on": "ON",
+       "value_off": "OFF"
+      }
+     ]
+    },
+    {
+     "type": "numeric",
+     "name": "power",
+     "label": "Power",
+     "property": "power",
+     "access": 5,
+     "unit": "W"
+    },
+    {
+     "type": "numeric",
+     "name": "linkquality",
+     "label": "Linkquality",
+     "property": "linkquality",
+     "access": 1,
+     "unit": "lqi",
+     "value_min": 0,
+     "value_max": 255
+    }
+   ]
+  },
+  "power_source": "Mains (single phase)",
+  "date_code": "20240101",
+  "model_id": "PLUG-01",
+  "manufacturer": "Example",
+  "interview_state": "SUCCESSFUL",
+  "interviewing": false,
+  "interview_completed": true
+ }
+]

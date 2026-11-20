@@ -31,7 +31,7 @@ All colours are CSS custom properties on `:root`, with a dark set under `@media 
 | `--cool-soft` | `#dde9f2` | `#1d2c37` | Background for rest, heat sink, demo and a held setpoint |
 | `--ok` | `#2a7253` | `#6cc59c` | Comfortable |
 | `--ok-soft` | `#dcefe5` | `#17302a` | Background for comfortable |
-| `--warn` | `#975300` | `#f0b45a` | Lead, preheating, alerts, dry run, stale data, a stuck valve, short-cycling |
+| `--warn` | `#975300` | `#f0b45a` | Lead, preheating, a room waiting for a burn, alerts, dry run, stale data, a stuck valve, short-cycling |
 | `--warn-soft` | `#fbecd2` | `#36290f` | Background for those states |
 
 Colour carries meaning, so keep it consistent: heat colours for anything burning or calling, cool for resting and hot water, green for comfortable, amber for waiting or needing attention. Every coloured state also has a text label, so colour is never the only signal.
@@ -65,6 +65,7 @@ Bars meet 3:1 against their track: `--heat` on `--surface-2` is 3.2:1 in light m
 | Room name | 0.98rem | 600 |
 | Status line | 0.95rem | 400 |
 | Buttons, segmented control, alerts | 0.9rem | 400 |
+| Demand mode note | 0.8rem | 400 |
 | Banner, reason text | 0.84rem to 0.85rem | 400 |
 | Chips, labels, metadata, timeline ticks | 0.72rem to 0.8rem | 400 to 600 |
 
@@ -105,7 +106,7 @@ The household setup is used a few times a year, so each step fades in from `opac
 
 - The page declares `lang="en-GB"` and `color-scheme: light dark`.
 - Text meets WCAG 2.1 AA contrast: 4.5:1 for body and small text, 3:1 for text at 24 px, or 19 px bold, and above. Check both themes when you add or change a token.
-- Every interactive element is a real `<button>` with a visible label. Toggles use `aria-pressed`; the heating mode is a `radiogroup` of `role="radio"` buttons with `aria-checked`.
+- Every interactive element is a real `<button>` with a visible label. Toggles use `aria-pressed`; the heating mode and the demand mode are each a `radiogroup` of `role="radio"` buttons with `aria-checked`. The demand mode group is described by its note (`aria-describedby`).
 - The focus ring is `outline: 2px solid var(--cool)` with a 2px offset on `:focus-visible`. Never remove it.
 - The status line is `aria-live="polite"`, so screen readers hear the boiler state change without being interrupted.
 - Decorative graphics (the brand mark, the guard bar) are `aria-hidden="true"`. Graphics that carry data, such as the timeline, have an `aria-label`.
@@ -146,7 +147,8 @@ Every view has to make sense in each of these states. When you add a component, 
 | Boiler states | Idle, opening valves, firing, resting, with minimum burn and minimum off progress, and why the burner is on | Chip, status line and guard bar. The guard bar and countdown use the effective minimum off from `state` |
 | Short-cycling | That minimum off has been raised and for how long | Line under the guard bar with an amber "Short-cycling" tag: "Minimum off raised to 15 min for the next 23 h 30 min, so the burner starts less often." Hidden when `boiler.short_cycle` is absent or null |
 | Daily accounting | Burner time and starts today, how well balanced yesterday was | "Burner today" (hours, starts, and litres and kWh when a nozzle rating is set) and "Balance, yesterday" (score out of 100, and "Last room 22 min after the first" for the median arrival spread) in the statistics. "No full day yet" until a day has closed. Servers without `accounting` show the old "Burner hours" total |
-| Room states | Heating, preheating, topping up, heat sink, fire lit, comfortable, waiting, bypass | Badge per room card. "Topping up" (heat colours) is a burn extension, which keeps the burner on; "Heat sink" (cool) is a room opened only so the heat has somewhere to go. Each has a one-line reason on the card. A server without `extend` shows "Topped up" |
+| Demand mode | Which mode is in effect, what it does, and whether it is the configured default | Eco and Comfort control beside the heating mode, with one muted line under it: "Default: fewer, longer burns. Rooms might warm a bit later." or "Every room held at its target, with more burns." A failed change reads "Not saved. Try again." in amber. Hidden when the server sends no `settings` |
+| Room states | Heating, preheating, waiting for a burn, topping up, heat sink, fire lit, comfortable, waiting, bypass | Badge per room card. "Waiting for a burn" (amber) is a room calling in eco while it waits for other rooms (`reason_code` `demand.pooled`); its reason reads "Waiting to share a burn with other rooms." and, with the boiler idle, the status line names it: "Boiler idle. Toilet is waiting to share a burn with other rooms." "Topping up" (heat colours) is a burn extension, which keeps the burner on; "Heat sink" (cool) is a room opened only so the heat has somewhere to go. Each has a one-line reason on the card. A server without `extend` shows "Topped up" |
 | Setpoint held | That the schedule is overridden, until when, and how to undo it | Stepper turns cool; the label reads "Held until 22:30", "Held for 1 h 20 min" or "Held until cleared", with a "Resume schedule" link. A failed change reads "Not saved. Try again." in amber |
 | Away | Who Radiate counts as away, until when, and how to change it | People section, shown only with a household. A badge per person: "Home" or "Out" (neutral), "Away" (cool), "Due back" (amber, while their rooms warm up), "No update" (amber, presence gone stale). A line in words: "Away until Tuesday 18:00.", "Away since 09:10, from Home Assistant.", "Out since 14:05. Counts as away after 1 h.", "Due back at 18:00. Warming up their rooms.", "Home Assistant hasn't reported for over 1 h, so Radiate treats them as home." "Set away" opens a date and an optional time; "Back now" clears it. While everyone being away holds frost, a cool note says so above the people. Within the return warm-up, a cool note says "Warming up for Early riser's return at 18:00." (or "tomorrow at 18:00") |
 | Household setup | Whether a household is set up, how to start or change it, and where it is saved | Without a household, a card above the rooms: "Set up your household", a sentence on what it does and a primary button. With one, a "Change household setup" link beside the People heading. Neither shows on a server without the setup. The wizard replaces the dashboard until it is closed or saved; a cool note at the top says where the answers come from and, for a saved setup, offers "Use the house file's setup instead" with an inline confirmation. After saving, a cool status line above the dashboard says so for 15 s |
@@ -168,6 +170,8 @@ Every view has to make sense in each of these states. When you add a component, 
 
 **Setup wizard.** A heading with "Close", the five steps as a list (the current one bold with a `--cool` underline, visited ones as links), then one card per step: a heading, a one-line introduction, the questions, an "Advanced: …" disclosure, and Back, "Step 2 of 5: Routines, Sam" and Next along the bottom. Next reads "See the result" on Temperatures and "Save" on the Result. Questions are plain and name the person: "When does Sam get up?", "Is Sam out or working from home during the day?", "Where does Sam work?", "When does Sam go to bed?", "How is it used?", "What kind of room?", "Who uses it?". Every answer starts filled in, so Next always works on a first visit. Each Advanced setting has a one-line explanation ending with its default ("Default 1 h."); per-person and per-room settings are empty, with the house's value as the placeholder. Room kinds are explained in a sentence under the choice. Below 12° an amber line under the unused or night temperature gives the damp note. Errors are amber, at the top of the step and under the answer. The Result is the week card for every room, with any advice and a sentence on warm periods left out of the valves' own schedules.
 
+**Demand mode control.** A segmented control (Eco, Comfort) after the heating mode, in the same style. The control already names the mode, so the note under it says what the mode does. It starts "Default:" while the server follows the configuration file, and that prefix is the only sign of the default. Picking the configured default sends `null`, so Radiate follows the file again. A press shows at once and is held until a state confirms it, or for 5 s. The note sits right-aligned under the controls on wide screens.
+
 **Boiler statistics.** Burner today, starts in the last hour, predicted burn, yesterday's balance score and the supply factor. Secondary detail sits under a value in 0.75rem muted text. Every value is optional: a missing key or a null shows `–`.
 
 ## Phone width
@@ -175,7 +179,7 @@ Every view has to make sense in each of these states. When you add a component, 
 - Design for 360 px wide first. The page never scrolls sideways.
 - The 16px gutter holds at every width.
 - The room grid uses `repeat(auto-fill, minmax(230px, 1fr))`, so it drops to one column on a phone.
-- Under 560 px the status line moves to its own row and the room temperature shrinks to 1.7rem.
-- The header wraps; the mode control stays reachable without scrolling.
+- Under 560 px the room temperature shrinks to 1.7rem and the header becomes a grid of four rows: brand and outdoor temperature; heating mode and demand mode side by side; the demand mode note; the status line. Segment buttons drop to 10 px side padding there, so both controls fit at 360 px with 44 px touch targets.
+- Above 560 px the header wraps; when the controls don't fit beside a status line of at least 280 px they move to their own row, right-aligned. Both mode controls stay reachable without scrolling.
 - Long room names and reasons wrap or clamp (reasons clamp at two lines); they never push the layout wider.
 - The setup wizard is at most 820 px wide. Under 560 px the step line moves above Back and Next. Room cards in the setup drop to one column below 300 px each.

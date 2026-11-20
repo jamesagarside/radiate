@@ -180,13 +180,32 @@ async def test_back_online_resends_settings():
 
 
 async def test_alerts():
-    drv, clock, _ = make()
+    drv, clock, _ = make(dry_run=False)
     feed(drv)
     assert drv.alerts() == []
     drv.handle_message("zigbee2mqtt/trv_dining/availability", b'{"state":"offline"}')
     drv.writers["bedroom_1"].failed.add("valve_opening_degree")
     codes = {(a.code, a.room_id) for a in drv.alerts()}
     assert codes == {("driver.trv_offline", "dining"), ("driver.write_failed", "bedroom_1")}
+
+
+async def test_rejected_settings_reach_the_core_except_in_dry_run():
+    drv, _, _ = make(dry_run=False)
+    feed(drv)
+    drv.writers["bedroom_1"].failed.update({"valve_opening_degree", "occupied_heating_setpoint"})
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.rooms["bedroom_1"].trv_rejected == (
+        "occupied_heating_setpoint",
+        "valve_opening_degree",
+    )
+    assert snap.rooms["dining"].trv_rejected == ()
+    # In dry run nothing is sent, so an echo that disagrees is not a rejection.
+    dry, _, _ = make(dry_run=True)
+    feed(dry)
+    dry.writers["bedroom_1"].failed.add("valve_opening_degree")
+    snap = await dry.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.rooms["bedroom_1"].trv_rejected == ()
+    assert not any(a.code == "driver.write_failed" for a in dry.alerts())
 
 
 @pytest.fixture
@@ -262,26 +281,63 @@ async def test_safe_mode_hands_the_boiler_to_the_watchdog(fake_shelly):
     clock, bus = Clock(), Bus()
     drv = LiveDriver(s, bus.publish, boiler, clock=clock, wall=lambda: WALL)
 
-    def safe(heating):
+    def safe(heating, handover):
         a = actions(heating=heating)
         a.valves = {}
         a.safe_mode = True
+        a.watchdog_handover = handover
         return a
 
     # Still inside minimum burn: Radiate keeps the relay on and the heartbeat going.
-    await drv.apply(safe(True))
+    await drv.apply(safe(True, False))
     assert fake_shelly.kvs[HEARTBEAT_KEY] == int(WALL)
+    assert fake_shelly.switches[0]["output"] is True
     fake_shelly.calls.clear()
     fake_shelly.kvs.pop(HEARTBEAT_KEY)
-    # Burn over: no relay commands and no heartbeat, so the watchdog takes over.
-    await drv.apply(safe(False))
+    # Burn over: the relay is switched off once, with no heartbeat, so the watchdog
+    # takes over after its timeout.
+    await drv.apply(safe(False, True))
     assert HEARTBEAT_KEY not in fake_shelly.kvs
-    assert not any(m == "Switch.Set" for m, _ in fake_shelly.calls)
+    assert fake_shelly.switches[0]["output"] is False
     assert any(a.code == "driver.watchdog_handover" for a in drv.alerts())
+    # From then on, nothing: not even when the core follows the watchdog's burn.
+    fake_shelly.calls.clear()
+    await drv.apply(safe(False, True))
+    await drv.apply(safe(True, True))
+    assert not any(m == "Switch.Set" or p.get("key") == HEARTBEAT_KEY for m, p in fake_shelly.calls)
     # Back to normal: Radiate commands the relay again.
     await drv.apply(actions())
     assert fake_shelly.kvs[HEARTBEAT_KEY] == int(WALL)
     assert not any(a.code == "driver.watchdog_handover" for a in drv.alerts())
+
+
+async def test_relay_unseen_time_and_dry_run_reach_the_core(fake_shelly):
+    s = site(dry_run=False)
+    s = dataclasses.replace(s, shelly=dataclasses.replace(s.shelly, host=fake_shelly.host))
+    rpc = ShellyRpc(fake_shelly.host, "pw", fake_shelly.session)
+    clock, bus = Clock(), Bus()
+    drv = LiveDriver(s, bus.publish, ShellyBoiler(s.shelly, rpc), clock=clock, wall=lambda: WALL)
+    feed(drv)
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.relay_follows_commands and snap.heating_relay_unseen_s == 0.0
+
+    # The Shelly drops off the network for 12 minutes; the watchdog switches it on.
+    async def unreachable(*_args, **_kw):
+        raise OSError("host unreachable")
+
+    rpc.call = unreachable
+    for _ in range(12):
+        clock.t += 60
+        snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+        assert snap.heating_relay is False and snap.heating_relay_unseen_s == 0.0
+    del rpc.call
+    fake_shelly.switches[0]["output"] = True
+    clock.t += 60
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.heating_relay is True and snap.heating_relay_unseen_s == 13 * 60
+    # In dry run the observed relay is not Radiate's to adopt.
+    drv_dry, _, _ = make(dry_run=True)
+    assert (await drv_dry.snapshot(Mode.AUTO, {}, False, set())).relay_follows_commands is False
 
 
 async def test_internal_sensor_room_mirrors_schedule_in_trv_frame():

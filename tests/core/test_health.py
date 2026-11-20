@@ -12,6 +12,7 @@ from radiate.core import (
     Snapshot,
     decide,
 )
+from radiate.core.health import ValveCheck
 
 CFG = HouseConfig(
     rooms=(
@@ -218,15 +219,23 @@ def test_guard_uses_the_raised_minimum_off():
 def test_burns_cut_short_by_something_else_for_two_hours():
     st = EngineState.new(CFG)
     relay = False
+    on_since = None
     raised_at = None
+    cuts = []
     for m in range(0, 150):
         cmd = step(st, m, cold, relay).heating_relay
-        # Radiate keeps calling, but the relay only stays in for 3 minutes in every 50.
-        relay = cmd and m % 50 < 3
         if raised_at is None and st.short_cycle.extra_off_s > 0:
             raised_at = m
-    # The relay drops out at minutes 4, 54 and 104: an hour apart only at the third.
-    assert raised_at == 104
+        # Radiate keeps calling, but the relay drops out 3 minutes into every burn.
+        on_since = (on_since if on_since is not None else m) if cmd else None
+        was = relay
+        relay = cmd and m - on_since < 3
+        if was and not relay:
+            cuts.append(m + 1)  # Radiate sees the drop on its next tick
+    # The guard takes each drop as a stop and rests for minimum off before firing again,
+    # so the cuts are about 15 min apart. Raised at the first cut an hour after the first.
+    assert all(b - a >= 10 for a, b in zip(cuts, cuts[1:], strict=False))
+    assert raised_at == next(c for c in cuts if c - cuts[0] >= 60)
 
 
 # --- stuck valves -----------------------------------------------------------------------
@@ -287,6 +296,72 @@ def test_flag_clears_when_the_radiator_warms_again():
     st, acts = drive_burns(burns({"bed"}, healthy_from=0), 1, start=3 * CYCLE, st=st)
     assert not st.rooms["bed"].valve.untrusted and st.rooms["bed"].valve.misses == 0
     assert stuck_alerts(acts) == set()
+
+
+def leak_burns(leaking: bool) -> Temps:
+    """Dining and kitchen call for an hour each cycle (two open radiators, so no heat
+    sink is needed); the bedroom is warm and its valve shut.
+
+    With `leaking`, the bedroom TRV warms during the burn although it is not heating.
+    """
+
+    def temps(m: int) -> dict[str, tuple[float, float]]:
+        c = m % CYCLE
+        if c >= 60:
+            return warm(m)
+        out = warm(m)
+        out["dining"] = out["kitchen"] = (17.0, 17.5)
+        rise = max(0, c - 25) * 0.05 if leaking else 0.0
+        out["bed"] = (21.0, 21.5 + rise)
+        return out
+
+    return temps
+
+
+def leak_alerts(acts) -> set[str]:
+    return {a.room_id for a in acts.alerts if a.code == "valve.leaking"}
+
+
+def test_radiator_warming_with_its_valve_shut_is_flagged_after_two_burns():
+    st, acts = drive_burns(leak_burns(True), 1.05)
+    assert st.rooms["bed"].valve.leak_history == [True] and leak_alerts(acts) == set()
+    st, acts = drive_burns(leak_burns(True), 1, start=int(1.05 * CYCLE), st=st)
+    assert leak_alerts(acts) == {"bed"}
+    msg = next(a.message for a in acts.alerts if a.code == "valve.leaking")
+    assert msg == "Bedroom radiator warming with its valve shut: check the valve"
+    # The calling room's valve is open, so it is never judged.
+    assert st.rooms["dining"].valve.leak_history == []
+    assert st.rooms["bed"].learning_gate == "valve_leaking"
+
+
+def test_shut_valve_that_stays_cool_is_not_flagged_and_clears_a_flag():
+    st, acts = drive_burns(leak_burns(False), 3)
+    assert st.rooms["bed"].valve.leak_history == [False, False, False]
+    assert leak_alerts(acts) == set()
+    st, _ = drive_burns(leak_burns(True), 2, start=3 * CYCLE, st=st)
+    assert st.rooms["bed"].valve.leaking
+    # Fixed (recalibrated): five cool burns in a row clear it, not fewer.
+    st, _ = drive_burns(leak_burns(False), 4, start=5 * CYCLE, st=st)
+    assert st.rooms["bed"].valve.leaking
+    st, acts = drive_burns(leak_burns(False), 1, start=9 * CYCLE, st=st)
+    assert not st.rooms["bed"].valve.leaking and leak_alerts(acts) == set()
+
+
+def test_valve_check_window_needs_two_warm_burns_out_of_five():
+    v = ValveCheck()
+
+    def burn(rise: float, minutes: int = 40) -> bool:
+        newly = False
+        for i in range(minutes):
+            offset = 1.0 + rise * i / (minutes - 1)
+            newly |= v.observe_shut(60.0, flowing=True, shut=True, offset=offset)
+        return v.observe_shut(60.0, flowing=False, shut=True, offset=None) or newly
+
+    assert not burn(1.2)  # one warm burn
+    assert not burn(0.7)  # in between: no verdict
+    assert not burn(0.1) and not burn(0.1)
+    assert burn(1.2) and v.leaking  # two warm burns within the last five
+    assert v.leak_history == [True, False, False, True]
 
 
 def test_no_stuck_valve_verdict_when_no_radiator_warms():

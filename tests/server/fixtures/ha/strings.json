@@ -52,6 +52,13 @@
       "room": { "name": "Heating" }
     },
     "select": {
+      "demand_mode": {
+        "name": "Demand mode",
+        "state": {
+          "eco": "Eco",
+          "comfort": "Comfort"
+        }
+      },
       "mode": {
         "name": "Heating mode",
         "state": {
@@ -80,6 +87,7 @@
       },
       "starts_last_hour": { "name": "Burner starts, last hour" },
       "predicted_burn": { "name": "Predicted burn" },
+      "pooled_demand": { "name": "Pooled demand" },
       "outdoor_temperature": { "name": "Outdoor temperature" },
       "short_cycle_extra_off": { "name": "Short-cycle extra off time" },
       "burner_hours_today": { "name": "Burner hours today" },
@@ -151,15 +159,24 @@
       "name": "Set away",
       "description": "Count a person as away until a date and time. Their rooms follow the people at home. If everyone is away, the house keeps frost protection until someone is due back.",
       "fields": {
-        "person": { "name": "Person", "description": "Radiate person ID, or their mapped person entity." },
-        "until": { "name": "Until", "description": "When they are back. Their rooms warm up shortly before." }
+        "person": {
+          "name": "Person",
+          "description": "Radiate person ID, or their mapped person entity."
+        },
+        "until": {
+          "name": "Until",
+          "description": "When they are back. Their rooms warm up shortly before."
+        }
       }
     },
     "clear_away": {
       "name": "Clear away",
       "description": "Count a person as home again.",
       "fields": {
-        "person": { "name": "Person", "description": "Radiate person ID, or their mapped person entity." }
+        "person": {
+          "name": "Person",
+          "description": "Radiate person ID, or their mapped person entity."
+        }
       }
     }
   }

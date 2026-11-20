@@ -34,7 +34,7 @@ The same server is packaged three ways:
 | Home Assistant App | Same image plus App manifest, ingress, MQTT service discovery | Home Assistant OS users | Same web UI in the HA sidebar; entities via the integration below |
 | Cloud | Hosted service plus a local **edge** (the standalone server in edge mode) | Remote access, history, multi-home | Hosted web UI |
 
-**Home Assistant integration** (`custom_components/radiate`, HACS): a thin client of the server's API. Config flow finds the server (Supervisor discovery for the App, zeroconf or a URL otherwise) and exposes rooms, valves, boiler and learned parameters as entities, plus services. It contains no control logic. Home Assistant Container and Core users (no Apps) run the standalone image next to HA and install the integration.
+**Home Assistant integration** (`custom_components/radiate`, HACS; moved to its own Apache-2.0 repository by [ADR-0003](0003-separate-home-assistant-integration.md)): a thin client of the server's API. Config flow finds the server (Supervisor discovery for the App, zeroconf or a URL otherwise) and exposes rooms, valves, boiler and learned parameters as entities, plus services. It contains no control logic. Home Assistant Container and Core users (no Apps) run the standalone image next to HA and install the integration.
 
 ### The cloud never sits in the control loop
 
@@ -60,7 +60,7 @@ The same server is packaged three ways:
 
 ## Consequences
 
-- Repository becomes a monorepo: `src/radiate` (core, server, drivers, simulator, exporter), `custom_components/radiate` (HA client), `app/` (HA App packaging), `web/` (UI), `docs/`.
+- Repository becomes a monorepo: `src/radiate` (core, server, drivers, simulator, exporter), `custom_components/radiate` (HA client), `app/` (HA App packaging), `web/` (UI), `docs/`. The HA client later moved to its own repository ([ADR-0003](0003-separate-home-assistant-integration.md)).
 - The HA integration and the server share an API contract (versioned, documented in the spec).
 - Boiler safety does not rely on Radiate staying up: a Shelly watchdog script reverts to a local schedule if Radiate's heartbeat stops (see spec).
 - The cloud service itself is out of scope until the local editions are proven on the reference house. Its API boundary is designed now so the edge protocol does not have to change later.

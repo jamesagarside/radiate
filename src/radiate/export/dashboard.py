@@ -20,7 +20,7 @@ slugified, then the exposed property (`sensor.<name>_temperature`), and `climate
 for a TRV. Devices that are not paired yet show as unavailable until they are.
 
 With `radiate=True` (the default) it also uses the entities and services of Radiate's own
-integration (`custom_components/radiate`); `radiate_entity` derives those IDs. With
+integration (radiate-ha); `radiate_entity` derives those IDs. With
 `radiate=False` it uses Zigbee2MQTT's entities only, for a house where Radiate is not
 running yet, and sets temperatures on the valves directly.
 
@@ -70,7 +70,7 @@ def slug(name: str) -> str:
 RADIATE_DEVICE = "Radiate"
 
 # English entity names by (platform, translation key), as in
-# custom_components/radiate/strings.json. Only the entities this dashboard shows.
+# radiate-ha's custom_components/radiate/strings.json. Only the entities this dashboard shows.
 RADIATE_NAMES: dict[tuple[str, str], str] = {
     ("sensor", "boiler_state"): "Boiler state",
     ("sensor", "alerts"): "Alerts",

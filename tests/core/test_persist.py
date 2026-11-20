@@ -1,9 +1,11 @@
+import dataclasses
 import json
 import math
 
 from radiate.core import EngineState, decide
+from radiate.core.estimator import forgetting
 from radiate.core.persist import dump_state, load_state
-from radiate.core.types import BoilerState
+from radiate.core.types import BoilerState, LearningConfig
 from radiate.sim.reference import house_config
 from radiate.sim.runner import run
 
@@ -155,6 +157,25 @@ def test_stuck_valve_verdicts_survive_a_restart():
     assert not restored.rooms["bedroom_1"].valve.untrusted
 
 
+def test_leaking_valve_verdicts_survive_a_restart():
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    st.rooms["dining"].valve.leak_history = [True, False, True]
+    st.rooms["dining"].valve.leaking = True
+    data = json.loads(json.dumps(dump_state(st, 100.0)))
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == []
+    assert restored.rooms["dining"].valve.leaking
+    assert restored.rooms["dining"].valve.leak_history == [True, False, True]
+    assert not restored.rooms["lounge"].valve.leaking
+    # Saves from before the leak check, or with junk in it, load with no verdicts.
+    del data["rooms"]["dining"]["valve"]["leak_history"]
+    data["rooms"]["lounge"]["valve"]["leak_history"] = [1, "x"]
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == [] and restored.rooms["dining"].valve.leak_history == []
+    assert restored.rooms["lounge"].valve.leak_history == []
+
+
 def test_state_saved_before_health_data_still_loads():
     cfg, st = learned()
     data = dump_state(st, st.last_now)
@@ -179,3 +200,38 @@ def test_internal_sensor_room_keeps_its_confidence_cap():
     restored, _ = load_state(cfg, dump_state(st, st.last_now), 0.0)
     restored.rooms["toilet"].est.p[0][0] = 0.0
     assert restored.rooms["toilet"].est.confidence == 0.5
+
+
+def test_change_detection_survives_a_restart():
+    cfg, st = learned()
+    est = st.rooms["dining"].est
+    est.gain_eu, est.gain_uu, est.level_e, est.since_reset, est.relearns = 0.4, 0.1, -0.2, 99, 2
+    data = json.loads(json.dumps(dump_state(st, st.last_now)))
+    restored, problems = load_state(cfg, data, 0.0)
+    assert problems == []
+    r = restored.rooms["dining"].est
+    for key in ("gain_eu", "gain_uu", "gain_ee", "level_e", "level_ee", "since_reset"):
+        assert getattr(r, key) == getattr(est, key), key
+    assert r.relearns == 2 and r.lam == est.lam
+
+
+def test_models_saved_before_change_detection_still_load():
+    cfg, st = learned()
+    data = json.loads(json.dumps(dump_state(st, st.last_now)))
+    for room in data["rooms"].values():
+        del room["est"]["change"]
+    data["rooms"]["lounge"]["est"]["change"] = {"gain_uu": -1, "since_reset": "x"}  # junk
+    restored, problems = load_state(cfg, data, 0.0)
+    assert problems == []
+    for rid, rs in st.rooms.items():
+        r = restored.rooms[rid].est
+        assert r.theta == rs.est.theta and r.p == rs.est.p
+        assert r.since_reset == 0 and r.relearns == 0 and r.gain_uu == 0.0
+
+
+def test_learning_memory_comes_from_the_configuration():
+    cfg, st = learned()
+    short = dataclasses.replace(cfg, learning=LearningConfig(memory_days=3))
+    restored, _ = load_state(short, dump_state(st, st.last_now), 0.0)
+    assert all(rs.est.lam == forgetting(3) for rs in restored.rooms.values())
+    assert all(rs.est.lam == forgetting(730) for rs in EngineState.new(cfg).rooms.values())

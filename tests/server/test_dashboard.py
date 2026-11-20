@@ -11,7 +11,9 @@ from radiate.export.dashboard import RADIATE_NAMES, build_dashboard, radiate_ent
 
 ROOT = Path(__file__).resolve().parents[2]
 REFERENCE = ROOT / "examples" / "reference-house.yaml"
-STRINGS = ROOT / "custom_components" / "radiate" / "strings.json"
+# A copy of radiate-ha's custom_components/radiate/strings.json. Copy it again when the
+# integration renames an entity the dashboard shows.
+STRINGS = ROOT / "tests" / "server" / "fixtures" / "ha" / "strings.json"
 ENV = {"RADIATE_MQTT_PASSWORD": "x", "RADIATE_SHELLY_PASSWORD": "x"}
 ENTITY = re.compile(r"^(sensor|climate|binary_sensor|switch|select)\.[a-z0-9_]+$")
 

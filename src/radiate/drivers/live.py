@@ -76,7 +76,10 @@ class LiveDriver:
         self._last_heating = False
         self._last_store = False
         self._handover = False  # safe mode: boiler left to the Shelly watchdog
+        self._relay_seen_at: float | None = None  # last successful read of the relay
         self._pending: set[asyncio.Task] = set()
+        # Days of ticks the runtime records for replay and bootstrap (spec 4.3, 6).
+        self.history_days = site.history_days
 
     # --- clock -----------------------------------------------------------------------
 
@@ -215,6 +218,7 @@ class LiveDriver:
                 inp.trv_heating = None if state is None else state == "heat"
                 opening = trv.number("valve_opening_degree")
                 inp.opening_echo = None if opening is None else round(opening)
+                inp.trv_rejected = self._rejected(rc.id)
             else:
                 inp.trv_available = False
             window = self.devices.get(dev.window)
@@ -238,10 +242,17 @@ class LiveDriver:
             if age is not None and age <= OUTDOOR_MAX_AGE_S:
                 outdoor = out_dev.number("temperature")
 
+        # Without a reading, the relay is taken to be as last commanded. When it is read
+        # again, the core is told how long it went unseen: the watchdog may have
+        # switched it meanwhile (spec 5.7 hand-back).
         heating, store = self._last_heating, self._last_store
+        unseen = 0.0
         if self.boiler is not None and self.boiler.reachable and self.boiler.heating:
             heating = self.boiler.heating.output
             store = self.boiler.store.output if self.boiler.store else store
+            if self._relay_seen_at is not None:
+                unseen = now - self._relay_seen_at
+            self._relay_seen_at = now
         return Snapshot(
             now=now,
             minute_of_day=minute,
@@ -252,6 +263,9 @@ class LiveDriver:
             mode=mode,
             store_boost=store_boost,
             day=local.date().toordinal(),
+            # In dry run the relay is not Radiate's: the guard must not adopt it.
+            relay_follows_commands=not self.dry_run,
+            heating_relay_unseen_s=unseen,
         )
 
     async def apply(self, actions: Actions) -> None:
@@ -266,10 +280,12 @@ class LiveDriver:
             for write in writer.plan(action, echo, now, mirror):
                 self._send(write)
         self._last_heating, self._last_store = actions.heating_relay, actions.store_relay
-        # Safe mode with the burner off: stop commanding the relay and stop the
-        # heartbeat, so the Shelly watchdog runs its fallback schedule (spec 7).
-        handover = actions.safe_mode and not actions.heating_relay
-        if handover and not self._handover:
+        # Safe mode with no burn of Radiate's own: stop commanding the relay and stop
+        # the heartbeat, so the Shelly watchdog runs its fallback schedule (spec 7).
+        # The core decides; it keeps following the relay meanwhile, so it can hand back.
+        handover = actions.watchdog_handover
+        starting = handover and not self._handover
+        if starting:
             LOG.warning("safe mode: boiler handed to the Shelly watchdog")
         elif self._handover and not handover:
             LOG.info("safe mode over: Radiate controls the boiler again")
@@ -278,6 +294,12 @@ class LiveDriver:
             if not handover:
                 await self.boiler.command(
                     actions.heating_relay, actions.store_relay, int(self._wall())
+                )
+            elif starting and not actions.heating_relay:
+                # Radiate's own burn has just ended: switch it off once, without a
+                # heartbeat, rather than leave it on until the watchdog takes over.
+                await self.boiler.command(
+                    False, actions.store_relay, int(self._wall()), heartbeat=False
                 )
             heat = fallback_heating_windows(
                 [self.site.schedule_for(r.id) for r in self.cfg.rooms if r.controllable],
@@ -315,6 +337,16 @@ class LiveDriver:
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
 
+    def _rejected(self, room_id: str) -> tuple[str, ...]:
+        """Settings the room's TRV did not take after the reconciler's retries.
+
+        None in dry run: nothing was sent, so an echo that disagrees proves nothing.
+        """
+        w = self.writers.get(room_id)
+        if w is None or self.dry_run:
+            return ()
+        return tuple(sorted(w.failed))
+
     def _zigbee_up(self) -> bool:
         return self._connected() and self.devices.bridge_online is not False
 
@@ -339,9 +371,9 @@ class LiveDriver:
             trv = self.devices.get(dev.trv)
             if dev.trv and not is_available(trv, now, self.site.sensor_max_silence_s):
                 out.append(Reason("driver.trv_offline", f"{rc.name}: TRV not reachable", rc.id))
-            w = self.writers.get(rc.id)
-            if w is not None and w.failed:
-                keys = ", ".join(sorted(w.failed))
+            rejected = self._rejected(rc.id)
+            if rejected:
+                keys = ", ".join(rejected)
                 out.append(
                     Reason("driver.write_failed", f"{rc.name}: TRV did not accept {keys}", rc.id)
                 )

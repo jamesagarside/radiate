@@ -22,14 +22,15 @@ class SimRadiator:
     t_water: float = 15.0
     trv: SimTrv | None = None
     manual_opening: float = 100.0  # for radiators without a TRV
+    leak: float = 0.0  # share of full flow that passes when shut (valve not closing)
 
     def conductance(self) -> float:
         opening = self.trv.position if self.trv else self.manual_opening
         # Thermostatic insert: no flow below ~6 % stroke, near-linear lift-to-Kv,
         # saturating around 60 %. Deliberately not the same curve Radiate assumes.
         if opening <= 6.0:
-            return 0.0
-        return self.pipe_k * min(1.0, (opening - 6.0) / 54.0) ** 0.8
+            return self.pipe_k * self.leak
+        return self.pipe_k * max(self.leak, min(1.0, (opening - 6.0) / 54.0) ** 0.8)
 
     def emission(self, t_room: float) -> float:
         dt = self.t_water - t_room

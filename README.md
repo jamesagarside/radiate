@@ -4,11 +4,11 @@
 
 Plumbers balance a heating system by hand, turning the lockshield valve on each radiator to throttle the ones nearest the boiler so the far ones get their share of hot water. Radiate does that job in software, continuously, using smart radiator valves you already own.
 
-> **Status:** pre-alpha. The control core, simulator, web UI, Home Assistant integration and App are tested against a simulated house. Zigbee2MQTT and Shelly drivers, the configuration file and SQLite persistence are in place but untested on real devices. Run real installs in dry run first; see [configuration](docs/configuration.md).
+> **Status:** pre-alpha. The control core, simulator, web UI, Home Assistant integration and App are tested against a simulated house. The Zigbee2MQTT and Shelly drivers, `radiate discover`, dry run, the Shelly watchdog installer, and the tick history with replay and bootstrap are in place but untested on real devices. Run real installs in dry run first; see [configuration](docs/configuration.md). [Implementation status](docs/implementation-status.md) lists what is built.
 
 ## Try it
 
-![Radiate web UI running the simulated house: the burner is topping up the toilet so it will not need a second burn soon, and Bedroom 3 is held at 16.5° until 06:30](docs/images/ui-demo.png)
+![Radiate web UI running the simulated house in Eco, the default demand mode: the burner is heating four rooms and the Lounge fire is lit](docs/images/ui-demo.png)
 
 Try the [online demo](https://jamesagarside.github.io/radiate/): a simulated 9-radiator house running the real engine in your browser. Nothing to install, and nothing leaves your browser.
 
@@ -25,16 +25,19 @@ Open http://localhost:8099 to watch a simulated 9-radiator house, 60 times faste
 .venv/bin/radiate sim --days 5
 ```
 
-To run against real devices, describe your house in a YAML file (start from [`examples/reference-house.yaml`](examples/reference-house.yaml)), check it, and start the server. It runs in dry run until the file says otherwise:
+To run against real devices, describe your house in a YAML file, check it, and start the server. `radiate discover` drafts the file from the devices Zigbee2MQTT already knows, and only reads from the broker. You can also start from [`examples/reference-house.yaml`](examples/reference-house.yaml). The server runs in dry run until the file says otherwise:
 
 ```bash
+.venv/bin/radiate discover --host 192.0.2.20 --username radiate --out radiate.yaml
 .venv/bin/radiate check-config radiate.yaml
 .venv/bin/radiate serve --config radiate.yaml
 ```
 
-To run Radiate in Docker, on a Raspberry Pi, as a Home Assistant App or with the HACS integration, see [deployment](docs/deployment.md).
+The server records every tick, so `radiate replay` shows what Radiate would have done during a dry run, and `radiate bootstrap` relearns the room models from that history. Before you turn dry run off, install the boiler watchdog with `radiate shelly install-watchdog`. See [replay and bootstrap](docs/deployment.md#replay-and-bootstrap) and [Shelly watchdog](docs/deployment.md#shelly-watchdog).
 
-Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). The Home Assistant integration tests run in a separate environment; see [CONTRIBUTING.md](CONTRIBUTING.md).
+To run Radiate in Docker, on a Raspberry Pi or as a Home Assistant App, see [deployment](docs/deployment.md). For entities and services in Home Assistant, install the [radiate-ha](https://github.com/jamesagarside/radiate-ha) integration through HACS.
+
+Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Why
 
@@ -44,12 +47,12 @@ Radiate aims to close that gap without a subscription and without the internet.
 
 ## Goals
 
-- **Whole-house balancing.** Learn how quickly each radiator heats up after the boiler fires and cap the maximum opening of over-supplied radiators so under-supplied ones get flow.
+- **Whole-house balancing.** Learn how quickly each radiator heats up after the boiler fires, and limit how far over-supplied radiators open so under-supplied ones get flow.
 - **Local first.** The control loop always runs in your home: on a Raspberry Pi, as a Home Assistant App, or on the cloud edition's local edge. No subscription needed to heat your house; the cloud adds remote access and history, never control features.
 - **Whole-house, not per room.** One model of every room, radiator, the boiler and the hot-water store, optimised together, so rooms warm up together and the burner runs fewer, longer burns.
 - **Other heat sources.** Pause learning for rooms heated by an open fire, range cooker, wood burner or sun, so they aren't mistaken for over-supplied radiators.
 - **Boiler-aware.** Aggregate room demand into a single boiler call with minimum burn and minimum off times to prevent short-cycling (important for oil and older non-modulating boilers), and schedule a hot-water store separately.
-- **Observable.** Expose learned parameters and decisions as Home Assistant entities, with optional export to external stores for analysis.
+- **Observable.** Expose learned parameters and decisions in the web UI and as Home Assistant entities, with optional export to Elastic for analysis.
 - **Safe failure.** If Home Assistant or Radiate stops, valves and boiler fall back to sensible local behaviour.
 
 ## Editions
@@ -58,7 +61,7 @@ Radiate aims to close that gap without a subscription and without the internet.
 |---|---|---|
 | Standalone (Docker, Raspberry Pi) | No Home Assistant | Built-in web UI |
 | Home Assistant App | Home Assistant OS | Same UI in the sidebar, plus entities via the HACS integration |
-| Cloud | Remote access, history, several homes | Hosted UI; a small local edge still runs the control loop |
+| Cloud (planned) | Remote access, history, several homes | Hosted UI; a small local edge still runs the control loop |
 
 See [ADR-0002](docs/adr/0002-deployment-topology.md).
 
@@ -93,9 +96,12 @@ The [documentation index](docs/README.md) lists everything. The main pages:
 - [Feature coverage matrix](docs/research/coverage-matrix.md)
 - [ADR-0001: standalone, not a VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md)
 - [ADR-0002: one engine, three editions](docs/adr/0002-deployment-topology.md)
+- [ADR-0003: Home Assistant integration in its own repository](docs/adr/0003-separate-home-assistant-integration.md)
 - Source analyses: [Versatile Thermostat](docs/research/vtherm.md), [Better Thermostat](docs/research/better-thermostat.md), [commercial products](docs/research/commercial.md), [provenance](docs/research/provenance.md)
 - [Reverse-engineering and clean-room policy](docs/research/reverse-engineering-policy.md)
 
 ## Licence
 
 [Elastic License 2.0](LICENSE) (ELv2). Free to use, modify and self-host. You may not offer Radiate as a hosted or managed service, or remove licensing notices. ELv2 is source-available rather than OSI-approved open source.
+
+The Home Assistant integration, [radiate-ha](https://github.com/jamesagarside/radiate-ha), is a separate repository under the Apache License 2.0.

@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from radiate.core import Reason
 from radiate.server import bridge
 from radiate.server.bridge import DemoSession, RequestError, handle, run_sync
 from radiate.server.demo import DemoDriver
@@ -70,6 +71,22 @@ def test_fire_mode_and_boost(rt):
     assert _status(rt, "POST", "store/boost", {"minutes": "lots"}) == 400
 
 
+def test_settings_demand_mode(rt):
+    settings = handle(rt, "GET", "settings")
+    assert settings["demand_mode"] == "eco" and settings["demand_mode_default"] == "eco"
+    assert settings["demand_modes"] == ["eco", "comfort"]
+    assert handle(rt, "GET", "state")["settings"] == settings
+    done = handle(rt, "POST", "settings", {"demand_mode": "comfort"})
+    assert done["ok"] and done["settings"]["demand_mode"] == "comfort"
+    run_sync(rt.step())
+    assert rt.last_snapshot.demand_mode.value == "comfort"  # decided, and recorded, so
+    assert handle(rt, "POST", "settings", {})["settings"]["demand_mode"] == "comfort"
+    handle(rt, "POST", "settings", {"demand_mode": None})  # back to the configuration
+    assert rt.demand_mode is None and handle(rt, "GET", "settings")["demand_mode"] == "eco"
+    for body in ({"demand_mode": "turbo"}, {"demand_mode": 1}, {"memory_days": 3}, [1]):
+        assert _status(rt, "POST", "settings", body) == 400
+
+
 def test_run_sync_refuses_a_coroutine_that_suspends():
     import asyncio
 
@@ -91,3 +108,16 @@ def test_demo_session_speaks_json():
     assert json.loads(s.request("POST", "mode", "{bad"))["status"] == 400
     bad = json.loads(s.request("POST", "mode", json.dumps({"mode": "sauna"})))
     assert bad == {"status": 400, "body": "mode must be auto, off or frost"}
+    done = json.loads(s.request("POST", "settings", json.dumps({"demand_mode": "comfort"})))
+    assert done["status"] == 200 and done["body"]["settings"]["demand_mode"] == "comfort"
+
+
+def test_rooms_carry_their_reason_code(rt):
+    message = "Toilet: calling, waiting for more rooms to share a burn (eco)"
+    rt.last_actions.reasons.append(Reason("demand.pooled", message, "toilet"))
+    rooms = {r["id"]: r for r in handle(rt, "GET", "state")["rooms"]}
+    assert rooms["toilet"]["reason"] == message
+    assert rooms["toilet"]["reason_code"] == "demand.pooled"
+    for room in rooms.values():
+        if "reason" in room:
+            assert (room["reason"] is None) == (room["reason_code"] is None)

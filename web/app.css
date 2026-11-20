@@ -64,9 +64,12 @@ h2, h3, p { margin: 0; }
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; letter-spacing: -0.01em; }
 .mark { width: 22px; height: 22px; fill: none; stroke: var(--heat); stroke-width: 2.2; stroke-linecap: round; }
-.status { flex: 1; min-width: 200px; color: var(--muted); font-size: 0.95rem; }
-.right { display: flex; align-items: center; gap: 12px; }
+.status { flex: 1; min-width: 280px; color: var(--muted); font-size: 0.95rem; }
+.right { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 12px; }
 .outdoor { font-variant-numeric: tabular-nums; color: var(--muted); }
+/* One line under the controls explaining the demand mode in effect. */
+.demand-note { flex-basis: 100%; margin-top: -10px; text-align: right; font-size: 0.8rem; color: var(--muted); }
+.demand-note[data-error="true"] { color: var(--warn); }
 
 .seg { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; }
 .seg button {
@@ -115,6 +118,7 @@ h2, h3, p { margin: 0; }
 .signin-error { color: var(--warn); font-size: 0.9rem; }
 body[data-auth="needed"] main,
 body[data-auth="needed"] .right,
+body[data-auth="needed"] .demand-note,
 body[data-auth="needed"] .notice { display: none; }
 
 main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20px; }
@@ -189,6 +193,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 }
 .badge[data-kind="calling"] { background: var(--heat-soft); color: var(--ember); }
 .badge[data-kind="preheat"] { background: var(--warn-soft); color: var(--warn); }
+.badge[data-kind="pooled"] { background: var(--warn-soft); color: var(--warn); }
 .badge[data-kind="fire"] { background: var(--heat-soft); color: var(--ember); }
 .badge[data-kind="ok"] { background: var(--ok-soft); color: var(--ok); }
 .badge[data-kind="extend"] { background: var(--heat-soft); color: var(--ember); }
@@ -473,4 +478,13 @@ body[data-link="stale"] .status { color: var(--warn); }
   .setup-progress { order: -1; flex-basis: 100%; text-align: left; }
   .setup-form { padding: 14px; }
   .temp .now { font-size: 1.7rem; }
+  /* Four rows: brand and outdoor; heating and demand modes; the demand note; status. */
+  .top { display: grid; grid-template-columns: 1fr auto; gap: 10px 12px; }
+  .right { display: contents; }
+  .brand, #mode { grid-column: 1; justify-self: start; }
+  .outdoor, #demand { grid-column: 2; justify-self: end; }
+  #mode, #demand { order: 1; }
+  .demand-note { order: 2; grid-column: 1 / -1; margin-top: -4px; text-align: left; }
+  .status { grid-column: 1 / -1; min-width: 0; }
+  .seg button { padding-inline: 10px; }
 }

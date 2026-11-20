@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 import uuid
 from collections import deque
@@ -39,8 +40,11 @@ from radiate.config.household import (
     household_view,
 )
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
-from radiate.core.persist import dump_state, load_state
-from radiate.core.types import BoilerState, RoomRole
+from radiate.core.bootstrap import bootstrap, needs_bootstrap
+from radiate.core.persist import dump_state, first_start_state, load_state
+from radiate.core.types import BoilerState, DemandMode, RoomRole
+
+LOG = logging.getLogger(__name__)
 
 
 class Driver(Protocol):
@@ -68,6 +72,8 @@ class Driver(Protocol):
     # Optional: `replace_household(site)`, a new household from the web UI's setup
     # (radiate.server.setup): which rooms it covers, and the house file's schedule for
     # every other room. `set_household_schedules` follows straight after.
+    # Optional: `history_days`, days of ticks to record in the state database. Only the
+    # live driver sets it, so the demo never records.
 
 
 OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
@@ -99,6 +105,8 @@ class Runtime:
     tick_s: float = 60.0
     state: EngineState = field(init=False)
     mode: Mode = Mode.AUTO
+    # Demand mode chosen through the API (spec 5.3); None follows `boiler.demand_mode`.
+    demand_mode: DemandMode | None = None
     overrides: dict[str, float] = field(default_factory=dict)  # setpoints the driver applies
     override_meta: dict[str, Override] = field(default_factory=dict)  # when each one ends
     fire: set[str] = field(default_factory=set)
@@ -113,10 +121,11 @@ class Runtime:
     exporter: object | None = None  # radiate.export.elastic.ElasticExporter
     store: object | None = None  # radiate.server.store.Store; None keeps state in memory
     save_every_s: float = 300.0
+    wall: Callable[[], float] = field(default=lambda: time.time())  # Unix time
+    recorder: object | None = None  # radiate.server.history.Recorder; set by restore()
     # Household and away (radiate.config.away). Away times are wall-clock seconds.
     household: Household | None = None
     timezone: str = "Europe/London"
-    wall: Callable[[], float] | None = None  # None: time.time
     presence: dict[str, Presence] = field(default_factory=dict)
     away: frozenset[str] = frozenset()  # people who count as away, as last compiled
     everyone_away: bool = False
@@ -138,7 +147,12 @@ class Runtime:
     # --- persistence ---------------------------------------------------------------------
 
     def restore(self) -> list[str]:
-        """Load the house id, mode and engine state from the store, if any."""
+        """Load the house id, mode, settings and engine state from the store, if any.
+
+        With a history (the driver's `history_days`), this also starts recording, and
+        when there is no usable saved engine state it warms the learner by replaying
+        the recorded history (spec 4.3).
+        """
         if self.store is None:
             return []
         saved_id = self.store.get("house_id")
@@ -147,21 +161,62 @@ class Runtime:
         else:
             self.store.put("house_id", self.house_id)
         saved_rt = self.store.get("runtime")
+        wall = self.wall()
         if saved_rt is not None and isinstance(saved_rt[0], dict):
             with contextlib.suppress(ValueError):
                 self.mode = Mode(saved_rt[0].get("mode", "auto"))
-            self._restore_overrides(saved_rt[0].get("overrides"), time.time() - saved_rt[1])
+            saved_demand = saved_rt[0].get("demand_mode")
+            if saved_demand is not None:
+                with contextlib.suppress(ValueError):
+                    self.demand_mode = DemandMode(saved_demand)
+            self._restore_overrides(saved_rt[0].get("overrides"), wall - saved_rt[1])
         saved_away = self.store.get("away")
         if saved_away is not None:
             self._restore_away(saved_away[0])
+        now = self.driver.clock()
+        data, elapsed = None, 0.0
         saved = self.store.get("engine")
-        if saved is None:
-            return []
-        data, saved_wall = saved
-        elapsed = max(0.0, time.time() - saved_wall)
-        self.state, problems = load_state(self.cfg, data, self.driver.clock(), elapsed)
-        self._saved_at = self.driver.clock()
+        if saved is not None:
+            data, saved_wall = saved
+            elapsed = max(0.0, wall - saved_wall)
+        history = self._open_history()
+        if history is not None and needs_bootstrap(data):
+            data = self._bootstrap(history, data, wall)
+        problems: list[str] = []
+        if data is not None:
+            self.state, problems = load_state(self.cfg, data, now, elapsed)
+            self._saved_at = now
+        else:
+            self.state = first_start_state(self.cfg)
+        if history is not None:
+            from radiate.server.history import Recorder
+
+            # The start entry records exactly how this state was built, for replay.
+            self.recorder = Recorder(history, int(wall * 1000), now, wall, data, elapsed)
         return problems
+
+    def _open_history(self):
+        days = getattr(self.driver, "history_days", None)
+        if self.store is None or not isinstance(days, (int, float)) or days <= 0:
+            return None
+        from radiate.server.history import History
+
+        try:
+            return History(self.store, float(days))
+        except Exception as err:  # history is a convenience: never stop the server
+            LOG.warning("history: cannot open: %s", err)
+            return None
+
+    def _bootstrap(self, history, data: object, wall: float) -> object:
+        try:
+            merged, ticks = bootstrap(self.cfg, history.recent(wall), data)
+        except Exception as err:
+            LOG.warning("bootstrap: skipped: %s", err)
+            return data
+        if merged is None:
+            return data
+        LOG.info("bootstrap: learned room models from %d recorded ticks", ticks)
+        return merged
 
     def save(self) -> None:
         if self.store is None:
@@ -184,7 +239,39 @@ class Runtime:
                 "until": meta.until if meta else "cleared",
                 "remaining_s": left,
             }
-        self.store.put("runtime", {"mode": self.mode.value, "overrides": overrides})
+        self.store.put(
+            "runtime",
+            {
+                "mode": self.mode.value,
+                "overrides": overrides,
+                "demand_mode": self.demand_mode.value if self.demand_mode else None,
+            },
+        )
+
+    # --- settings ------------------------------------------------------------------------
+
+    @property
+    def effective_demand_mode(self) -> DemandMode:
+        return self.demand_mode or self.cfg.boiler.demand_mode
+
+    def set_demand_mode(self, mode: DemandMode | None) -> None:
+        """Choose the demand mode (spec 5.3), or None to follow the configuration file.
+        Saved straight away and used from the next tick."""
+        self.demand_mode = mode
+        self._save_runtime(self.driver.clock())
+
+    def settings(self) -> dict:
+        """Settings a person can see, and `demand_mode` they can change at runtime."""
+        b, learning = self.cfg.boiler, self.cfg.learning
+        return {
+            "demand_mode": self.effective_demand_mode.value,
+            "demand_mode_default": b.demand_mode.value,
+            "demand_modes": [m.value for m in DemandMode],
+            "comfort_limit_k": b.comfort_limit_k,
+            "eco_limit_k": b.eco_limit_k,
+            "learning_memory_days": learning.memory_days,
+            "learn_on_trv_fallback": learning.learn_on_trv_fallback,
+        }
 
     def _restore_overrides(self, data: object, elapsed_s: float) -> None:
         if not isinstance(data, dict):
@@ -270,7 +357,7 @@ class Runtime:
     # --- away ----------------------------------------------------------------------------
 
     def _wall(self) -> float:
-        return self.wall() if self.wall is not None else time.time()
+        return self.wall()
 
     @property
     def people(self) -> tuple[str, ...]:
@@ -598,11 +685,17 @@ class Runtime:
             self.effective_mode(), self.overrides, now < self.store_boost_until, self.fire
         )
         self._apply_return(snap)
+        # Always explicit, so the tick history records the mode each tick was decided in.
+        snap.demand_mode = self.effective_demand_mode
         actions = decide(self.cfg, snap, self.state)
+        recorder = self.recorder
+        compact = recorder.compact(actions) if recorder is not None else None
         await self.driver.apply(actions)
         driver_alerts = getattr(self.driver, "alerts", None)
-        if callable(driver_alerts):
-            actions.alerts.extend(driver_alerts())
+        extra = driver_alerts() if callable(driver_alerts) else []
+        actions.alerts.extend(extra)
+        if recorder is not None:
+            recorder.record(self.wall(), snap, compact, extra, self.state, snap.now)
         if self.store is not None and (
             self._saved_at is None or now - self._saved_at >= self.save_every_s
         ):
@@ -612,7 +705,7 @@ class Runtime:
         logged = [(r.code, r.message, r.room_id) for r in self._away_log]
         self._away_log.clear()
         for r in actions.reasons:
-            if r.code.startswith(("boiler.", "disturbance.", "safe_mode.")):
+            if r.code.startswith(("boiler.", "disturbance.", "safe_mode.", "learning.relearn")):
                 self._log(now, r)
                 logged.append((r.code, r.message, r.room_id))
         # Alerts repeat every tick while they hold; log each one when it first appears
@@ -692,11 +785,11 @@ class Runtime:
         snap, acts, st = self.last_snapshot, self.last_actions, self.state
         now = self.driver.clock()
         rooms = []
-        reasons_by_room: dict[str, str] = {}
+        reasons_by_room: dict[str, Reason] = {}
         if acts:
             for r in acts.reasons:
                 if r.room_id:
-                    reasons_by_room[r.room_id] = r.message
+                    reasons_by_room[r.room_id] = r
         for rc in self.cfg.rooms:
             inp = snap.rooms.get(rc.id) if snap else None
             item = {
@@ -741,9 +834,20 @@ class Runtime:
                         "arrival_lag_min": round(rs.arrival_lag_s / 60, 1),
                         "lockshield": rs.lockshield,
                     },
-                    reason=reasons_by_room.get(rc.id),
-                    # Stuck-valve check (spec 7): burns in a row with no warming.
-                    valve={"untrusted": rs.valve.untrusted, "misses": rs.valve.misses},
+                    reason=reason.message if (reason := reasons_by_room.get(rc.id)) else None,
+                    # The code of that reason, such as `demand.pooled` (spec 5.3).
+                    reason_code=reason.code if reason else None,
+                    # Valve checks (spec 7). `untrusted`: stuck or leaking. `misses`:
+                    # burns in a row with no warming when open. `leak_burns`: of the
+                    # last 5 judged burns, those in which it warmed while shut.
+                    # `rejected`: TRV settings the device would not take (reconciler).
+                    valve={
+                        "untrusted": rs.valve.untrusted or rs.valve.leaking,
+                        "misses": rs.valve.misses,
+                        "leaking": rs.valve.leaking,
+                        "leak_burns": rs.valve.leak_burns,
+                        "rejected": list(rs.rejected),
+                    },
                 )
             rooms.append(item)
 
@@ -764,7 +868,14 @@ class Runtime:
                 else 0,
                 "state_elapsed_s": now - guard.since,
                 "starts_last_hour": guard.starts_last_hour(now),
+                # Hand-back (spec 5.7): this burn was started outside Radiate (the Shelly
+                # watchdog, a manual switch) and adopted, so it gets a full minimum burn.
+                "adopted": guard.state is BoilerState.FIRING and guard.external,
+                # Safe mode: the relay is left to the Shelly watchdog.
+                "watchdog_handover": acts.watchdog_handover if acts else False,
                 "predicted_burn_min": round(st.allocation.t_star_h * 60) if st.allocation else 0,
+                # Minutes of full radiator output the calling rooms need (spec 5.3).
+                "pooled_demand_min": round(st.pooled_demand_s / 60, 1),
                 "supply": round(st.supply, 3),
                 # Effective minimum off, raised while short-cycling was seen (spec 7).
                 "min_off_s": sc.min_off_s(self.cfg.boiler.min_off_s),
@@ -794,6 +905,7 @@ class Runtime:
             if acts
             else [],
             "telemetry": self.driver.telemetry(),
+            "settings": self.settings(),
         }
 
 

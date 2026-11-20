@@ -15,7 +15,7 @@ from collections.abc import Coroutine
 from typing import Any
 
 from radiate.config.away import parse_local
-from radiate.core import Mode
+from radiate.core import DemandMode, Mode
 from radiate.core.types import RoomConfig
 
 from .runtime import Runtime
@@ -200,6 +200,34 @@ def household(rt: Runtime, method: str, body: Any = None) -> dict:
     raise RequestError(405, "method not allowed")
 
 
+SETTINGS = ("demand_mode",)
+
+
+def set_settings(rt: Runtime, body: Any) -> dict:
+    """Change runtime settings. Only the keys given change.
+
+    `demand_mode`: `eco`, `comfort`, or null to follow `boiler.demand_mode` in the
+    configuration file. Saved straight away; used from the next tick.
+    """
+    body = require_object(body)
+    unknown = sorted(k for k in body if k not in SETTINGS)
+    if unknown:
+        raise RequestError(400, f"unknown setting: {', '.join(unknown)}")
+    if "demand_mode" in body:
+        value = body["demand_mode"]
+        if value is None:
+            mode = None
+        else:
+            try:
+                mode = DemandMode(value) if isinstance(value, str) else None
+            except ValueError:
+                mode = None
+            if mode is None:
+                raise RequestError(400, "demand_mode must be eco, comfort or null")
+        rt.set_demand_mode(mode)
+    return {"ok": True, "settings": rt.settings()}
+
+
 def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
     """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`."""
     method = method.upper()
@@ -219,9 +247,13 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return rt.away_view()
         if parts == ["schedules"]:
             return schedules_view(rt)
+        if parts == ["settings"]:
+            return rt.settings()
     elif method == "POST":
         if parts == ["mode"]:
             return set_mode(rt, body)
+        if parts == ["settings"]:
+            return set_settings(rt, body)
         if parts == ["store", "boost"]:
             return boost_store(rt, body)
         if len(parts) == 3 and parts[0] == "people":

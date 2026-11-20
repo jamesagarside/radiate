@@ -42,7 +42,13 @@ async def test_house_and_state(client):
     assert state["boiler"]["state"] in {"idle", "lead", "firing", "rest"}
     lounge = next(r for r in state["rooms"] if r["id"] == "lounge")
     assert "model" in lounge and "opening" in lounge
-    assert lounge["valve"] == {"untrusted": False, "misses": 0}
+    assert lounge["valve"] == {
+        "untrusted": False,
+        "misses": 0,
+        "leaking": False,
+        "leak_burns": 0,
+        "rejected": [],
+    }
 
 
 async def test_setpoint_override_and_validation(client):
@@ -57,6 +63,21 @@ async def test_setpoint_override_and_validation(client):
     ).status == 404
     await client.post("/api/v1/rooms/bedroom_1/setpoint", json={"setpoint": None}, headers=H)
     assert "bedroom_1" not in client.rt.overrides
+
+
+async def test_settings(client):
+    r = await client.get("/api/v1/settings", headers=H)
+    assert r.status == 200 and (await r.json())["demand_mode"] == "eco"
+    assert (await client.post("/api/v1/settings", json={"demand_mode": "comfort"})).status == 401
+    r = await client.post("/api/v1/settings", json={"demand_mode": "comfort"}, headers=H)
+    assert r.status == 200
+    assert (await r.json()) == {"ok": True, "settings": client.rt.settings()}
+    state = await (await client.get("/api/v1/state", headers=H)).json()
+    assert state["settings"]["demand_mode"] == "comfort"
+    assert isinstance(state["boiler"]["pooled_demand_min"], float)
+    for body in ({"demand_mode": "turbo"}, {"colour": "red"}):
+        assert (await client.post("/api/v1/settings", json=body, headers=H)).status == 400
+    assert (await client.post("/api/v1/settings", data="{bad", headers=H)).status == 400
 
 
 async def test_fire_switch_reaches_the_core(client):
