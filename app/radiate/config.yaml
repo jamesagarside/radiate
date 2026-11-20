@@ -1,5 +1,5 @@
 name: Radiate
-version: "0.1.0-dev"
+version: "0.1.0"
 slug: radiate
 description: Whole-house hydronic balancing and boiler control, local first
 url: https://github.com/jamesagarside/radiate

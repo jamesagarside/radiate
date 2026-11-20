@@ -2,4 +2,4 @@ build_from:
   aarch64: python:3.13-slim
   amd64: python:3.13-slim
 args:
-  RADIATE_REF: main
+  RADIATE_REF: v0.1.0

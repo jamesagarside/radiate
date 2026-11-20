@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "radiate"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Local-first whole-house hydronic balancing and boiler orchestration"
 readme = "README.md"
 license = { file = "LICENSE" }

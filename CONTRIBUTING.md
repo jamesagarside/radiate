@@ -66,6 +66,20 @@ If you change `src/radiate/core` or the simulator, compare the simulator's resul
 
 Never run Radiate against a real boiler or real valves with dry run off, or install the Shelly watchdog on someone's relay, without the owner's agreement.
 
+## Release
+
+1. On a branch, set the new version in `pyproject.toml`, `src/radiate/__init__.py` and `app/radiate/config.yaml`.
+2. Point `RADIATE_REF` at the new tag (for example `v0.2.0`) in `app/radiate/Dockerfile` and `app/radiate/build.yaml`. The App installs whatever that tag holds.
+3. Add the release to `app/radiate/CHANGELOG.md`. Home Assistant shows this file when it offers the update.
+4. Merge, then tag the merge commit and publish a GitHub release with the same notes:
+
+   ```bash
+   git tag -a v0.2.0 -m "Radiate 0.2.0" && git push origin v0.2.0
+   gh release create v0.2.0 --title "0.2.0" --notes-file notes.md
+   ```
+
+If the release adds or changes API fields, release radiate-ha after it and say which Radiate version it needs.
+
 ## Pull request checklist
 
 - Tests added or updated, and `pytest` passes.
