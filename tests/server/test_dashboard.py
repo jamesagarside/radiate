@@ -12,10 +12,9 @@ ENV = {"RADIATE_MQTT_PASSWORD": "x", "RADIATE_SHELLY_PASSWORD": "x"}
 ENTITY = re.compile(r"^(sensor|climate|binary_sensor)\.[a-z0-9_]+$")
 
 
-def _sections():
+def _sections(view=0, **kwargs):
     site = load_site(REFERENCE, env=ENV)
-    view = build_dashboard(site)["views"][0]
-    return site, view["sections"]
+    return site, build_dashboard(site, **kwargs)["views"][view]["sections"]
 
 
 def _room(sections, name):
@@ -51,9 +50,9 @@ def test_one_section_per_room_between_overview_and_batteries():
     assert headings[-1] == "Batteries"
 
 
-def test_normal_room_has_humidity_badges_trend_and_valve():
+def test_normal_room_has_humidity_badges_trend_valve_and_activity():
     _, sections = _sections()
-    heading, temp, valve = _room(sections, "Bedroom 1")["cards"]
+    heading, temp, valve, activity = _room(sections, "Bedroom 1")["cards"]
     assert [b["entity"] for b in heading["badges"]] == [
         "sensor.temp_bedroom_1_humidity",
         "sensor.temp_bedroom_1_dew_point",
@@ -62,6 +61,9 @@ def test_normal_room_has_humidity_badges_trend_and_valve():
     assert temp["features"] == [{"type": "trend-graph", "hours_to_show": 24}]
     assert valve["entity"] == "climate.trv_bedroom_1"
     assert valve["features"] == [{"type": "target-temperature"}]
+    assert activity["type"] == "history-graph"
+    assert activity["entities"] == [{"entity": "climate.trv_bedroom_1", "name": "Bedroom 1"}]
+    assert activity["title"] == "Valve activity, last 24 hours"
 
 
 def test_heat_sources_are_named_in_words():
@@ -84,6 +86,9 @@ def test_internal_sensor_room_uses_the_valve_reading_and_has_no_badges():
     assert tiles[0]["entity"] == "sensor.trv_toilet_local_temperature"
     assert tiles[0]["name"] == "Temperature at the valve"
     assert tiles[1]["entity"] == "climate.trv_toilet"
+    _, analysis = _sections(view=1)
+    stats = [c for c in _room(analysis, "Toilet")["cards"] if c["type"] == "statistic"]
+    assert {c["entity"] for c in stats} == {"sensor.trv_toilet_local_temperature"}
 
 
 def test_passive_room_has_no_valve_control():
@@ -104,8 +109,59 @@ def test_cli_writes_yaml_without_the_secrets_set(tmp_path, monkeypatch):
     for name in ENV:
         monkeypatch.delenv(name, raising=False)
     out = tmp_path / "dashboard.yaml"
-    main(["dashboard", str(REFERENCE), "--title", "Radiators", "-o", str(out)])
+    main(["dashboard", str(REFERENCE), "--title", "Radiators", "--hours", "48", "-o", str(out)])
     data = yaml.safe_load(out.read_text())
     assert data["title"] == "Radiators"
-    assert data["views"][0]["path"] == "radiators"
-    assert data["views"][0]["type"] == "sections"
+    assert [v["path"] for v in data["views"]] == ["radiators", "radiators-analysis"]
+    assert all(v["type"] == "sections" for v in data["views"])
+
+
+def test_hours_sets_every_live_window():
+    _, sections = _sections(hours=72)
+    windows = [c["hours_to_show"] for s in sections for c in s["cards"] if "hours_to_show" in c]
+    trends = [
+        f["hours_to_show"]
+        for s in sections
+        for c in s["cards"]
+        for f in c.get("features", [])
+        if f["type"] == "trend-graph"
+    ]
+    assert windows and set(windows) == {72}
+    assert trends and set(trends) == {72}
+    assert sections[0]["cards"][1]["title"] == "Temperatures, last 3 days"
+
+
+def test_hours_out_of_range_is_refused():
+    site = load_site(REFERENCE, env=ENV)
+    for bad in (0, 14 * 24 + 1):
+        try:
+            build_dashboard(site, hours=bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"hours={bad} accepted")
+
+
+def test_analysis_view_follows_one_date_picker():
+    site, sections = _sections(view=1)
+    cards = [c for s in sections for c in s["cards"]]
+    assert sum(c["type"] == "energy-date-selection" for c in cards) == 1
+    stats = [c for c in cards if c["type"] == "statistic"]
+    graphs = [c for c in cards if c["type"] == "statistics-graph"]
+    assert stats and all(c["period"] == "energy_date_selection" for c in stats)
+    assert graphs and all(c["energy_date_selection"] for c in graphs)
+    bedroom = _room(sections, "Bedroom 1")
+    names = [c.get("name") for c in bedroom["cards"] if c["type"] == "statistic"]
+    assert names == ["Lowest", "Average", "Highest", "Peak humidity", "Average humidity"]
+    # One analysis section per room with a temperature reading, after the comparison.
+    assert len(sections) == 1 + len(site.house.rooms)
+
+
+def test_outdoor_sensor_joins_the_house_charts():
+    import dataclasses
+
+    site = dataclasses.replace(load_site(REFERENCE, env=ENV), outdoor_sensor="outdoor_temp")
+    data = build_dashboard(site)
+    house = data["views"][0]["sections"][0]["cards"][1]["entities"]
+    compare = data["views"][1]["sections"][0]["cards"][3]["entities"]
+    assert house[0] == {"entity": "sensor.outdoor_temp_temperature", "name": "Outside"}
+    assert compare[0]["name"] == "Outside"

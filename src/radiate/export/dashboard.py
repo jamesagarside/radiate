@@ -1,10 +1,17 @@
 """Home Assistant dashboard for a house configuration.
 
-`radiate dashboard` turns the house file into a Lovelace dashboard: a whole-house
-history first, then one section per room with its temperature, humidity and valve, then
-device batteries. It uses built-in cards only (sections view, heading, tile with the
-`trend-graph` and `target-temperature` features, history graph, entities), so it needs
-nothing from HACS and works on any recent Home Assistant.
+`radiate dashboard` turns the house file into a Lovelace dashboard with two views:
+
+- **Rooms**: whole-house history, then one section per room with its temperature trend,
+  humidity, valve control and valve activity (room against target, heating shaded),
+  then device batteries. The live window is `hours`, set when the dashboard is built.
+- **Analysis**: a date picker (the `energy-date-selection` card) drives every card on the
+  view, so the reader chooses the day, week, month or a custom range. Per room it shows
+  the lowest, average and highest temperature, a min/mean/max chart and peak humidity,
+  plus a house-wide comparison of averages. These read Home Assistant's long-term
+  statistics, so they reach back beyond the recorder's purge window.
+
+It uses built-in cards only, so it needs nothing from HACS.
 
 Entity IDs follow Zigbee2MQTT's Home Assistant discovery: the device's friendly name,
 slugified, then the exposed property (`sensor.<name>_temperature`), and `climate.<name>`
@@ -22,7 +29,10 @@ from typing import Any
 from radiate.config import RoomDevices, SiteConfig
 from radiate.core.types import HeatSource, RoomConfig, RoomRole
 
-HISTORY_H = 24
+DEFAULT_HOURS = 24
+MAX_HOURS = 14 * 24  # the recorder keeps 14 days in the reference install
+
+Card = dict[str, Any]
 
 _ICONS = {
     HeatSource.EPISODIC: "mdi:fireplace",
@@ -32,11 +42,20 @@ _NOTES = {
     HeatSource.EPISODIC: "Open fire",
     HeatSource.CONTINUOUS: "Range cooker",
 }
+_FULL = {"columns": 12}
+_THIRD = {"columns": 4}
 
 
 def slug(name: str) -> str:
     """Home Assistant's object ID for a Zigbee2MQTT friendly name."""
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _window_label(hours: int) -> str:
+    if hours % 24 == 0:
+        days = hours // 24
+        return "24 hours" if days == 1 else f"{days} days"
+    return f"{hours} hours"
 
 
 def _temperature_entity(dev: RoomDevices) -> str | None:
@@ -45,6 +64,14 @@ def _temperature_entity(dev: RoomDevices) -> str | None:
     if dev.trv:
         return f"sensor.{slug(dev.trv)}_local_temperature"
     return None
+
+
+def _humidity_entity(dev: RoomDevices) -> str | None:
+    return f"sensor.{slug(dev.sensor)}_humidity" if dev.sensor else None
+
+
+def _outdoor_entity(site: SiteConfig) -> str | None:
+    return f"sensor.{slug(site.outdoor_sensor)}_temperature" if site.outdoor_sensor else None
 
 
 def _icon(room: RoomConfig) -> str:
@@ -61,9 +88,23 @@ def _note(room: RoomConfig) -> str | None:
     return _NOTES.get(room.heat_source)
 
 
-def room_section(room: RoomConfig, dev: RoomDevices) -> dict[str, Any]:
-    """One grid section: heading with humidity badges, temperature trend, valve control."""
-    badges: list[dict[str, Any]] = []
+def _heading(room: RoomConfig, badges: list[Card] | None = None) -> list[Card]:
+    heading: Card = {"type": "heading", "heading": room.name, "icon": _icon(room)}
+    if badges:
+        heading["badges"] = badges
+    cards = [heading]
+    note = _note(room)
+    if note:
+        cards.append({"type": "heading", "heading": note, "heading_style": "subtitle"})
+    return cards
+
+
+# Rooms view ---------------------------------------------------------------------------
+
+
+def room_section(room: RoomConfig, dev: RoomDevices, hours: int = DEFAULT_HOURS) -> Card:
+    """Heading with humidity badges, temperature trend, valve control and valve activity."""
+    badges: list[Card] = []
     if dev.sensor:
         s = slug(dev.sensor)
         badges.append(
@@ -83,13 +124,7 @@ def room_section(room: RoomConfig, dev: RoomDevices) -> dict[str, Any]:
                 "show_state": True,
             }
         )
-    heading: dict[str, Any] = {"type": "heading", "heading": room.name, "icon": _icon(room)}
-    if badges:
-        heading["badges"] = badges
-    cards: list[dict[str, Any]] = [heading]
-    note = _note(room)
-    if note:
-        cards.append({"type": "heading", "heading": note, "heading_style": "subtitle"})
+    cards = _heading(room, badges)
     temp = _temperature_entity(dev)
     if temp:
         cards.append(
@@ -99,61 +134,74 @@ def room_section(room: RoomConfig, dev: RoomDevices) -> dict[str, Any]:
                 "name": "Temperature" if dev.sensor else "Temperature at the valve",
                 "color": "deep-orange",
                 "features_position": "bottom",
-                "features": [{"type": "trend-graph", "hours_to_show": HISTORY_H}],
-                "grid_options": {"columns": 12},
+                "features": [{"type": "trend-graph", "hours_to_show": hours}],
+                "grid_options": _FULL,
             }
         )
     if dev.trv and room.controllable:
+        climate = f"climate.{slug(dev.trv)}"
         cards.append(
             {
                 "type": "tile",
-                "entity": f"climate.{slug(dev.trv)}",
+                "entity": climate,
                 "name": "Valve",
                 "features_position": "bottom",
                 "features": [{"type": "target-temperature"}],
-                "grid_options": {"columns": 12},
+                "grid_options": _FULL,
+            }
+        )
+        # A climate history graph draws the valve's reading against its target and shades
+        # the time it was calling for heat: the quickest way to see when a room heated.
+        cards.append(
+            {
+                "type": "history-graph",
+                "title": f"Valve activity, last {_window_label(hours)}",
+                "hours_to_show": hours,
+                "entities": [{"entity": climate, "name": room.name}],
+                "grid_options": _FULL,
             }
         )
     return {"type": "grid", "cards": cards}
 
 
-def _overview(site: SiteConfig) -> dict[str, Any]:
+def _house(site: SiteConfig, hours: int) -> Card:
     temps, hums = [], []
+    outdoor = _outdoor_entity(site)
+    if outdoor:
+        temps.append({"entity": outdoor, "name": "Outside"})
     for room in site.house.rooms:
         dev = site.devices[room.id]
-        temp = _temperature_entity(dev)
-        if temp:
+        if temp := _temperature_entity(dev):
             temps.append({"entity": temp, "name": room.name})
-        if dev.sensor:
-            hums.append({"entity": f"sensor.{slug(dev.sensor)}_humidity", "name": room.name})
-    cards: list[dict[str, Any]] = [
-        {"type": "heading", "heading": "House", "icon": "mdi:home-thermometer"}
-    ]
+        if hum := _humidity_entity(dev):
+            hums.append({"entity": hum, "name": room.name})
+    label = _window_label(hours)
+    cards: list[Card] = [{"type": "heading", "heading": "House", "icon": "mdi:home-thermometer"}]
     if temps:
         cards.append(
             {
                 "type": "history-graph",
-                "title": "Room temperatures",
-                "hours_to_show": HISTORY_H,
+                "title": f"Temperatures, last {label}",
+                "hours_to_show": hours,
                 "entities": temps,
-                "grid_options": {"columns": 12},
+                "grid_options": _FULL,
             }
         )
     if hums:
         cards.append(
             {
                 "type": "history-graph",
-                "title": "Humidity",
-                "hours_to_show": HISTORY_H,
+                "title": f"Humidity, last {label}",
+                "hours_to_show": hours,
                 "entities": hums,
-                "grid_options": {"columns": 12},
+                "grid_options": _FULL,
             }
         )
     return {"type": "grid", "column_span": 2, "cards": cards}
 
 
-def _batteries(site: SiteConfig) -> dict[str, Any] | None:
-    rows: list[dict[str, Any]] = []
+def _batteries(site: SiteConfig) -> Card | None:
+    rows: list[Card] = []
     for room in site.house.rooms:
         dev = site.devices[room.id]
         if dev.sensor:
@@ -173,25 +221,134 @@ def _batteries(site: SiteConfig) -> dict[str, Any] | None:
     }
 
 
-def build_dashboard(site: SiteConfig, title: str = "Heating") -> dict[str, Any]:
-    """Lovelace configuration for the house, ready for YAML mode or the raw editor."""
-    sections = [_overview(site)]
-    sections += [room_section(r, site.devices[r.id]) for r in site.house.rooms]
-    batteries = _batteries(site)
-    if batteries:
-        sections.append(batteries)
-    view = {
-        "title": title,
-        "path": slug(title) or "heating",
-        "icon": "mdi:radiator",
-        "type": "sections",
-        "max_columns": 4,
-        "sections": sections,
+# Analysis view ------------------------------------------------------------------------
+
+
+def _picked(stat_type: str, entity: str, name: str, icon: str) -> Card:
+    """A statistic card that follows the view's date picker."""
+    return {
+        "type": "statistic",
+        "entity": entity,
+        "stat_type": stat_type,
+        "period": "energy_date_selection",
+        "name": name,
+        "icon": icon,
+        "grid_options": _THIRD,
     }
-    return {"title": title, "views": [view]}
 
 
-def dashboard_yaml(site: SiteConfig, title: str = "Heating") -> str:
+def analysis_section(room: RoomConfig, dev: RoomDevices) -> Card | None:
+    """Lowest, average and highest temperature, their chart and peak humidity."""
+    temp = _temperature_entity(dev)
+    if not temp:
+        return None
+    cards = _heading(room)
+    cards += [
+        _picked("min", temp, "Lowest", "mdi:thermometer-chevron-down"),
+        _picked("mean", temp, "Average", "mdi:thermometer"),
+        _picked("max", temp, "Highest", "mdi:thermometer-chevron-up"),
+        {
+            "type": "statistics-graph",
+            "title": "Temperature range",
+            "entities": [{"entity": temp, "name": room.name}],
+            "stat_types": ["min", "mean", "max"],
+            "chart_type": "line",
+            "energy_date_selection": True,
+            "hide_legend": True,
+            "grid_options": _FULL,
+        },
+    ]
+    if hum := _humidity_entity(dev):
+        cards.append(_picked("max", hum, "Peak humidity", "mdi:water-percent"))
+        cards.append(_picked("mean", hum, "Average humidity", "mdi:water-percent"))
+    return {"type": "grid", "cards": cards}
+
+
+def _comparison(site: SiteConfig) -> Card:
+    temps, hums = [], []
+    outdoor = _outdoor_entity(site)
+    if outdoor:
+        temps.append({"entity": outdoor, "name": "Outside"})
+    for room in site.house.rooms:
+        dev = site.devices[room.id]
+        if temp := _temperature_entity(dev):
+            temps.append({"entity": temp, "name": room.name})
+        if hum := _humidity_entity(dev):
+            hums.append({"entity": hum, "name": room.name})
+    cards: list[Card] = [
+        {"type": "heading", "heading": "Period", "icon": "mdi:calendar-range"},
+        # Every statistics card on this view follows this picker.
+        {"type": "energy-date-selection", "grid_options": _FULL},
+        {"type": "heading", "heading": "Rooms compared", "heading_style": "subtitle"},
+    ]
+    if temps:
+        cards.append(
+            {
+                "type": "statistics-graph",
+                "title": "Average temperature",
+                "entities": temps,
+                "stat_types": ["mean"],
+                "chart_type": "line",
+                "energy_date_selection": True,
+                "grid_options": _FULL,
+            }
+        )
+    if hums:
+        cards.append(
+            {
+                "type": "statistics-graph",
+                "title": "Peak humidity",
+                "entities": hums,
+                "stat_types": ["max"],
+                "chart_type": "line",
+                "energy_date_selection": True,
+                "grid_options": _FULL,
+            }
+        )
+    return {"type": "grid", "column_span": 2, "cards": cards}
+
+
+# Dashboard ----------------------------------------------------------------------------
+
+
+def build_dashboard(
+    site: SiteConfig, title: str = "Heating", hours: int = DEFAULT_HOURS
+) -> dict[str, Any]:
+    """Lovelace configuration for the house, ready for YAML mode or the raw editor."""
+    if not 1 <= hours <= MAX_HOURS:
+        raise ValueError(f"hours must be between 1 and {MAX_HOURS}, got {hours}")
+    rooms = site.house.rooms
+    live = [_house(site, hours)]
+    live += [room_section(r, site.devices[r.id], hours) for r in rooms]
+    if batteries := _batteries(site):
+        live.append(batteries)
+    analysis = [_comparison(site)]
+    analysis += [s for r in rooms if (s := analysis_section(r, site.devices[r.id]))]
+    base = slug(title) or "heating"
+    return {
+        "title": title,
+        "views": [
+            {
+                "title": "Rooms",
+                "path": base,
+                "icon": "mdi:radiator",
+                "type": "sections",
+                "max_columns": 4,
+                "sections": live,
+            },
+            {
+                "title": "Analysis",
+                "path": f"{base}-analysis",
+                "icon": "mdi:chart-box-outline",
+                "type": "sections",
+                "max_columns": 4,
+                "sections": analysis,
+            },
+        ],
+    }
+
+
+def dashboard_yaml(site: SiteConfig, title: str = "Heating", hours: int = DEFAULT_HOURS) -> str:
     import yaml
 
     header = (
@@ -199,6 +356,6 @@ def dashboard_yaml(site: SiteConfig, title: str = "Heating") -> str:
         "# Regenerate it after changing rooms or device names, rather than editing by hand.\n"
     )
     body = yaml.safe_dump(
-        build_dashboard(site, title), sort_keys=False, allow_unicode=True, width=100
+        build_dashboard(site, title, hours), sort_keys=False, allow_unicode=True, width=100
     )
     return header + body

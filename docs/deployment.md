@@ -246,11 +246,22 @@ Services:
 radiate dashboard radiate.yaml -o heating-dashboard.yaml
 ```
 
-The dashboard has:
+The dashboard has two views.
 
-- A **House** section with the last 24 hours of room temperatures and humidity.
-- One section per room: humidity and dew point beside the room name, the temperature with a 24-hour trend, and the valve with its target temperature. A room with an open fire or range cooker says so under its name. An internal-sensor room shows the valve's own reading. A bypass radiator has no valve control.
+**Rooms** shows the house as it is now:
+
+- A **House** section with recent room temperatures and humidity, and the outside temperature when `house.outdoor_sensor` is set.
+- One section per room: humidity and dew point beside the room name, the temperature with a trend line, the valve with its target temperature, and the valve's activity (its reading against its target, with the time it was calling for heat shaded). A room with an open fire or range cooker says so under its name. An internal-sensor room shows the valve's own reading. A bypass radiator has no valve control.
 - A **Batteries** section listing every sensor and valve.
+
+The live window is 24 hours. Set it with `--hours`, from 1 to 336 (14 days), for example `--hours 72`. History older than Home Assistant's recorder keeps (`purge_keep_days`) doesn't show.
+
+**Analysis** looks back over a period you choose. The date picker at the top (day, week, month or a custom range, with arrows to step back) drives every card on the view:
+
+- **Rooms compared**: each room's average temperature and peak humidity on one chart.
+- Per room: the lowest, average and highest temperature, a chart of all three, and the peak and average humidity.
+
+These cards read Home Assistant's long-term statistics, which it keeps after the recorder purges detailed history, so they work for periods longer than 14 days. A sensor has statistics from about an hour after it first reports.
 
 It uses built-in cards only, so it needs nothing from HACS. Entity IDs follow Zigbee2MQTT's discovery naming (`sensor.<device>_temperature`, `climate.<device>`). A device that isn't paired yet shows as unavailable until it joins. Unset `${NAME}` variables in the house file are fine here, because the dashboard doesn't use secrets.
 

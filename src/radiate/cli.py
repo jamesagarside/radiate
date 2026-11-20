@@ -208,7 +208,10 @@ def _dashboard(args: argparse.Namespace) -> None:
         sys.exit(str(err))
     except OSError as err:
         sys.exit(f"cannot read {args.path}: {err.strerror}")
-    text = dashboard_yaml(site, args.title)
+    try:
+        text = dashboard_yaml(site, args.title, args.hours)
+    except ValueError as err:
+        sys.exit(str(err))
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(text)
@@ -288,7 +291,13 @@ def build_parser() -> argparse.ArgumentParser:
     c.set_defaults(func=_check_config)
     d = sub.add_parser("dashboard", help="print a Home Assistant dashboard for the house")
     d.add_argument("path", help="house configuration file")
-    d.add_argument("--title", default="Heating", help="dashboard and view title")
+    d.add_argument("--title", default="Heating", help="dashboard title")
+    d.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="window for the live trends and history on the Rooms view (1 to 336)",
+    )
     d.add_argument("-o", "--output", help="write the YAML to this file instead of stdout")
     d.set_defaults(func=_dashboard)
     sh = sub.add_parser("shelly", help="check the boiler relay or install its watchdog")
