@@ -294,7 +294,7 @@ class Runtime:
         self.relay_history.append((now, actions.heating_relay, actions.store_relay))
         logged = []
         for r in actions.reasons:
-            if r.code.startswith(("boiler.", "disturbance.", "safe_mode.")):
+            if r.code.startswith(("boiler.", "disturbance.", "safe_mode.", "learning.relearn")):
                 self._log(now, r)
                 logged.append((r.code, r.message, r.room_id))
         # Alerts repeat every tick while they hold; log each one when it first appears

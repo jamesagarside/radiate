@@ -17,10 +17,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from radiate.core.estimator import MEMORY_DAYS_MAX, MEMORY_DAYS_MIN
 from radiate.core.types import (
     BoilerConfig,
     HeatSource,
     HouseConfig,
+    LearningConfig,
     RoomConfig,
     RoomRole,
     StoreConfig,
@@ -285,6 +287,17 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
     )
 
 
+def _learning(ctx: _Ctx, raw: dict) -> LearningConfig:
+    p = "learning."
+    ctx.unknown(raw, {"memory_days"}, p)
+    d = LearningConfig()
+    return LearningConfig(
+        memory_days=ctx.number(
+            raw, "memory_days", d.memory_days, MEMORY_DAYS_MIN, MEMORY_DAYS_MAX, p
+        ),
+    )
+
+
 def _trv(ctx: _Ctx, raw: dict) -> TrvOptions:
     p = "trv."
     ctx.unknown(raw, {"schedule_mirror", "external_keepalive_min"}, p)
@@ -440,6 +453,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "schedules",
             "rooms",
             "balancing",
+            "learning",
         },
         "",
     )
@@ -483,6 +497,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         rooms=tuple(rooms),
         boiler=_boiler(ctx, ctx.section(data, "boiler")),
         store=_store(ctx, ctx.section(data, "store")),
+        learning=_learning(ctx, ctx.section(data, "learning")),
         balancing=balancing,
     )
     mqtt = _mqtt(ctx, ctx.section(data, "mqtt"))

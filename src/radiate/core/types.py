@@ -63,6 +63,13 @@ class BoilerConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class LearningConfig:
+    """Room model learning (spec 4.3, 4.6)."""
+
+    memory_days: float = 730.0  # RLS memory, in days of learning updates
+
+
+@dataclass(frozen=True, slots=True)
 class StoreConfig:
     windows: tuple[tuple[int, int], ...] = ((6 * 60, 7 * 60 + 30), (17 * 60, 21 * 60))
     recovery_s: float = 25 * 60
@@ -74,6 +81,7 @@ class HouseConfig:
     rooms: tuple[RoomConfig, ...]
     boiler: BoilerConfig = field(default_factory=BoilerConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
+    learning: LearningConfig = field(default_factory=LearningConfig)
     balancing: bool = True  # False: every heating valve fully open (for comparison)
     supply_kappa: float = 0.15  # supply factor sensitivity to total opening
     bypass_equivalent: float = 0.4  # always-open path, in fully-open-radiator equivalents

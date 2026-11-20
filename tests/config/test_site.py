@@ -201,3 +201,13 @@ def test_shifted_schedule_stays_in_trvzb_steps():
     up = week.shifted(1.5)
     assert up.days[0].trvzb() == "00:00/17.5 06:30/19.5 22:30/17.5"
     assert parse_week("00:00/34").shifted(3).days[0].trvzb() == "00:00/35"
+
+
+def test_learning_memory():
+    assert parse_site(minimal()).house.learning.memory_days == 730
+    site = parse_site(minimal(learning={"memory_days": 90}))
+    assert site.house.learning.memory_days == 90
+    with pytest.raises(ConfigError) as err:
+        parse_site(minimal(learning={"memory_days": 0.5, "forget": True}))
+    assert "learning.memory_days: must be 1 to 3650" in err.value.problems
+    assert "learning.forget: unknown key" in err.value.problems

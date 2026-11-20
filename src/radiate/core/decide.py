@@ -139,15 +139,17 @@ class EngineState:
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
         return cls(
-            rooms={r.id: RoomState(est=new_estimator(r)) for r in cfg.rooms if r.controllable}
+            rooms={r.id: RoomState(est=new_estimator(r, cfg)) for r in cfg.rooms if r.controllable}
         )
 
 
-def new_estimator(rc: RoomConfig) -> RoomEstimator:
-    """A room model at its priors, with the room's confidence cap."""
+def new_estimator(rc: RoomConfig, cfg: HouseConfig) -> RoomEstimator:
+    """A room model at its priors, with the room's confidence cap and the house's
+    learning memory."""
     return RoomEstimator.new(
         rc.heat_source is HeatSource.CONTINUOUS,
         INTERNAL_SENSOR_MAX_CONFIDENCE if rc.role is RoomRole.INTERNAL_SENSOR_ONLY else 1.0,
+        cfg.learning.memory_days,
     )
 
 
@@ -378,7 +380,17 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 gate = "setpoint_change"
         rs.learning_gate = gate
         if gate is None:
+            relearns = rs.est.relearns
             rs.est.update(rs.slope, rs.drive, delta_out)
+            if rs.est.relearns != relearns:
+                # Change detection (spec 4.3): the model no longer fits; re-learn it.
+                reasons.append(
+                    Reason(
+                        "learning.relearn",
+                        f"{rc.name}: heating no longer matches what was learned, re-learning",
+                        rc.id,
+                    )
+                )
 
         # Demand latch.
         hyst = (
