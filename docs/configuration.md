@@ -121,11 +121,10 @@ If a [household](#household) section covers every room, you don't need a `schedu
 
 ### household
 
-Instead of writing schedules, you can describe the people in the house and how each room is used. Radiate builds an ordinary weekly schedule for every room listed under `household.rooms`, so the schedule mirror, the web UI and Home Assistant work the same way. A full example is [`examples/household.yaml`](../examples/household.yaml).
+Instead of writing schedules, you can describe the people in the house and how each room is used. Radiate builds an ordinary weekly schedule for every room listed under `household.rooms`, so the schedule mirror, the web UI and Home Assistant work the same way. A full example is [`examples/household.yaml`](../examples/household.yaml). Its people, times and rooms are an example: replace them with your own.
 
 ```yaml
 household:
-  presence_delay_min: 60      # minutes out before Home Assistant presence counts as away
   temperatures:               # house-wide, °C; these are the defaults
     in_use: 19
     occasional: 16
@@ -168,15 +167,18 @@ household:
 
 Put times in quotes. YAML reads an unquoted `22:30` as a number, and Radiate reports it.
 
-`temperatures` sets one temperature for each use level, and the night temperature every room drops to overnight. Values are 4 to 35 °C and are rounded to 0.5 °C. Below 12 °C, `check-config` notes that walls and window frames can get damp.
+`temperatures` sets one temperature for each use level, and the night temperature every room drops to overnight. Values are 4 to 35 °C and are rounded to 0.5 °C. Below 12 °C, `check-config` notes that walls and window frames can get damp. You can still use a lower value.
 
-`people` maps a person ID (lower case letters, digits and `_`) to their routine:
+`people` maps a person ID (lower case letters, digits and `_`) to their routine and, optionally, their own timing:
 
 | Key | Meaning |
 |---|---|
 | `name` | Display name, shown in the UI only |
-| `weekdays` | Required. The routine for Monday to Friday |
-| `weekend` | The routine for Saturday and Sunday. Defaults to the weekday routine |
+| `weekdays` | Required. The routine for days that aren't weekend days |
+| `weekend` | The routine for weekend days. Defaults to the weekday routine |
+| `getting_up_min` | Replaces `timing.getting_up_min` for this person |
+| `bedtime_min` | Replaces `timing.bedtime_min` for this person |
+| `weekend_days` | Replaces `household.weekend_days` for this person, for example `[mon, tue]` for someone who works weekends |
 
 Each routine has these keys:
 
@@ -194,30 +196,64 @@ Each routine has these keys:
 | Key | Meaning |
 |---|---|
 | `use` | Required. The use level: `in_use`, `occasional` or `unused`. For a different level at weekends, write `{weekdays: unused, weekend: occasional}` |
-| `kind` | `shared` (the default), `bedroom`, `office` or `all_day` |
+| `kind` | `shared` (the default), `bedroom`, `office`, `while_home` or `all_day`. See [How schedules are built](#how-schedules-are-built) |
 | `people` | The person IDs who use the room. Required for a bedroom or an office. Defaults to everyone |
-| `temperature` | Replaces the use level's temperature in this room only |
+| `temperature` | Replaces the use level's temperature in this room |
+| `night_temperature` | Replaces `temperatures.night` in this room, for example a warmer nursery |
+| `unused_temperature` | Replaces `temperatures.unused` in this room |
+| `preheat_min` | Replaces `timing.preheat_min` in this room, for example a slow room with a small radiator |
 
 A room in `household.rooms` can't also set `schedule` in the `rooms` section. Rooms not listed keep their `schedule`. A passive room has no valve, so it can't be listed.
 
+#### Household settings
+
+Every setting below is optional. The defaults describe one way of living, so change any of them to suit your household. `check-config` reports a value outside its range.
+
+`weekend_days` lists the days that use each person's weekend routine and each room's weekend use level. It's `[sat, sun]` by default. Write days as `mon` to `sun` or in full. An empty list means every day uses the weekday routine. A person can set their own `weekend_days`; rooms always follow the house-wide list.
+
+`timing` sets how routines turn into warm periods. Values are whole minutes.
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `preheat_min` | 30 | 0 to 180 | How early each warm period starts in the valve's own copy of the schedule, so the room is warm in time when the valve runs it without Radiate |
+| `live_preheat` | `optimum_start` | `optimum_start` or `fixed` | How Radiate itself starts early. `optimum_start`: each warm period starts when the room is needed, and optimum start decides how early to heat from what Radiate has learned. `fixed`: Radiate follows the valve's copy, `preheat_min` early, as well as using optimum start |
+| `getting_up_min` | 30 | 0 to 180 | How long a bedroom or shared room counts as in use after someone gets up |
+| `bedtime_min` | 30 | 0 to 180 | How long a bedroom counts as in use before someone goes to bed |
+| `merge_gap_min` | 30 | 0 to 120 | Warm periods this close together, or closer, join into one |
+
+`away` sets how away and Home Assistant presence work. Values are whole minutes.
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `presence_delay_min` | 60 | 0 to 720 | How long Home Assistant must say a person is not home before they count as away |
+| `presence_stale_after_min` | 60 | 20 to 1440, or 0 for off | Presence that Home Assistant hasn't reported again within this time counts as unknown, not away |
+| `return_warmup_min` | 180 | 0 to 360 | How early Radiate can start warming rooms for someone who is due back. 0 means rooms start warming when they arrive |
+| `everyone_away` | `frost` | `frost` or `unused` | What happens when everyone is away. `frost`: every room is held at the frost threshold. `unused`: every household room stays at its unused temperature, for example for pets or a house that gets damp |
+
+`presence_delay_min` used to sit directly under `household`. If your file still has it there, `check-config` tells you to move it to `household.away`.
+
 #### How schedules are built
 
-Radiate works out when each room is in use, for weekdays and for the weekend:
+Radiate works out when each room is in use, day by day:
 
-- A `bedroom` is in use for the first 30 minutes after each of its people gets up, and for the last 30 minutes before they go to bed.
+- A `bedroom` is in use for `getting_up_min` after each of its people gets up, and for `bedtime_min` before they go to bed.
 - An `office` is in use during its people's `work` hours.
-- A `shared` room is in use while any of its people is up, at home and not working. It's also in use for the first 30 minutes after they get up, even if they then go out or start work.
+- A `shared` room is in use while any of its people is up, at home and not working. It's also in use for `getting_up_min` after they get up, even if they then go out or start work.
+- A `while_home` room is in use while any of its people is up and at home, working or not. Use it for a kitchen or dining room that should stay warm while someone works from home.
 - An `all_day` room is in use from the first of its people getting up until the last goes to bed, whether or not anyone is at home.
 - An `unused` room is never in use.
 
 Then:
 
-1. Each period of use starts 30 minutes early, so the room is warm in time.
-2. Periods 30 minutes or less apart join into one.
-3. During those periods the room gets its use level's temperature, or its own `temperature`. Outside them it gets the unused temperature between the first person getting up and the last going to bed, and the night temperature overnight.
-4. The TRVZB holds six changes a day. If a day needs more, Radiate drops the shortest warm periods until it fits, and `check-config` and `radiate schedules` say which periods were dropped.
+1. Periods of use `merge_gap_min` or less apart join into one. Radiate measures the gap after starting each period `preheat_min` early.
+2. During those periods the room gets its use level's temperature, or its own `temperature`. Outside them it gets the unused temperature between the first person getting up and the last going to bed, and the night temperature overnight.
+3. Each room gets two copies of its week:
+   - The valve's copy starts each period `preheat_min` early. The schedule mirror writes it to the TRV, and the Shelly fallback uses it, because a valve on its own can't start early by itself. The TRVZB holds six changes a day. If a day needs more, the valve's copy leaves out the shortest warm periods until it fits, and `check-config` and `radiate schedules` say which ones.
+   - Radiate's own copy starts each period when the room is needed: "warm by 06:30". Optimum start then decides how early to heat, from the room's learned heating rate and arrival lag, so the fixed preheat isn't added on top. This copy keeps every warm period. With `live_preheat: fixed`, Radiate follows the valve's copy instead.
 
-With the example above, the kitchen is at 19 °C from 06:00 to 08:30 and from 17:30 to 22:30 on weekdays, and 14 °C the rest of the time. Run `radiate schedules` to see every room.
+With the example above, Radiate's copy has the kitchen at 19 °C from 06:30 to 08:30 and from 18:00 to 22:30 on weekdays. The valve's copy has it at 19 °C from 06:00 to 08:30 and from 17:30 to 22:30. Both have it at 14 °C the rest of the time. `radiate schedules` prints the valve's copy of every room.
+
+A room with a range cooker or other steady heat source needs nothing special. Choose its use level and kind like any other room, and set `heat_source: continuous` in the `rooms` section so Radiate learns that heat as part of the room.
 
 #### Away
 
@@ -225,14 +261,26 @@ When a person is away, Radiate rebuilds the household's schedules without their 
 
 A person counts as away in two ways:
 
-- Away until: someone sets it in the web UI, through the API, or with the Home Assistant service `radiate.set_away`. It counts straight away, and it stops counting 30 minutes before the given time, so their rooms are warm when they arrive. It clears itself at that time. You don't need Home Assistant for this.
+- Away until: someone sets it in the web UI, through the API, or with the Home Assistant service `radiate.set_away`. It counts straight away and clears itself at the given time. You don't need Home Assistant for this.
 - Presence: the Home Assistant integration reports a mapped `person` entity as home or not home. Not home counts as away once it has lasted `presence_delay_min`. Home counts at once.
 
 Away until wins over a home that Home Assistant reported before it was set, so you can set it before you leave. If Home Assistant sees the person arrive home after it was set, the away ends early.
 
-`presence_delay_min` is 0 to 720 minutes, 60 by default. An hour is longer than a trip to the shops or the school run, and shorter than a working day or an evening out. A room cools slowly, so turning it down for a short trip saves little heat and costs an extra boiler start to warm it again. Set it to 0 to count a person as away as soon as they leave.
+`presence_delay_min` is 60 minutes by default. An hour is longer than a trip to the shops or the school run, and shorter than a working day or an evening out. A room cools slowly, so turning it down for a short trip saves little heat and costs an extra boiler start to warm it again. Set it to 0 to count a person as away as soon as they leave.
 
-When everyone is away and the heating mode is `auto`, the house holds every room at the frost threshold, like the `frost` mode. It goes back to the schedules as soon as someone is home, or 30 minutes before the first person is due back. The heating mode you chose doesn't change, so `off` and `frost` still apply while everyone is away. Frost protection and the boiler guards work as usual.
+The integration reports each person's presence again every 15 minutes. If Home Assistant stops reporting, for example because it's down, presence older than `presence_stale_after_min` counts as unknown. An unknown person isn't away, so their rooms follow their routine. The API and the Home Assistant away entity show when presence has gone stale. Set `presence_stale_after_min` to 0 if something reports presence through the API without repeating it.
+
+When everyone is away and the heating mode is `auto`, the house holds every room at the frost threshold, like the `frost` mode, or at its unused temperature with `everyone_away: unused`. It goes back to the schedules as soon as someone is home. The heating mode you chose doesn't change, so `off` and `frost` still apply while everyone is away. Frost protection and the boiler guards work as usual.
+
+#### Coming back
+
+When someone has set an away until, Radiate knows when they're due back. From `return_warmup_min` before that time, Radiate treats the return as the next change in each room's schedule. Optimum start then starts heating each room as early as it needs, so a house that cooled during a long absence starts early, and a house that is still warm after a short one starts late. While everyone is away, rooms stay at frost protection until then, unless optimum start says a room must start heating. The person counts as away until the time they gave.
+
+Until Radiate has learned a room, optimum start can begin as early as `return_warmup_min` allows. A larger value can mean an earlier start for an unlearned room.
+
+With `live_preheat: fixed`, the person stops counting as away `preheat_min` before the time they gave, as the valve's copy expects.
+
+Presence on its own gives no return time. If Home Assistant still says the person is not home at the time they gave, presence keeps them away after it.
 
 Away state is saved in the state database, so it survives a restart.
 
