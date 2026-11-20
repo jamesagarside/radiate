@@ -67,6 +67,7 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
   let busy = false;
   let keyboard = false; // the last step change came from the keyboard: no motion
   const open = new Set(); // Advanced disclosures left open
+  const linkChosen = new Set(); // people whose Home Assistant link was picked by hand
   let week = null;
 
   // --- persistence -------------------------------------------------------------------
@@ -193,12 +194,60 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
     return [h("h3", { class: "setup-title", id: "setup-step-h", tabindex: "-1", text }), intro ? h("p", { class: "setup-intro", text: intro }) : null];
   }
 
+  // A person's Home Assistant `person` entity: a choice of the people Home Assistant
+  // reported, or, without a report, the entity ID typed in. Every link shares one
+  // explanation, `helpId`, under the list.
+  function haPersonField(p, path, helpId) {
+    const persons = H.haPersons(view);
+    let control;
+    if (persons) {
+      control = select(`${path}.ha_person`, p.ha_person ?? "", H.personOptions(persons, p.ha_person), (v) => {
+        p.ha_person = v || null;
+        linkChosen.add(p.id);
+      });
+    } else {
+      control = h("input", {
+        id: idFor(`${path}.ha_person`),
+        type: "text",
+        class: "entity",
+        value: p.ha_person ?? "",
+        placeholder: "person.sam",
+        autocomplete: "off",
+        autocapitalize: "none",
+        spellcheck: "false",
+        maxlength: "107",
+      });
+      control.addEventListener("input", () => { p.ha_person = control.value.trim() || null; remember(); });
+    }
+    control.setAttribute("aria-describedby", helpId);
+    return h("div", { class: "field", "data-path": `${path}.ha_person` }, h("label", { for: control.id, text: "Home Assistant person" }), control);
+  }
+
   function peopleStep() {
     const list = h("div", { class: "setup-people" });
+    const persons = H.haPersons(view);
+    const helpId = `${idFor("household.people")}-ha-help`;
+    const linkHelp = () =>
+      persons
+        ? `${H.linkHelp(draft.away.presence_delay_min)} A link set in the integration's options comes first.`
+        : `Optional. Type the entity ID, such as person.sam. ${H.linkHelp(draft.away.presence_delay_min)}`;
+    const help = h("p", { class: "field-help", id: helpId, text: linkHelp() });
     draft.people.forEach((p, i) => {
       const path = `household.people.${p.id}`;
       const name = h("input", { id: idFor(`${path}.name`), type: "text", value: p.name, autocomplete: "off", maxlength: "40", required: true });
       name.addEventListener("input", () => { p.name = name.value; remember(); });
+      // A new name can match someone in Home Assistant: suggest them, unless a link is set
+      // or this person's link was chosen by hand.
+      name.addEventListener("change", () => {
+        if (!persons || p.ha_person || linkChosen.has(p.id)) return;
+        const taken = draft.people.map((x) => x.ha_person).filter(Boolean);
+        const match = H.matchPerson(p.name, persons, taken);
+        if (!match) return;
+        p.ha_person = match;
+        const choice = document.getElementById(idFor(`${path}.ha_person`));
+        if (choice) choice.value = match;
+        remember();
+      });
       const remove = h("button", {
         type: "button",
         class: "link",
@@ -212,7 +261,13 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
           remember();
         },
       });
-      list.append(h("div", { class: "setup-person", "data-path": path }, field(`${path}.name`, `Person ${i + 1}`, name), remove));
+      list.append(h(
+        "div",
+        { class: "setup-person", role: "group", "aria-label": `Person ${i + 1}`, "data-path": path },
+        field(`${path}.name`, `Person ${i + 1}`, name),
+        haPersonField(p, path, helpId),
+        remove,
+      ));
     });
     const add = h("button", {
       type: "button",
@@ -229,11 +284,14 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
     const off = limit("away.presence_stale_after_min").off;
     return [
       ...stepHeading("Who lives here?", "Add everyone whose comings and goings change when rooms need heat. Names stay on this server and only appear in Radiate."),
-      h("div", { class: "field-group", "data-path": "household.people" }, list, add),
+      h("div", { class: "field-group", "data-path": "household.people" }, list, help, add),
       advanced(
         "away",
         "Advanced: away and presence",
-        field("household.away.presence_delay_min", "Counts as away after", withUnit(numberInput("household.away.presence_delay_min", a.presence_delay_min, { limit: limit("away.presence_delay_min"), onChange: (v) => (a.presence_delay_min = v) }), "min"),
+        field("household.away.presence_delay_min", "Counts as away after", withUnit(numberInput("household.away.presence_delay_min", a.presence_delay_min, { limit: limit("away.presence_delay_min"), onChange: (v) => {
+          a.presence_delay_min = v;
+          if (typeof v === "number") help.textContent = linkHelp();
+        } }), "min"),
           `How long Home Assistant must say someone is out before Radiate counts them as away. ${defText(def("away", "presence_delay_min"))}`),
         field("household.away.presence_stale_after_min", "Presence goes stale after", withUnit(numberInput("household.away.presence_stale_after_min", a.presence_stale_after_min, { limit: limit("away.presence_stale_after_min"), onChange: (v) => (a.presence_stale_after_min = v) }), "min"),
           `If Home Assistant stops reporting someone for this long, Radiate treats them as home, not away. 0 turns this off. ${defText(def("away", "presence_stale_after_min"), off)}`),
@@ -802,6 +860,7 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
   $("setup-restart").addEventListener("click", () => {
     forget();
     draft = H.draftFrom(view);
+    linkChosen.clear();
     resume.hidden = true;
     reached = 0;
     go(0);
@@ -824,6 +883,7 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
       $("setup-h").textContent = view.household ? "Change household setup" : "Set up your household";
       errors = [];
       keyboard = false;
+      linkChosen.clear();
       drawSource();
       root.hidden = false;
       onOpen();

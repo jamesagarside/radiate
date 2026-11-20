@@ -220,3 +220,74 @@ def test_a_new_household_can_be_saved_as_it_comes(tmp_path):
     household = parse_household(out["section"], setup.site)
     bedroom = next(r for r in household.rooms if r.room_id == "bedroom_1")
     assert bedroom.people == ("person_1",)
+
+
+LINKS = """
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const w = await import(process.argv[1]);
+const view = JSON.parse(readFileSync(0, "utf8"));
+const persons = [
+  { entity_id: "person.alex", name: "Alex" },
+  { entity_id: "person.early", name: " early RISER " },
+  { entity_id: "person.jo_1", name: "Jo" },
+  { entity_id: "person.jo_2", name: "Jo" },
+];
+
+// Names match ignoring case and spaces, once, and never twice over.
+assert.equal(w.matchPerson("Early riser", persons), "person.early");
+assert.equal(w.matchPerson("Early riser", persons, ["person.early"]), null);
+assert.equal(w.matchPerson("Jo", persons), null); // two people called Jo: no guess
+assert.equal(w.matchPerson("", persons), null);
+assert.equal(w.matchPerson("Alex", null), null);
+assert.equal(w.haPersons(view), null);
+
+// The choices: Not linked, then by name, entity IDs where a name repeats, and a link
+// Home Assistant no longer lists is kept.
+assert.deepEqual(w.personOptions(persons, null), [
+  ["", "Not linked"], ["person.alex", "Alex"], ["person.early", " early RISER "],
+  ["person.jo_1", "Jo (person.jo_1)"], ["person.jo_2", "Jo (person.jo_2)"],
+]);
+assert.deepEqual(w.personOptions([], "person.gone").at(-1),
+  ["person.gone", "person.gone, not in Home Assistant now"]);
+assert.equal(w.linkHelp(60),
+  "Linked people count as away once Home Assistant has said they're out for 1 h.");
+assert.equal(w.linkHelp(0),
+  "Linked people count as away as soon as Home Assistant says they're out.");
+
+const out = {};
+// Without a report nothing is guessed.
+out.plain = w.draftFrom(view).people.map((p) => p.ha_person);
+// With one, a name that matches is linked.
+const reported = { ...view, ha_persons: { persons, reported_at: "2026-11-18T06:00+00:00" } };
+const draft = w.draftFrom(reported);
+out.prefilled = draft.people.map((p) => p.ha_person);
+out.section = w.toSection(draft);
+assert.deepEqual(w.stepFor(draft, "household.people.home_worker.ha_person"), { step: 0, person: 1 });
+// Once anyone is linked, "Not linked" may be a choice: no more guessing.
+const linked = structuredClone(view);
+linked.household.people.home_worker.ha_person = "person.alex";
+out.kept = w.draftFrom({ ...linked, ha_persons: { persons } }).people.map((p) => p.ha_person);
+// A typed link is trimmed; an empty one is left out.
+const typed = w.draftFrom(view);
+typed.people[0].ha_person = " person.sam ";
+typed.people[1].ha_person = "";
+out.typed = w.toSection(typed).people;
+assert.equal(w.addPerson(typed, "Guest"), "guest");
+assert.equal(typed.people.at(-1).ha_person, null);
+console.log(JSON.stringify(out));
+"""
+
+
+def test_people_link_to_home_assistant_persons(tmp_path):
+    setup, rt = setup_for(house_data())
+    out = run(LINKS, setup.view(rt), tmp_path)
+    assert out["plain"] == [None, None]
+    assert out["prefilled"] == ["person.early", None]
+    assert out["kept"] == [None, "person.alex"]
+    hh = parse_household(out["section"], setup.site)
+    assert [p.ha_person for p in hh.people] == ["person.early", None]
+    assert out["typed"]["early_riser"]["ha_person"] == "person.sam"
+    assert "ha_person" not in out["typed"]["home_worker"]
+    typed = parse_household({**out["section"], "people": out["typed"]}, setup.site)
+    assert typed.people[0].ha_person == "person.sam"

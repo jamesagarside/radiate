@@ -4,8 +4,9 @@
 //
 // The draft is shaped for the questions, not for the house file:
 //   people: [{ id, name, weekdays, weekend, weekendSame, getting_up_min, bedtime_min,
-//              weekend_days }], each routine { up, bed, periods: [{ type, from, to }] }
-//              with type "out" or "work";
+//              weekend_days, ha_person }], each routine { up, bed, periods: [{ type, from,
+//              to }] } with type "out" or "work", and ha_person a Home Assistant
+//              `person` entity ID or null;
 //   rooms: [{ id, name, schedule, own, use, weekendUse, weekendDifferent, kind, people,
 //             temperature, night_temperature, unused_temperature, preheat_min }];
 //   temperatures, timing, away, weekend_days: as in the house file, every value set.
@@ -91,9 +92,59 @@ export function addPerson(draft, name = "") {
     getting_up_min: null,
     bedtime_min: null,
     weekend_days: null,
+    ha_person: null,
   });
   return id;
 }
+
+// --- Home Assistant people -------------------------------------------------------------
+
+// The `person` entities Home Assistant reported ([{ entity_id, name }]), or null when it
+// hasn't reported any: no integration, or one too old to send them.
+export const haPersons = (view) => view?.ha_persons?.persons ?? null;
+
+// The one reported person whose name is `name`, ignoring case and spaces at the ends,
+// and who isn't in `taken`. null when there is none, or more than one.
+export function matchPerson(name, persons, taken = []) {
+  const key = String(name ?? "").trim().toLocaleLowerCase();
+  if (!key || !persons) return null;
+  const found = persons.filter(
+    (p) => String(p.name ?? "").trim().toLocaleLowerCase() === key && !taken.includes(p.entity_id),
+  );
+  return found.length === 1 ? found[0].entity_id : null;
+}
+
+// Link people to the reported person with the same name, but only while nobody in the
+// draft is linked: once someone is, "Not linked" may be a choice, so it is left alone.
+export function linkByName(draft, persons) {
+  if (!persons || draft.people.some((p) => p.ha_person)) return;
+  for (const p of draft.people) {
+    const taken = draft.people.map((x) => x.ha_person).filter(Boolean);
+    p.ha_person = matchPerson(p.name, persons, taken);
+  }
+}
+
+// The choices for a person's link: "Not linked", then each reported person by name. A
+// name shared by two people gets its entity ID; a link Home Assistant no longer reports
+// stays, so opening the wizard never drops it.
+export function personOptions(persons, current) {
+  const names = persons.map((p) => p.name);
+  const options = [["", "Not linked"]];
+  for (const p of persons) {
+    const twice = names.indexOf(p.name) !== names.lastIndexOf(p.name);
+    options.push([p.entity_id, twice ? `${p.name} (${p.entity_id})` : p.name]);
+  }
+  if (current && !persons.some((p) => p.entity_id === current)) {
+    options.push([current, `${current}, not in Home Assistant now`]);
+  }
+  return options;
+}
+
+// What linking does, in a line, for the presence delay in minutes.
+export const linkHelp = (delayMin) =>
+  delayMin
+    ? `Linked people count as away once Home Assistant has said they're out for ${minutesText(delayMin)}.`
+    : "Linked people count as away as soon as Home Assistant says they're out.";
 
 // Remove a person and every link to them. A room left with nobody is for everyone
 // again, and an office left with nobody becomes a shared room.
@@ -177,11 +228,13 @@ export function draftFrom(view) {
         getting_up_min: p.getting_up_min ?? null,
         bedtime_min: p.bedtime_min ?? null,
         weekend_days: p.weekend_days ? fullDays(p.weekend_days) : null,
+        ha_person: p.ha_person ?? null,
       });
     }
   } else {
     addPerson(draft);
   }
+  linkByName(draft, haPersons(view));
   for (const r of view.rooms) {
     const link = section?.rooms?.[r.id];
     const room = {
@@ -245,6 +298,8 @@ export function toSection(draft) {
     if (p.getting_up_min != null) item.getting_up_min = p.getting_up_min;
     if (p.bedtime_min != null) item.bedtime_min = p.bedtime_min;
     if (p.weekend_days != null) item.weekend_days = [...p.weekend_days];
+    const link = String(p.ha_person ?? "").trim();
+    if (link) item.ha_person = link;
     people[p.id] = item;
   }
   const rooms = {};
@@ -299,7 +354,7 @@ export function stepFor(draft, path) {
   const section = (parts[1] ?? "").replace(/\[.*$/, ""); // weekend_days[0]
   if (section === "people") {
     const person = Math.max(0, draft.people.findIndex((p) => p.id === parts[2]));
-    if (parts.length <= 3 || parts[3] === "name") return { step: 0, person };
+    if (parts.length <= 3 || parts[3] === "name" || parts[3] === "ha_person") return { step: 0, person };
     return { step: 1, person };
   }
   if (section === "away") return { step: 0, person: 0 };
