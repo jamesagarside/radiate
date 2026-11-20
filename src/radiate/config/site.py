@@ -26,12 +26,24 @@ from radiate.core.types import (
     StoreConfig,
 )
 
-from .schedule import ScheduleError, WeekSchedule, parse_week
+from .household import (
+    DAMP_BELOW_C,
+    Household,
+    Person,
+    RoomKind,
+    RoomLink,
+    Routine,
+    Temperatures,
+    UseLevel,
+    compile_household,
+)
+from .schedule import MAX_C, MIN_C, ScheduleError, WeekSchedule, hhmm, parse_week
 
 DEFAULT_TRV_BIAS_K = -1.5
 _ID = re.compile(r"^[a-z0-9_]{1,40}$")
 _ENV = re.compile(r"\$\{([A-Z0-9_]+)\}")
 _WINDOW = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-4]):([0-5]\d)$")
+_CLOCK = re.compile(r"^([01]\d|2[0-4]):([0-5]\d)$")
 
 
 class ConfigError(ValueError):
@@ -47,7 +59,7 @@ class RoomDevices:
     trv: str | None = None
     sensor: str | None = None
     window: str | None = None  # contact sensor; `contact: false` means open
-    schedule: str = "default"
+    schedule: str | None = "default"  # None: compiled from the household section
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,9 +106,22 @@ class SiteConfig:
     # to this long (their maximum reporting interval) before it counts as stale.
     sensor_max_silence_s: float = 3600.0
     notes: tuple[str, ...] = ()  # non-fatal remarks for the operator
+    household: Household | None = None
+    household_schedules: dict[str, WeekSchedule] = field(default_factory=dict)
 
     def schedule_for(self, room_id: str) -> WeekSchedule:
+        if room_id in self.household_schedules:
+            return self.household_schedules[room_id]
         return self.schedules[self.devices[room_id].schedule]
+
+    def mirror_payload(self, room_id: str) -> dict[str, str]:
+        """The room's week as written to its TRVZB, in the frame the TRV compares with."""
+        week = self.schedule_for(room_id)
+        room = self.house.room(room_id)
+        if room.role is RoomRole.INTERNAL_SENSOR_ONLY:
+            # The TRV reads about room - bias; spec 4.6 and decide._trv_setpoint.
+            week = week.shifted(-room.trv_bias_k)
+        return week.trvzb_payload()
 
 
 # --- parsing helpers -------------------------------------------------------------------
@@ -311,7 +336,11 @@ _ROOM_KEYS = {
 
 
 def _rooms(
-    ctx: _Ctx, raw: Any, schedules: dict[str, WeekSchedule], notes: list[str]
+    ctx: _Ctx,
+    raw: Any,
+    schedules: dict[str, WeekSchedule],
+    notes: list[str],
+    household_rooms: set[str],
 ) -> tuple[list[RoomConfig], dict[str, RoomDevices]]:
     if not isinstance(raw, list) or not raw:
         ctx.err("rooms", "expected a non-empty list")
@@ -348,7 +377,14 @@ def _rooms(
         trv = ctx.get(item, "trv", str, None, p) or None
         sensor = ctx.get(item, "sensor", str, None, p) or None
         window = ctx.get(item, "window", str, None, p) or None
-        sched = ctx.get(item, "schedule", str, "default", p)
+        sched: str | None = ctx.get(item, "schedule", str, "default", p)
+        if rid in household_rooms:
+            if item.get("schedule") is not None:
+                ctx.err(
+                    f"{p}schedule",
+                    "the household section builds this room's schedule; remove one of them",
+                )
+            sched = None
 
         if role is RoomRole.NORMAL:
             if trv is None:
@@ -362,7 +398,7 @@ def _rooms(
                 ctx.err(f"{p}sensor", "an internal_sensor_only room has no room sensor")
         elif trv is not None:
             ctx.err(f"{p}trv", "a passive room has no controllable valve")
-        if role is not RoomRole.PASSIVE and sched not in schedules:
+        if role is not RoomRole.PASSIVE and sched is not None and sched not in schedules:
             ctx.err(f"{p}schedule", f"unknown schedule {sched!r}")
         for dev_key, dev in (("trv", trv), ("sensor", sensor), ("window", window)):
             if dev is None:
@@ -419,6 +455,222 @@ def _rooms(
     return rooms, devices
 
 
+# --- household -------------------------------------------------------------------------
+
+
+def _clock(ctx: _Ctx, raw: Any, path: str, end: bool = False) -> int | None:
+    if raw is None:
+        ctx.err(path, "required")
+        return None
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        # YAML reads an unquoted 22:30 as a number.
+        ctx.err(path, 'put the time in quotes, for example "22:30"')
+        return None
+    m = _CLOCK.match(str(raw))
+    minute = int(m.group(1)) * 60 + int(m.group(2)) if m else -1
+    if not 0 <= minute <= (1440 if end else 1439):
+        ctx.err(path, f"{raw!r} is not a time as HH:MM")
+        return None
+    return minute
+
+
+def _windows(ctx: _Ctx, raw: Any, path: str) -> tuple[tuple[int, int], ...]:
+    if raw is None:
+        return ()
+    items = raw if isinstance(raw, list) else [raw]
+    out = []
+    for i, item in enumerate(items):
+        at = f"{path}[{i}]" if isinstance(raw, list) else path
+        m = _WINDOW.match(str(item))
+        if not m:
+            ctx.err(at, f"{item!r} is not HH:MM-HH:MM")
+            continue
+        a = int(m.group(1)) * 60 + int(m.group(2))
+        b = int(m.group(3)) * 60 + int(m.group(4))
+        if b <= a or b > 1440:
+            ctx.err(at, "end must be after start, on the same day")
+            continue
+        out.append((a, b))
+    return tuple(sorted(out))
+
+
+def _routine(ctx: _Ctx, raw: Any, path: str) -> Routine | None:
+    if not isinstance(raw, dict):
+        ctx.err(path, "expected a mapping with up, bed and optionally out and work")
+        return None
+    ctx.unknown(raw, {"up", "bed", "out", "work"}, f"{path}.")
+    up = _clock(ctx, raw.get("up"), f"{path}.up")
+    bed = _clock(ctx, raw.get("bed"), f"{path}.bed", end=True)
+    out = _windows(ctx, raw.get("out"), f"{path}.out")
+    work = _windows(ctx, raw.get("work"), f"{path}.work")
+    if up is None or bed is None:
+        return None
+    if bed <= up:
+        ctx.err(f"{path}.bed", "must be after up, on the same day")
+        return None
+    ok = True
+    for key, spans in (("out", out), ("work", work)):
+        for a, b in spans:
+            if a < up or b > bed:
+                ctx.err(
+                    f"{path}.{key}",
+                    f"{hhmm(a)}-{hhmm(b)} is outside {hhmm(up)} to {hhmm(bed)} (up to bed)",
+                )
+                ok = False
+    spans = sorted(out + work)
+    for (_, end), (a, b) in zip(spans, spans[1:], strict=False):
+        if a < end:
+            ctx.err(path, f"out and work times overlap at {hhmm(a)}-{hhmm(b)}")
+            ok = False
+    return Routine(up_min=up, bed_min=bed, out=out, work=work) if ok else None
+
+
+def _use(ctx: _Ctx, raw: Any, path: str) -> tuple[UseLevel, UseLevel] | None:
+    def level(value: Any, at: str) -> UseLevel | None:
+        try:
+            return UseLevel(value)
+        except ValueError:
+            ctx.err(at, "must be in_use, occasional or unused")
+            return None
+
+    if raw is None:
+        ctx.err(path, "required: in_use, occasional or unused")
+        return None
+    if isinstance(raw, dict):
+        ctx.unknown(raw, {"weekdays", "weekend"}, f"{path}.")
+        days: list[UseLevel | None] = []
+        for key in ("weekdays", "weekend"):
+            if key in raw:
+                days.append(level(raw[key], f"{path}.{key}"))
+            else:
+                ctx.err(f"{path}.{key}", "required when the use differs at weekends")
+                days.append(None)
+        weekdays, weekend = days
+        if weekdays is None or weekend is None:
+            return None
+        return weekdays, weekend
+    one = level(raw, path)
+    return None if one is None else (one, one)
+
+
+def _people(ctx: _Ctx, raw: dict, p: str) -> list[Person]:
+    people: list[Person] = []
+    if not raw:
+        ctx.err(f"{p}people", "at least one person is required")
+    for pid, item in raw.items():
+        at = f"{p}people.{pid}"
+        if not _ID.match(str(pid)):
+            ctx.err(at, "person ids are lower case letters, digits and _ (max 40)")
+            continue
+        if not isinstance(item, dict):
+            ctx.err(at, "expected a mapping with weekdays and optionally weekend")
+            continue
+        ctx.unknown(item, {"name", "weekdays", "weekend"}, f"{at}.")
+        name = ctx.get(item, "name", str, "", f"{at}.")
+        weekdays = _routine(ctx, item.get("weekdays"), f"{at}.weekdays")
+        weekend = weekdays
+        if item.get("weekend") is not None:
+            weekend = _routine(ctx, item["weekend"], f"{at}.weekend")
+        if weekdays is not None and weekend is not None:
+            people.append(Person(id=str(pid), weekdays=weekdays, weekend=weekend, name=name))
+    return people
+
+
+def _room_link(
+    ctx: _Ctx, rid: str, item: Any, room: RoomConfig | None, person_ids: set[str], p: str
+) -> RoomLink | None:
+    at = f"{p}rooms.{rid}"
+    if room is None:
+        ctx.err(at, f"unknown room {rid!r}; use an id from rooms")
+        return None
+    if room.role is RoomRole.PASSIVE:
+        ctx.err(at, "a passive room has no valve, so it has no schedule")
+        return None
+    if not isinstance(item, dict):
+        ctx.err(at, "expected a mapping with use and optionally kind, people and temperature")
+        return None
+    ctx.unknown(item, {"use", "kind", "people", "temperature"}, f"{at}.")
+    use = _use(ctx, item.get("use"), f"{at}.use")
+    try:
+        kind = RoomKind(ctx.get(item, "kind", str, "shared", f"{at}."))
+    except ValueError:
+        ctx.err(f"{at}.kind", "must be shared, bedroom, office or all_day")
+        return None
+    linked: tuple[str, ...] | None = None
+    names = item.get("people")
+    if names is not None:
+        if not isinstance(names, list) or not names:
+            ctx.err(f"{at}.people", "expected a list of person ids")
+            return None
+        for name in names:
+            if str(name) not in person_ids:
+                ctx.err(f"{at}.people", f"unknown person {name!r}")
+        if len(set(names)) != len(names):
+            ctx.err(f"{at}.people", "a person is listed twice")
+        linked = tuple(str(n) for n in names)
+    elif kind in (RoomKind.BEDROOM, RoomKind.OFFICE):
+        ctx.err(f"{at}.people", f"required for a {kind.value}: who sleeps or works here")
+    temperature = None
+    if item.get("temperature") is not None:
+        temperature = ctx.number(item, "temperature", 0.0, MIN_C, MAX_C, f"{at}.")
+    if use is None:
+        return None
+    return RoomLink(
+        room_id=room.id,
+        use_weekdays=use[0],
+        use_weekend=use[1],
+        kind=kind,
+        people=linked,
+        temperature_c=temperature,
+        name=room.name,
+    )
+
+
+def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) -> Household | None:
+    p = "household."
+    ctx.unknown(raw, {"temperatures", "people", "rooms"}, p)
+
+    tp = f"{p}temperatures."
+    t_raw = ctx.section(raw, "temperatures", p)
+    ctx.unknown(t_raw, {"in_use", "occasional", "unused", "night"}, tp)
+    d = Temperatures()
+    temps = Temperatures(
+        in_use_c=ctx.number(t_raw, "in_use", d.in_use_c, MIN_C, MAX_C, tp),
+        occasional_c=ctx.number(t_raw, "occasional", d.occasional_c, MIN_C, MAX_C, tp),
+        unused_c=ctx.number(t_raw, "unused", d.unused_c, MIN_C, MAX_C, tp),
+        night_c=ctx.number(t_raw, "night", d.night_c, MIN_C, MAX_C, tp),
+    )
+    for key, value in (("unused", temps.unused_c), ("night", temps.night_c)):
+        if value < DAMP_BELOW_C:
+            notes.append(
+                f"{tp}{key} is {value:g}°: below {DAMP_BELOW_C:g}° walls and window frames "
+                "can get damp, especially in older houses."
+            )
+
+    p_raw = ctx.section(raw, "people", p)
+    people = _people(ctx, p_raw, p)
+    person_ids = {str(pid) for pid in p_raw}
+
+    by_id = {r.id: r for r in rooms}
+    r_raw = ctx.section(raw, "rooms", p)
+    if not r_raw:
+        ctx.err(f"{p}rooms", "at least one room is required")
+    links = []
+    for rid, item in r_raw.items():
+        link = _room_link(ctx, str(rid), item, by_id.get(str(rid)), person_ids, p)
+        if link is not None:
+            links.append(link)
+
+    offices = {pid for link in links if link.kind is RoomKind.OFFICE for pid in link.people or ()}
+    for person in people:
+        if (person.weekdays.work or person.weekend.work) and person.id not in offices:
+            notes.append(
+                f"{p}people.{person.id} has work hours but no office room: "
+                "shared rooms are not heated while they work."
+            )
+    return Household(people=tuple(people), rooms=tuple(links), temperatures=temps)
+
+
 def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     """Validate a parsed YAML document. Raises ConfigError listing every problem."""
     ctx = _Ctx()
@@ -437,6 +689,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "schedules",
             "rooms",
             "balancing",
+            "household",
         },
         "",
     )
@@ -457,17 +710,22 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         ctx.err("house.timezone", f"unknown time zone {tz!r}")
     dry_run = ctx.get(house, "dry_run", bool, True, "house.")
 
+    raw_household = ctx.section(data, "household")
+    raw_links = raw_household.get("rooms")
+    household_rooms = {str(k) for k in raw_links} if isinstance(raw_links, dict) else set()
+
     schedules: dict[str, WeekSchedule] = {}
     raw_sched = ctx.section(data, "schedules")
-    if not raw_sched:
-        ctx.err("schedules", "at least one schedule is required")
+    if not raw_sched and not raw_household:
+        ctx.err("schedules", "at least one schedule, or a household section, is required")
     for name, spec in raw_sched.items():
         try:
             schedules[str(name)] = parse_week(spec)
         except ScheduleError as err:
             ctx.err(f"schedules.{name}", str(err))
 
-    rooms, devices = _rooms(ctx, data.get("rooms"), schedules, notes)
+    rooms, devices = _rooms(ctx, data.get("rooms"), schedules, notes, household_rooms)
+    household = _household(ctx, raw_household, rooms, notes) if raw_household else None
     balancing = ctx.get(data, "balancing", bool, True, "")
     cfg = HouseConfig(
         rooms=tuple(rooms),
@@ -492,6 +750,11 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
 
     if ctx.problems:
         raise ConfigError(ctx.problems)
+    household_schedules: dict[str, WeekSchedule] = {}
+    if household is not None:
+        compiled = compile_household(household)
+        household_schedules = compiled.schedules
+        notes.extend(compiled.notes)
     return SiteConfig(
         house=cfg,
         devices=devices,
@@ -505,6 +768,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         data_dir=data_dir,
         sensor_max_silence_s=silence_min * 60,
         notes=tuple(notes),
+        household=household,
+        household_schedules=household_schedules,
     )
 
 

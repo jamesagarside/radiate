@@ -1,0 +1,129 @@
+# The reference house with its schedules built from a household section instead of
+# written by hand. Devices are the same as reference-house.yaml.
+# See the schedules it builds with:  radiate schedules examples/household.yaml
+
+house:
+  timezone: Europe/London
+  dry_run: true
+  data_dir: ./data
+
+mqtt:
+  host: localhost
+  port: 1883
+  username: radiate
+  password: ${RADIATE_MQTT_PASSWORD}
+  base_topic: zigbee2mqtt
+
+shelly:
+  host: 192.0.2.10            # Shelly 2PM Gen4 at the boiler
+  password: ${RADIATE_SHELLY_PASSWORD}
+  heating_switch: 0
+  store_switch: 1
+  auto_off_min: 120
+
+boiler:
+  min_burn_min: 8
+  min_off_min: 10
+  max_starts_per_hour: 3
+  output_kw: 13
+
+store:
+  priority_over_heating: true
+  recovery_min: 25
+  windows: ["06:00-07:30", "17:00-21:00"]
+
+trv:
+  schedule_mirror: true
+
+household:
+  temperatures:               # house-wide, °C (these are the defaults)
+    in_use: 19
+    occasional: 16
+    unused: 14
+    night: 14
+  people:
+    early_riser:
+      name: Early riser       # shown in the UI only
+      weekdays:
+        up: "06:30"
+        out: "07:30-18:00"
+        bed: "22:30"
+      weekend:                # usually out: mornings and evenings only
+        up: "08:30"
+        out: "10:00-18:00"
+        bed: "22:30"
+    home_worker:
+      name: Home worker
+      weekdays:
+        up: "08:00"
+        work: "08:00-18:00"   # in their office, Bedroom 3
+        bed: "22:30"
+      weekend:
+        up: "08:30"
+        out: "10:00-18:00"
+        bed: "22:30"
+  rooms:
+    bedroom_1:
+      use: in_use
+      kind: bedroom
+      people: [early_riser, home_worker]
+    bedroom_3:
+      use: in_use
+      kind: office
+      people: [home_worker]
+    dining:
+      use: in_use             # shared by everyone unless kind or people say otherwise
+    kitchen:
+      use: in_use
+    bathroom:
+      use: occasional
+    bedroom_2:
+      use: unused
+    lounge:
+      use: unused
+    toilet:
+      use: {weekdays: unused, weekend: occasional}
+      kind: all_day           # warm from the first person up to the last in bed
+      temperature: 15
+
+rooms:
+  - id: bedroom_1
+    name: Bedroom 1
+    trv: trv_bedroom_1
+    sensor: temp_bedroom_1
+    actuate: true             # pilot valve: test one TRV first (spec 4.5)
+  - id: bedroom_2
+    name: Bedroom 2
+    trv: trv_bedroom_2
+    sensor: temp_bedroom_2
+  - id: bedroom_3
+    name: Bedroom 3
+    trv: trv_bedroom_3
+    sensor: temp_bedroom_3
+  - id: bathroom
+    name: Bathroom
+    trv: trv_bathroom
+    sensor: temp_bathroom
+    humidity: true
+  - id: dining
+    name: Dining room
+    trv: trv_dining
+    sensor: temp_dining
+  - id: lounge
+    name: Lounge
+    trv: trv_lounge
+    sensor: temp_lounge
+    heat_source: episodic     # open fire
+  - id: kitchen
+    name: Kitchen
+    trv: trv_kitchen
+    sensor: temp_kitchen
+    heat_source: continuous   # range cooker
+  - id: toilet
+    name: Toilet
+    role: internal_sensor_only
+    trv: trv_toilet
+  - id: stairs
+    name: Stairs
+    role: passive             # unvalved bypass radiator, observed only
+    sensor: temp_stairs

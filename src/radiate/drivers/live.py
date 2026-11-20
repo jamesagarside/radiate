@@ -225,12 +225,7 @@ class LiveDriver:
 
     def _mirror(self, room_id: str) -> dict[str, str]:
         """The room's schedule in the frame its TRV compares setpoints with."""
-        week = self.site.schedule_for(room_id)
-        rc = self.cfg.room(room_id)
-        if rc.role is RoomRole.INTERNAL_SENSOR_ONLY:
-            # The TRV reads about room - bias; spec 4.6 and decide._trv_setpoint.
-            week = week.shifted(-rc.trv_bias_k)
-        return week.trvzb_payload()
+        return self.site.mirror_payload(room_id)
 
     def _send(self, write: Write) -> None:
         if write.delay_s > 0:

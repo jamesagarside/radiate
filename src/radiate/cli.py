@@ -220,6 +220,43 @@ def _dashboard(args: argparse.Namespace) -> None:
         sys.stdout.write(text)
 
 
+def _schedules(args: argparse.Namespace) -> None:
+    import json
+
+    from radiate.config import ConfigError, load_site
+    from radiate.config.household import compile_household
+
+    try:
+        # Schedules need no secrets or hosts, like the dashboard.
+        site = load_site(args.path, env=_AnyEnv(os.environ))
+    except ConfigError as err:
+        sys.exit(str(err))
+    except OSError as err:
+        sys.exit(f"cannot read {args.path}: {err.strerror}")
+    rooms = [r for r in site.house.rooms if r.controllable]
+    if args.trvzb:
+        # What the schedule mirror writes, in each TRV's own frame.
+        payload = {
+            site.devices[r.id].trv: site.mirror_payload(r.id)
+            for r in rooms
+            if site.devices[r.id].trv
+        }
+        print(json.dumps(payload, indent=2))
+        return
+    for r in rooms:
+        source = site.devices[r.id].schedule
+        print(f"{r.name}: " + ("from the household" if source is None else f"schedule {source}"))
+        described = site.schedule_for(r.id).describe()
+        width = max(len(label) for label, _ in described)
+        for label, text in described:
+            print(f"  {label:<{width}}  {text}")
+    notes = compile_household(site.household).notes if site.household else ()
+    if notes:
+        print("Notes:")
+        for note in notes:
+            print(f"  {note}")
+
+
 def _load(path: str):
     from radiate.config import ConfigError, load_site
 
@@ -306,6 +343,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="leave out Radiate's own entities, for a house running Zigbee2MQTT only",
     )
     d.set_defaults(func=_dashboard)
+    w = sub.add_parser("schedules", help="print each room's weekly schedule")
+    w.add_argument("path", help="house configuration file")
+    w.add_argument(
+        "--trvzb",
+        action="store_true",
+        help="print the Zigbee2MQTT /set payload for each TRV as JSON",
+    )
+    w.set_defaults(func=_schedules)
     sh = sub.add_parser("shelly", help="check the boiler relay or install its watchdog")
     sh.add_argument("action", choices=["status", "install-watchdog"])
     sh.add_argument("--config", required=True)
