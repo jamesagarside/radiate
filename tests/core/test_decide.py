@@ -207,3 +207,20 @@ def test_internal_sensor_room_confidence_is_capped():
         rs.est.p[0][0] = 0.0
     assert st.rooms["loo"].est.confidence == 0.5
     assert st.rooms["bed"].est.confidence == 1.0
+
+
+def test_optimum_start_horizon_can_be_set_per_room():
+    # A cold room with its next setpoint four hours away: beyond the core's own
+    # three-hour horizon, so no preheat unless the input widens it.
+    def preheating(**inp) -> bool:
+        st = EngineState.new(CFG)
+        rooms = {"bed": RoomInput(temperature=8.0, trv_temperature=8.5, setpoint=8.0, **inp)}
+        decide(CFG, Snapshot(0.0, 720, 5.0, rooms, False, False), st)
+        return st.rooms["bed"].preheating
+
+    later = {"next_setpoint": 20.0, "next_setpoint_in_s": 4 * 3600.0}
+    assert not preheating(**later)
+    assert preheating(**later, preheat_max_s=6 * 3600.0)
+    soon = {"next_setpoint": 20.0, "next_setpoint_in_s": 1800.0}
+    assert preheating(**soon)
+    assert not preheating(**soon, preheat_max_s=0.0)
