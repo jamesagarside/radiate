@@ -78,5 +78,5 @@ def test_only_person_entity_ids(site, value):
 def test_one_entity_links_one_person(site):
     raw = section(site, early_riser="person.alex", home_worker="person.alex")
     assert problems(site, raw) == {
-        "household.people.home_worker.ha_person": "person.alex is already linked to Early riser"
+        "household.people.home_worker.ha_person": "Early riser is already linked to person.alex"
     }

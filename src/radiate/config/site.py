@@ -701,7 +701,7 @@ def _ha_person(ctx: _Ctx, item: dict, path: str, linked: dict[str, str]) -> str 
         ctx.err(f"{path}ha_person", "must be a person entity ID, such as person.sam")
         return None
     if raw in linked:
-        ctx.err(f"{path}ha_person", f"{raw} is already linked to {linked[raw]}")
+        ctx.err(f"{path}ha_person", f"{linked[raw]} is already linked to {raw}")
         return None
     return raw
 
