@@ -10,6 +10,14 @@ radiate check-config radiate.yaml
 
 The command lists every room with its devices, marks the valves Radiate will actuate, and prints any notes. If the file has problems, it lists all of them with their location, for example `rooms[2].trv: required for a normal room`.
 
+To see each room's weekly schedule in words, including schedules built from a [household](#household) section:
+
+```bash
+radiate schedules radiate.yaml
+```
+
+Add `--trvzb` to print, as JSON, the Zigbee2MQTT `/set` payload that the schedule mirror writes to each TRV, keyed by the TRV's friendly name. An internal-sensor room's payload is in the TRV's own frame, so its temperatures are higher than the room's by the TRV bias. Neither form needs the secrets in the file to be set.
+
 ## Bring Radiate in gradually
 
 Radiate writes to radiator valves and switches an oil boiler, so it starts cautiously.
@@ -109,6 +117,107 @@ schedules:
     weekend: "08:00/20 22:30/16"
 ```
 
+If a [household](#household) section covers every room, you don't need a `schedules` section.
+
+### household
+
+Instead of writing schedules, you can describe the people in the house and how each room is used. Radiate builds an ordinary weekly schedule for every room listed under `household.rooms`, so the schedule mirror, the web UI and Home Assistant work the same way. A full example is [`examples/household.yaml`](../examples/household.yaml).
+
+```yaml
+household:
+  temperatures:               # house-wide, °C; these are the defaults
+    in_use: 19
+    occasional: 16
+    unused: 14
+    night: 14
+  people:
+    early_riser:
+      name: Early riser       # shown in the UI only
+      weekdays:
+        up: "06:30"
+        out: "07:30-18:00"
+        bed: "22:30"
+      weekend:
+        up: "08:30"
+        out: "10:00-18:00"
+        bed: "22:30"
+    home_worker:
+      weekdays:
+        up: "08:00"
+        work: "08:00-18:00"
+        bed: "22:30"
+  rooms:
+    bedroom_1:
+      use: in_use
+      kind: bedroom
+      people: [early_riser, home_worker]
+    bedroom_3:
+      use: in_use
+      kind: office
+      people: [home_worker]
+    kitchen:
+      use: in_use
+    lounge:
+      use: unused
+    toilet:
+      use: {weekdays: unused, weekend: occasional}
+      kind: all_day
+      temperature: 15
+```
+
+Put times in quotes. YAML reads an unquoted `22:30` as a number, and Radiate reports it.
+
+`temperatures` sets one temperature for each use level, and the night temperature every room drops to overnight. Values are 4 to 35 °C and are rounded to 0.5 °C. Below 12 °C, `check-config` notes that walls and window frames can get damp.
+
+`people` maps a person ID (lower case letters, digits and `_`) to their routine:
+
+| Key | Meaning |
+|---|---|
+| `name` | Display name, shown in the UI only |
+| `weekdays` | Required. The routine for Monday to Friday |
+| `weekend` | The routine for Saturday and Sunday. Defaults to the weekday routine |
+
+Each routine has these keys:
+
+| Key | Meaning |
+|---|---|
+| `up` | Required. When the person gets up, `HH:MM` |
+| `bed` | Required. When they go to bed, after `up` on the same day. `24:00` is allowed |
+| `out` | When they're out of the house: one `HH:MM-HH:MM` window or a list of them |
+| `work` | When they work from home, in the same form. Link them to an office room |
+
+`out` and `work` windows must fall between `up` and `bed` and must not overlap.
+
+`rooms` maps a room ID from the `rooms` section to how it's used:
+
+| Key | Meaning |
+|---|---|
+| `use` | Required. The use level: `in_use`, `occasional` or `unused`. For a different level at weekends, write `{weekdays: unused, weekend: occasional}` |
+| `kind` | `shared` (the default), `bedroom`, `office` or `all_day` |
+| `people` | The person IDs who use the room. Required for a bedroom or an office. Defaults to everyone |
+| `temperature` | Replaces the use level's temperature in this room only |
+
+A room in `household.rooms` can't also set `schedule` in the `rooms` section. Rooms not listed keep their `schedule`. A passive room has no valve, so it can't be listed.
+
+#### How schedules are built
+
+Radiate works out when each room is in use, for weekdays and for the weekend:
+
+- A `bedroom` is in use for the first 30 minutes after each of its people gets up, and for the last 30 minutes before they go to bed.
+- An `office` is in use during its people's `work` hours.
+- A `shared` room is in use while any of its people is up, at home and not working. It's also in use for the first 30 minutes after they get up, even if they then go out or start work.
+- An `all_day` room is in use from the first of its people getting up until the last goes to bed, whether or not anyone is at home.
+- An `unused` room is never in use.
+
+Then:
+
+1. Each period of use starts 30 minutes early, so the room is warm in time.
+2. Periods 30 minutes or less apart join into one.
+3. During those periods the room gets its use level's temperature, or its own `temperature`. Outside them it gets the unused temperature between the first person getting up and the last going to bed, and the night temperature overnight.
+4. The TRVZB holds six changes a day. If a day needs more, Radiate drops the shortest warm periods until it fits, and `check-config` and `radiate schedules` say which periods were dropped.
+
+With the example above, the kitchen is at 19 °C from 06:00 to 08:30 and from 17:30 to 22:30 on weekdays, and 14 °C the rest of the time. Run `radiate schedules` to see every room.
+
 ### balancing
 
 A top-level key, default `true`. Set `balancing: false` to open every heating valve fully instead of sharing flow between them. The boiler guards, optimum start and learning still run. It exists to compare against balancing, for example in the simulator.
@@ -123,7 +232,7 @@ A top-level key, default `true`. Set `balancing: false` to open every heating va
 | `trv` | Zigbee2MQTT name of the TRVZB |
 | `sensor` | Zigbee2MQTT name of the room temperature sensor |
 | `window` | Zigbee2MQTT name of a contact sensor. `contact: false` means open |
-| `schedule` | Name of a schedule. Defaults to `default`, so every room except a `passive` one needs a schedule of that name or its own `schedule` key |
+| `schedule` | Name of a schedule. Defaults to `default`, so every room except a `passive` one needs a schedule of that name, its own `schedule` key, or an entry in `household.rooms` |
 | `heat_source` | `episodic` (open fire, wood burner) or `continuous` (range cooker) |
 | `humidity` | `true` to use the sensor's humidity for shower detection |
 | `actuate` | `true` to let Radiate write to this room's TRV |

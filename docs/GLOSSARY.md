@@ -66,6 +66,36 @@ Code: `HeatSource`, config key `rooms[].heat_source`.
 Temperature outside the house, from an optional sensor. The core assumes 5 °C when there is no reading.
 Symbol `T_out`, °C. Code: `Snapshot.outdoor`, config key `house.outdoor_sensor`.
 
+## Household
+
+**Household**:
+The people who live in the house, their routines, and how each room is used. Radiate compiles it into one weekly schedule per room, so nothing downstream of the schedule changes.
+Code: `Household`, `compile_household` in `radiate.config.household`, config key `household`.
+
+**Person**:
+Someone who lives in the house. Has an ID, a display name shown only in the UI, and a routine for weekdays and one for the weekend.
+Code: `Person`, config key `household.people`.
+
+**Routine**:
+When a person gets up, is out, works from home, and goes to bed, on weekdays or at the weekend.
+Code: `Routine` (`up_min`, `bed_min`, `out`, `work`), config keys `household.people.<id>.weekdays` and `.weekend`.
+
+**Use level**:
+How much a room is used: in use, occasional or unused. Each level has one house-wide temperature, 19, 16 and 14 °C by default. A room's level can differ at weekends.
+Code: `UseLevel`, `Temperatures`, config keys `household.rooms.<id>.use` and `household.temperatures`.
+
+**Night temperature**:
+The temperature every room in a household drops to overnight, from the last person going to bed until shortly before the first gets up. 14 °C by default.
+°C. Code: `Temperatures.night_c`, config key `household.temperatures.night`.
+
+**Room kind**:
+How a household room's people use it, which decides when it is warm: `shared` (while any of its people is at home, up and not working), `bedroom` (getting up and going to bed), `office` (working hours) or `all_day` (from the first person up to the last in bed).
+Code: `RoomKind`, `RoomLink.kind`, config key `household.rooms.<id>.kind`. The room's people are `RoomLink.people`.
+
+**Away**:
+A person treated as not at home, so their part of every routine is dropped when compiling. Only the compiler's `away` argument exists so far; presence from Home Assistant and an away control are not built.
+Code: `compile_household(away=...)`.
+
 ## Valve actuation
 
 **Actuation**:

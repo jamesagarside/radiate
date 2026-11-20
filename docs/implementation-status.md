@@ -10,9 +10,9 @@ Last audit: November 2026, against `main` at `c4657fe`.
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 97 |
+| Done | 82 | 98 |
 | Partial | 26 | 26 |
-| Missing | 37 | 25 |
+| Missing | 37 | 26 |
 
 Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat); boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck-valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score.
 
@@ -191,7 +191,9 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Why the burner is on | done | `web/app.js` `statusLine` | Names burn extensions ("Topping up") and heat sinks separately, from `rooms[].extend` |
 | Setpoint control and hold | done | `web/app.js`, `server/bridge.py` | Stepper per room, 0.5 °C steps, 5 to 28 °C; shows the hold and resumes the schedule. Server and demo |
 | Daily accounting and stuck valves in the UI | done | `web/app.js` | Burner hours and starts today, yesterday's balance score ("Not a full day of data" for a partial day), a line on a room whose valve may be stuck |
-| Setup wizard | missing | | Proposed in [household setup](proposals/household-setup.md) |
+| Household compiler | done | `config/household.py`, `config/site.py`, `radiate schedules` | People, routines, use levels and room links in the `household` section compile to one `WeekSchedule` per room. Fixed 30-minute preheat; learned arrival lags not fed in yet. See [household setup](proposals/household-setup.md) |
+| Setup wizard and week view | missing | | Proposed in [household setup](proposals/household-setup.md). The wizard writes the `household` section |
+| Away | missing | | The compiler takes the people who are away; presence from Home Assistant `person` entities, an away control and away state in the server are not built |
 | Home Assistant dashboard | done | `export/dashboard.py`, `radiate dashboard` | Built-in Lovelace cards from the house file. Rooms view: trends over `--hours`, humidity, valve control and activity, batteries. Analysis view: a date picker over long-term statistics, per-room min, mean and max. Reads Zigbee2MQTT entities, and by default the integration's too: boiler state and its timeline, alerts, today's burner hours and starts, the heating mode with buttons to change it, the hot-water store and boost with a boost button, each room's climate entity, opening limit and fire switch. `--no-radiate` leaves the integration out |
 
 ## 11. Simulator
