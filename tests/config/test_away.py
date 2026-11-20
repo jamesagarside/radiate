@@ -12,10 +12,13 @@ from radiate.config.away import (
     RETURN_LEAD_S,
     AwayStatus,
     Presence,
+    Return,
     effective_away,
     everyone_away,
     local_iso,
+    next_return,
     parse_local,
+    stale,
     status,
     tidy,
 )
@@ -72,6 +75,39 @@ def test_presence_takes_over_when_away_until_ends():
     assert status(p, NOW + 2 * H - RETURN_LEAD_S).reason == "presence"
 
 
+def test_stale_presence_counts_as_unknown():
+    p = Presence(state=NOT_HOME, since=NOW - 5 * H, reported_at=NOW)
+    limit = 60 * 60.0
+    assert status(p, NOW + limit, stale_s=limit).away
+    assert not stale(p, NOW + limit, limit)
+    assert stale(p, NOW + limit + 1, limit)
+    assert status(p, NOW + limit + 1, stale_s=limit) == AwayStatus(False)
+    # Off (None or 0), or never reported: the change time stands in for the report.
+    assert status(p, NOW + 9 * H, stale_s=0).away
+    assert status(p, NOW + 9 * H).away
+    assert stale(Presence(state=NOT_HOME, since=NOW), NOW + limit + 1, limit)
+    # An away until is the person's own word: presence going stale does not touch it.
+    both = Presence(away_until=NOW + 9 * H, set_at=NOW, state=NOT_HOME, since=NOW)
+    assert status(both, NOW + 2 * H, stale_s=limit).reason == "away_until"
+
+
+def test_next_return_is_the_earliest_away_until():
+    presence = {
+        "a": Presence(away_until=NOW + 9 * H, set_at=NOW),
+        "b": Presence(away_until=NOW + 4 * H, set_at=NOW),
+        "c": Presence(away_until=NOW + 4 * H, set_at=NOW),
+        "d": Presence(state=NOT_HOME, since=NOW - 9 * H),  # presence gives no return time
+    }
+    assert next_return(("a", "b", "c", "d"), presence, NOW, lead_s=0) == Return(
+        NOW + 4 * H, frozenset({"b", "c"})
+    )
+    # With a lead, the return is when they stop counting as away.
+    assert next_return(("a",), presence, NOW, lead_s=1800).at == NOW + 9 * H - 1800
+    assert next_return(("d",), presence, NOW) is None
+    # Once it has started counting down to the return, it is no longer away until.
+    assert next_return(("b",), presence, NOW + 4 * H, lead_s=0) is None
+
+
 def test_tidy_clears_ended_away_until():
     p = Presence(away_until=NOW + H, set_at=NOW)
     assert tidy(p, NOW + H - 1) is p
@@ -117,8 +153,19 @@ def _house(**over) -> dict:
 
 
 def test_presence_delay_setting():
-    assert parse_site(_house()).household.presence_delay_min == 60
-    assert parse_site(_house(presence_delay_min=15)).household.presence_delay_min == 15
+    assert parse_site(_house()).household.away.presence_delay_min == 60
+    site = parse_site(_house(away={"presence_delay_min": 15}))
+    assert site.household.away.presence_delay_min == 15
     with pytest.raises(ConfigError) as exc:
-        parse_site(_house(presence_delay_min=1000))
-    assert "household.presence_delay_min: must be 0 to 720" in exc.value.problems
+        parse_site(_house(away={"presence_delay_min": 1000}))
+    assert (
+        "household.away.presence_delay_min: must be whole minutes, 0 to 720" in exc.value.problems
+    )
+
+
+def test_presence_delay_moved_into_away():
+    with pytest.raises(ConfigError) as exc:
+        parse_site(_house(presence_delay_min=15))
+    assert exc.value.problems == [
+        "household.presence_delay_min: moved: set it as household.away.presence_delay_min"
+    ]

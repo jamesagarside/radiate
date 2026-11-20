@@ -96,20 +96,33 @@ class LiveDriver:
         if rc is None or not rc.controllable:
             return None
         t = self._local()
-        _, in_s = self.site.schedule_for(room_id).next_change(t.weekday(), t.hour * 60 + t.minute)
+        week = self.site.live_schedule_for(room_id)
+        _, in_s = week.next_change(t.weekday(), t.hour * 60 + t.minute)
         return in_s - t.second
 
-    def set_household_schedules(self, schedules: dict[str, WeekSchedule]) -> None:
+    def set_household_schedules(
+        self,
+        schedules: dict[str, WeekSchedule],
+        live: dict[str, WeekSchedule] | None = None,
+    ) -> None:
         """Use these weeks for the household's rooms from now on (away changed).
 
-        Snapshots, overrides ending at the next change, the schedule mirror and the
-        Shelly fallback all read the room's week through `site.schedule_for`, so they
-        follow at once. The mirror writes a changed week to the TRV on the next apply,
-        or only logs it in dry run, like every other write.
+        `schedules` are the valve's weeks: the schedule mirror and the Shelly fallback
+        read them through `site.schedule_for`. `live` are the weeks Radiate follows:
+        snapshots and overrides ending at the next change read them through
+        `site.live_schedule_for`. Without `live`, Radiate follows the valve's weeks.
+        The mirror writes a changed week to the TRV on the next apply, or only logs it
+        in dry run, like every other write.
         """
         known = {rid: week for rid, week in schedules.items() if rid in self.site.devices}
-        merged = {**self.site.household_schedules, **known}
-        self.site = dataclasses.replace(self.site, household_schedules=merged)
+        live_known = {
+            rid: week for rid, week in (live or known).items() if rid in self.site.devices
+        }
+        self.site = dataclasses.replace(
+            self.site,
+            household_schedules={**self.site.household_schedules, **known},
+            household_live={**self.site.household_live, **live_known},
+        )
 
     # --- inbound -----------------------------------------------------------------------
 
@@ -174,7 +187,7 @@ class LiveDriver:
             if rc.id in fire:
                 inp.fire_switch = True
             if rc.controllable:
-                week = self.site.schedule_for(rc.id)
+                week = self.site.live_schedule_for(rc.id)
                 if rc.id in overrides:
                     inp.setpoint = overrides[rc.id]
                 else:

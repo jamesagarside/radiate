@@ -13,20 +13,31 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from radiate import __version__
 from radiate.config.away import (
     AWAY_MAX_DAYS,
     PRESENCE_STATES,
     Presence,
+    Return,
     effective_away,
     everyone_away,
     local_iso,
+    next_return,
+    stale,
     status,
     tidy,
 )
-from radiate.config.household import Household, compile_household
+from radiate.config.household import (
+    CompiledHousehold,
+    EveryoneAway,
+    Household,
+    compile_household,
+    household_view,
+)
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
 from radiate.core.persist import dump_state, load_state
 from radiate.core.types import BoilerState, RoomRole
@@ -51,8 +62,9 @@ class Driver(Protocol):
 
     # Optional: `next_change_s(room_id) -> float | None`, seconds until the room's
     # schedule next changes its setpoint. Without it, overrides last until cleared.
-    # Optional: `set_household_schedules(schedules)`, the household's rooms compiled
-    # again for the people at home; the driver uses them from then on.
+    # Optional: `set_household_schedules(schedules, live=...)`, the household's rooms
+    # compiled again for the people at home: the valve's weeks and the weeks live
+    # control follows. The driver uses them from then on.
 
 
 OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
@@ -105,6 +117,11 @@ class Runtime:
     presence: dict[str, Presence] = field(default_factory=dict)
     away: frozenset[str] = frozenset()  # people who count as away, as last compiled
     everyone_away: bool = False
+    # The next known return while it is within the household's return warm-up.
+    returning: Return | None = None
+    _compiled: dict[frozenset[str], CompiledHousehold] = field(default_factory=dict)
+    _stale: frozenset[str] = frozenset()  # people whose presence has gone stale
+    _return_logged: float | None = None
     _saved_at: float | None = None
     _away_log: list[Reason] = field(default_factory=list)  # for the exporter, next tick
     _alert_keys: set[tuple[str, str | None, str]] = field(default_factory=set)
@@ -254,15 +271,44 @@ class Runtime:
     def people(self) -> tuple[str, ...]:
         return tuple(p.id for p in self.household.people) if self.household else ()
 
+    def _frost_hold(self) -> bool:
+        """Everyone away holds the house at frost: the household says so, mode is auto."""
+        return (
+            self.mode is Mode.AUTO
+            and self.everyone_away
+            and self.household is not None
+            and self.household.away.everyone_away is EveryoneAway.FROST
+        )
+
     def effective_mode(self) -> Mode:
         """The mode the core runs in: frost while everyone is away, if the mode is auto.
 
         The user's chosen mode is never changed, so `off` and `frost` still win, and
-        auto comes back by itself when someone is home or due back.
+        auto comes back by itself when someone is home. Within the return warm-up
+        before someone is due back the core runs in auto, with every room still held
+        at frost until the return, so optimum start can warm the house for it.
         """
-        if self.mode is Mode.AUTO and self.everyone_away:
+        if self._frost_hold() and self.returning is None:
             return Mode.FROST
         return self.mode
+
+    # Settings, in the units the away functions take.
+
+    def _delay_s(self) -> float:
+        return self.household.away.presence_delay_min * 60.0 if self.household else 0.0
+
+    def _lead_s(self) -> float:
+        return self.household.return_lead_min() * 60.0 if self.household else 0.0
+
+    def _stale_s(self) -> float | None:
+        if self.household is None:
+            return None
+        return self.household.away.presence_stale_after_min * 60.0 or None
+
+    def _compile(self, away: frozenset[str]) -> CompiledHousehold:
+        if away not in self._compiled:
+            self._compiled[away] = compile_household(self.household, away=away)
+        return self._compiled[away]
 
     def _person(self, person_id: str) -> Presence:
         if person_id not in self.people:
@@ -306,7 +352,9 @@ class Runtime:
         now = self._wall()
         if since is None:
             since = p.since if state == p.state and p.since is not None else now
-        self._put_presence(person_id, replace(p, state=state, since=min(since, now)))
+        # Every report, a repeat included, refreshes the presence (the heartbeat).
+        fresh = replace(p, state=state, since=min(since, now), reported_at=now)
+        self._put_presence(person_id, fresh)
 
     def _update_away(self) -> None:
         """Tidy away state, then recompile the household if who is away changed."""
@@ -317,16 +365,27 @@ class Runtime:
         if tidied != self.presence:
             self.presence = {pid: p for pid, p in tidied.items() if not p.empty}
             self._save_away()
-        away = effective_away(
-            self.people, self.presence, now, self.household.presence_delay_min * 60.0
-        )
+        delay_s, lead_s, stale_s = self._delay_s(), self._lead_s(), self._stale_s()
+        away = effective_away(self.people, self.presence, now, delay_s, lead_s, stale_s)
         reasons: list[Reason] = []
+        gone_stale = frozenset(
+            pid for pid, p in self.presence.items() if p.state and stale(p, now, stale_s)
+        )
+        if gone_stale - self._stale:
+            minutes = self.household.away.presence_stale_after_min
+            # Counts only: names are shown in the UI, never logged or exported.
+            message = (
+                f"Presence for {len(gone_stale - self._stale)} of {len(self.people)} people "
+                f"not reported for {minutes} min: treated as unknown, not away"
+            )
+            reasons.append(Reason("away.presence_stale", message))
+        self._stale = gone_stale
         if away != self.away:
             self.away = away
-            compiled = compile_household(self.household, away=away)
+            compiled = self._compile(away)
             setter = getattr(self.driver, "set_household_schedules", None)
             if callable(setter):
-                setter(compiled.schedules)
+                setter(compiled.schedules, live=compiled.live)
             # Counts only: names are shown in the UI, never logged or exported.
             reasons.append(
                 Reason(
@@ -349,6 +408,17 @@ class Runtime:
             else:
                 message = f"Everyone is away; the heating mode stays {self.mode.value}"
                 reasons.append(Reason("away.everyone", message))
+        ret = next_return(self.people, self.presence, now, lead_s) if away else None
+        warmup_s = self.household.away.return_warmup_min * 60.0
+        self.returning = ret if ret is not None and ret.at - now <= warmup_s else None
+        if self.returning is not None and self._return_logged != self.returning.at:
+            self._return_logged = self.returning.at
+            due = local_iso(self.returning.at, self.timezone)[11:16]
+            message = f"Someone is due back at {due}: rooms may start warming up for it"
+            if self._frost_hold():
+                message = f"Everyone is away and someone is due back at {due}: rooms held at "
+                message += "frost protection until then, warming up in time for it"
+            reasons.append(Reason("away.return", message))
         clock = self.driver.clock()
         for r in reasons:
             self._log(clock, r)
@@ -363,6 +433,7 @@ class Runtime:
                 "set_at": p.set_at,
                 "state": p.state,
                 "since": p.since,
+                "reported_at": p.reported_at,
             }
             for pid, p in self.presence.items()
         }
@@ -390,6 +461,7 @@ class Runtime:
                 set_at=set_at if manual else None,
                 state=state if seen else None,
                 since=since if seen else None,
+                reported_at=num(item.get("reported_at")) if seen else None,
             )
             if not p.empty:
                 self.presence[pid] = p
@@ -397,8 +469,7 @@ class Runtime:
     def person_view(self, person_id: str, now: float | None = None) -> dict:
         now = self._wall() if now is None else now
         p = self.presence.get(person_id, Presence())
-        delay_s = self.household.presence_delay_min * 60.0 if self.household else 0.0
-        st = status(p, now, delay_s)
+        st = status(p, now, self._delay_s(), self._lead_s(), self._stale_s())
         person = next((x for x in self.household.people if x.id == person_id), None)
         name = person.name if person and person.name else person_id.replace("_", " ").capitalize()
         return {
@@ -409,7 +480,12 @@ class Runtime:
             "until": None if p.away_until is None else local_iso(p.away_until, self.timezone),
             "presence": None
             if p.state is None or p.since is None
-            else {"state": p.state, "since": local_iso(p.since, self.timezone)},
+            else {
+                "state": p.state,
+                "since": local_iso(p.since, self.timezone),
+                # Not reported for the stale limit: treated as unknown, not away.
+                "stale": stale(p, now, self._stale_s()),
+            },
         }
 
     def away_view(self) -> dict:
@@ -420,18 +496,65 @@ class Runtime:
                 "everyone": False,
                 "frost": False,
                 "presence_delay_min": None,
+                "return": None,
                 "today": None,
                 "people": [],
             }
         now = self._wall()
+        ret = self.returning
         return {
             "everyone": self.everyone_away,
             # Everyone away is holding the house at frost protection right now.
             "frost": self.effective_mode() is not self.mode,
-            "presence_delay_min": self.household.presence_delay_min,
+            "presence_delay_min": self.household.away.presence_delay_min,
+            # The next known return, while rooms may warm up for it.
+            "return": None if ret is None else {"at": local_iso(ret.at, self.timezone)},
             "today": local_iso(now, self.timezone)[:10],
             "people": [self.person_view(pid, now) for pid in self.people],
         }
+
+    def _apply_return(self, snap: Snapshot) -> None:
+        """Make a return within the warm-up a scheduled change, for optimum start.
+
+        At the return, each household room's setpoint becomes what its live schedule
+        says with the returning people at home. The core sees that as the room's next
+        setpoint and starts heating as early as its learned heating rate and arrival lag
+        need, up to the return warm-up. While everyone away holds frost, every room is
+        held at the frost threshold until then, so nothing heats early unless optimum
+        start says it must. The boiler guards and frost protection apply as always.
+        """
+        ret = self.returning
+        if ret is None or self.household is None or snap.mode is not Mode.AUTO:
+            return
+        in_s = ret.at - self._wall()
+        if in_s <= 0:
+            return
+        live = self._compile(self.away - ret.people).live
+        local = datetime.fromtimestamp(ret.at, ZoneInfo(self.timezone))
+        weekday, minute = local.weekday(), local.hour * 60 + local.minute
+        hold = self._frost_hold()
+        horizon_s = self.household.away.return_warmup_min * 60.0
+        for rc in self.cfg.rooms:
+            inp = snap.rooms.get(rc.id)
+            if not rc.controllable or inp is None:
+                continue
+            week = live.get(rc.id)
+            if week is not None:
+                due = week.setpoint_at(weekday, minute)
+            elif inp.next_setpoint_in_s is not None and inp.next_setpoint_in_s <= in_s:
+                due = inp.next_setpoint  # a hand-written schedule: what it says then
+            else:
+                due = inp.setpoint
+            if hold:
+                inp.setpoint = self.cfg.boiler.frost_c
+            elif week is None or rc.id in self.overrides:
+                continue
+            elif inp.next_setpoint_in_s is not None and inp.next_setpoint_in_s <= in_s:
+                continue  # the schedule changes first: optimum start works towards that
+            if due is None or due == inp.setpoint:
+                continue
+            inp.next_setpoint, inp.next_setpoint_in_s = due, in_s
+            inp.preheat_max_s = horizon_s
 
     async def step(self) -> Actions:
         now = self.driver.clock()
@@ -440,6 +563,7 @@ class Runtime:
         snap = await self.driver.snapshot(
             self.effective_mode(), self.overrides, now < self.store_boost_until, self.fire
         )
+        self._apply_return(snap)
         actions = decide(self.cfg, snap, self.state)
         await self.driver.apply(actions)
         driver_alerts = getattr(self.driver, "alerts", None)
@@ -525,6 +649,9 @@ class Runtime:
             # The household's people, for clients that show them or map them to
             # Home Assistant `person` entities. Empty without a household.
             "people": [{"id": p["id"], "name": p["name"]} for p in self.away_view()["people"]],
+            # Every household setting with its default filled in, and the allowed
+            # ranges, for a setup wizard. None without a household.
+            "household": household_view(self.household) if self.household else None,
         }
 
     def describe(self) -> dict:
