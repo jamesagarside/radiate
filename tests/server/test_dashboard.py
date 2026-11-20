@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REFERENCE = ROOT / "examples" / "reference-house.yaml"
 STRINGS = ROOT / "custom_components" / "radiate" / "strings.json"
 ENV = {"RADIATE_MQTT_PASSWORD": "x", "RADIATE_SHELLY_PASSWORD": "x"}
-ENTITY = re.compile(r"^(sensor|climate|binary_sensor|switch)\.[a-z0-9_]+$")
+ENTITY = re.compile(r"^(sensor|climate|binary_sensor|switch|select)\.[a-z0-9_]+$")
 
 
 def _sections(view=0, **kwargs):
@@ -121,6 +121,9 @@ def test_radiate_house_section_shows_boiler_history_today_mode_and_boost():
         "sensor.radiate_alerts",
         "sensor.radiate_burner_hours_today",
         "sensor.radiate_starts_today",
+        "select.radiate_heating_mode",
+        "binary_sensor.radiate_hot_water_store",
+        "binary_sensor.radiate_hot_water_boost",
     ]
     (history,) = [c for c in cards if c["type"] == "history-graph"]
     assert history["entities"] == [{"entity": "sensor.radiate_boiler_state", "name": "Boiler"}]
@@ -135,6 +138,31 @@ def test_radiate_house_section_shows_boiler_history_today_mode_and_boost():
     assert all(a["action"] == "perform-action" for a in actions)
     # Only turning the heating off asks first.
     assert [("confirmation" in a) for a in actions] == [False, False, True, False]
+
+
+def test_mode_tile_shows_the_mode_and_the_buttons_change_it():
+    _, sections = _sections()
+    cards = _room(sections, "Radiate")["cards"]
+    names = [c.get("heading") or c.get("name") for c in cards]
+    mode = names.index("Heating mode")
+    assert names[mode : mode + 5] == ["Heating mode", "Mode", "Auto", "Frost", "Off"]
+    tile = cards[mode + 1]
+    assert tile["entity"] == "select.radiate_heating_mode"
+    # No select-options feature: it would turn the heating off without asking.
+    assert "features" not in tile
+    assert "icon" not in tile  # the integration's icon follows the mode
+
+
+def test_store_state_sits_next_to_the_boost_button():
+    _, sections = _sections()
+    cards = _room(sections, "Radiate")["cards"]
+    names = [c.get("heading") or c.get("name") for c in cards]
+    water = names.index("Hot water")
+    assert names[water:] == ["Hot water", "Store", "Boost", "Boost hot water for 1 hour"]
+    store, boost = cards[water + 1], cards[water + 2]
+    assert store["entity"] == "binary_sensor.radiate_hot_water_store"
+    assert boost["entity"] == "binary_sensor.radiate_hot_water_boost"
+    assert store["grid_options"] == boost["grid_options"] == {"columns": 6}
 
 
 def test_oil_and_heat_today_need_a_nozzle_rating():
@@ -165,12 +193,28 @@ def test_radiate_entity_ids_match_the_integration_naming():
         radiate_entity("sensor", "opening_limit", room["dining"])
         == "sensor.dining_room_opening_limit"
     )
+    assert radiate_entity("select", "mode") == "select.radiate_heating_mode"
+    assert radiate_entity("binary_sensor", "store") == "binary_sensor.radiate_hot_water_store"
+    assert radiate_entity("binary_sensor", "store_boost") == "binary_sensor.radiate_hot_water_boost"
 
 
 def test_radiate_names_match_the_integration_strings():
     entity = json.loads(STRINGS.read_text())["entity"]
     for (platform, key), name in RADIATE_NAMES.items():
         assert entity[platform][key]["name"] == name, (platform, key)
+
+
+def test_every_radiate_house_entity_on_the_dashboard_is_named():
+    # House entities come from RADIATE_NAMES, so the check above covers their names.
+    site = load_site(REFERENCE, env=ENV)
+    named = {radiate_entity(platform, key) for platform, key in RADIATE_NAMES}
+    shown = {e for e in _entities(build_dashboard(site)) if e.split(".")[1].startswith("radiate_")}
+    assert shown and shown <= named
+    assert {
+        "select.radiate_heating_mode",
+        "binary_sensor.radiate_hot_water_store",
+        "binary_sensor.radiate_hot_water_boost",
+    } <= shown
 
 
 def test_heat_sources_are_named_in_words():

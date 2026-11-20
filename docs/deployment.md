@@ -226,6 +226,9 @@ Rooms Radiate cannot control, such as a bypass radiator, get a temperature senso
 For the house:
 
 - Boiler state, boiler firing, starts in the last hour, predicted burn and outdoor temperature.
+- Heating mode (`select.radiate_heating_mode`): **Auto**, **Frost** or **Off**. Choosing an option sets the mode, as `radiate.set_mode` does.
+- Hot-water store (`binary_sensor.radiate_hot_water_store`): on while the store relay is on, in a store window or during a boost. The relay enables the store; the boiler's own thermostat decides when it heats.
+- Hot-water boost (`binary_sensor.radiate_hot_water_boost`): on while a boost from `radiate.boost_store` runs.
 - Short-cycle extra off time, in minutes. Radiate adds this to the minimum off time for 24 hours after it sees short-cycling. Attributes give the hours left and the effective minimum off.
 - Burner hours today and starts today, plus oil used today (litres) and heat delivered today (kWh) when the configuration has a nozzle rating. They reset at local midnight. Until a burner-firing signal exists they count relay time, so litres and kWh are an upper bound.
 - Balance score for yesterday, 0 to 100. It is higher when rooms reached their setpoints closer together.
@@ -257,8 +260,8 @@ The dashboard has two views.
   - The boiler state now and a timeline of it over the live window, so you can see when the boiler fired.
   - The number of alerts.
   - Burner hours and starts today. With a nozzle rating (`boiler.nozzle_lph`), oil used and heat delivered today too.
-  - **Auto**, **Frost** and **Off** buttons for the heating mode. **Off** asks you to confirm. The integration has no entity for the mode, so the buttons don't show which one is on.
-  - **Boost hot water for 1 hour**, which runs the hot-water store for 60 minutes outside its windows.
+  - The current heating mode, with **Auto**, **Frost** and **Off** buttons to change it in one tap. **Off** asks you to confirm.
+  - Whether the hot-water store and a boost are on, above **Boost hot water for 1 hour**, which runs the store for 60 minutes outside its windows.
 - One section per room: humidity and dew point beside the room name, the temperature with a trend line, Radiate's heating control with its target temperature, the opening limit Radiate set for the valve, and the valve's activity (its reading against its target, with the time it was calling for heat shaded). Change a room's temperature on the heating control: it sets an override that ends at the room's next scheduled change. A room with an open fire has a **Fire lit** switch. A room with an open fire or range cooker says so under its name. An internal-sensor room shows the valve's own reading. A bypass radiator has no heating control.
 - A **Batteries** section listing every sensor and valve.
 

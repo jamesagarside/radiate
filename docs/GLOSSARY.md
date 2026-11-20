@@ -384,11 +384,11 @@ Code: `frost`, `hard_frost` in `decide`.
 
 **Mode**:
 The house-wide heating mode: `auto` (follow schedules), `frost` (hold every room at the frost threshold), or `off` (no heating, frost protection still active).
-Code: `Mode`, API `POST /api/v1/mode`, HA service `radiate.set_mode`.
+Code: `Mode`, API `POST /api/v1/mode`, HA service `radiate.set_mode`, HA select `mode`.
 
 **Store**:
 The hot-water store inside the boiler, enabled by its own relay channel on a schedule.
-Code: `StoreConfig`, `Snapshot.store_relay`, `Actions.store_relay`.
+Code: `StoreConfig`, `Snapshot.store_relay`, `Actions.store_relay`, HA binary sensor `store`.
 _Avoid_: tank, cylinder, DHW.
 
 **Store window**:
@@ -397,7 +397,7 @@ Code: `StoreConfig.windows`, config key `store.windows`.
 
 **Store boost**:
 The store relay turned on outside its windows for a set time, 60 minutes by default.
-Code: `Snapshot.store_boost`, `Runtime.store_boost_until`, API `POST /api/v1/store/boost`, HA service `radiate.boost_store`.
+Code: `Snapshot.store_boost`, `Runtime.store_boost_until`, API `POST /api/v1/store/boost`, HA service `radiate.boost_store`, HA binary sensor `store_boost`.
 
 **Store recovery**:
 The period after the store relay turns on when the boiler heats the store first and radiators get no flow (hot-water priority). Heat availability is 0 and learning is gated.

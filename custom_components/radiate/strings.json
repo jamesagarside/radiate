@@ -30,11 +30,23 @@
   "entity": {
     "binary_sensor": {
       "boiler_firing": { "name": "Boiler firing" },
+      "store": { "name": "Hot-water store" },
+      "store_boost": { "name": "Hot-water boost" },
       "fire": { "name": "Fire detected" },
       "valve_untrusted": { "name": "Stuck valve" }
     },
     "climate": {
       "room": { "name": "Heating" }
+    },
+    "select": {
+      "mode": {
+        "name": "Heating mode",
+        "state": {
+          "auto": "Auto",
+          "frost": "Frost",
+          "off": "Off"
+        }
+      }
     },
     "sensor": {
       "temperature": { "name": "Temperature" },

@@ -161,6 +161,7 @@ Top remaining gaps, most important first:
 | HA: boiler state, starts | done | `custom_components/radiate/sensor.py` | Starts today and in the last hour; relay starts, not physical burner starts |
 | HA: burner hours, litres today, balance score | done | `custom_components/radiate/sensor.py` | Burner hours, starts, litres and kWh today (`total_increasing`, reset at local midnight; litres and kWh only with a nozzle rating) and yesterday's balance score |
 | HA: stuck valve, short-cycling, alerts | done | `custom_components/radiate/binary_sensor.py`, `sensor.py` | Problem binary sensor per room from `valve.untrusted`; short-cycle extra off time; alert count with codes and messages from `alert_details`. No repairs issues |
+| HA: heating mode select, hot-water store and boost | done | `custom_components/radiate/select.py`, `binary_sensor.py` | Select posts `mode`; binary sensors from `store.relay` and `store.boost`, no device class. The server reports no boost end time |
 | HA services `boost_store`, `set_mode` | done | `custom_components/radiate/__init__.py` | |
 | HA services `set_override`, `clear_override` | done | `custom_components/radiate/climate.py` | Entity services on Radiate climate entities; `until` and `duration_min` as in `POST /rooms/{id}/setpoint` |
 | HA service `recalibrate_valve` | missing | | |
@@ -191,7 +192,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Setpoint control and hold | done | `web/app.js`, `server/bridge.py` | Stepper per room, 0.5 °C steps, 5 to 28 °C; shows the hold and resumes the schedule. Server and demo |
 | Daily accounting and stuck valves in the UI | done | `web/app.js` | Burner hours and starts today, yesterday's balance score ("Not a full day of data" for a partial day), a line on a room whose valve may be stuck |
 | Setup wizard | missing | | Proposed in [household setup](proposals/household-setup.md) |
-| Home Assistant dashboard | done | `export/dashboard.py`, `radiate dashboard` | Built-in Lovelace cards from the house file. Rooms view: trends over `--hours`, humidity, valve control and activity, batteries. Analysis view: a date picker over long-term statistics, per-room min, mean and max. Reads Zigbee2MQTT entities, and by default the integration's too: boiler state and its timeline, alerts, today's burner hours and starts, mode buttons, hot-water boost, each room's climate entity, opening limit and fire switch. `--no-radiate` leaves the integration out. It can't show the current mode or store state, because the integration has no entity for either |
+| Home Assistant dashboard | done | `export/dashboard.py`, `radiate dashboard` | Built-in Lovelace cards from the house file. Rooms view: trends over `--hours`, humidity, valve control and activity, batteries. Analysis view: a date picker over long-term statistics, per-room min, mean and max. Reads Zigbee2MQTT entities, and by default the integration's too: boiler state and its timeline, alerts, today's burner hours and starts, the heating mode with buttons to change it, the hot-water store and boost with a boost button, each room's climate entity, opening limit and fire switch. `--no-radiate` leaves the integration out |
 
 ## 11. Simulator
 

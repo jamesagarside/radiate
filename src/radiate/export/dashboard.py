@@ -3,10 +3,10 @@
 `radiate dashboard` turns the house file into a Lovelace dashboard with two views:
 
 - **Rooms**: whole-house history, then a Radiate section (boiler state and its history,
-  alerts, today's burner time and starts, heating mode and hot-water boost), then one
-  section per room with its temperature trend, humidity, Radiate's heating control and
-  opening limit, and valve activity (room against target, heating shaded), then device
-  batteries. The live window is `hours`, set when the dashboard is built.
+  alerts, today's burner time and starts, the heating mode with buttons to change it, and
+  the hot-water store and boost with a boost button), then one section per room with its
+  temperature trend, humidity, Radiate's heating control and opening limit, and valve
+  activity (room against target, heating shaded), then device batteries. The live window is `hours`, set when the dashboard is built.
 - **Analysis**: a date picker (the `energy-date-selection` card) drives every card on the
   view, so the reader chooses the day, week, month or a custom range. Per room it shows
   the lowest, average and highest temperature, a min/mean/max chart and peak humidity,
@@ -80,6 +80,9 @@ RADIATE_NAMES: dict[tuple[str, str], str] = {
     ("sensor", "heat_today"): "Heat delivered today",
     ("sensor", "opening_limit"): "Opening limit",
     ("switch", "fire_switch"): "Fire lit",
+    ("select", "mode"): "Heating mode",
+    ("binary_sensor", "store"): "Hot-water store",
+    ("binary_sensor", "store_boost"): "Hot-water boost",
 }
 
 
@@ -323,8 +326,9 @@ def _button(name: str, icon: str, action: Card, grid: Card = _THIRD) -> Card:
 def _radiate_house(site: SiteConfig, hours: int) -> Card:
     """Boiler now and over the window, alerts, today's burner use, mode and hot water.
 
-    The integration has no entity for the heating mode or the hot-water store, so the
-    mode buttons and the boost call its services and cannot show which mode is on.
+    The mode tile shows which mode is on. Changing it stays one tap on the buttons, which
+    call `radiate.set_mode` so that Off can ask first. A `select-options` feature on the
+    tile would change the mode from a list with no confirmation, so the tile has none.
     """
     boiler = radiate_entity("sensor", "boiler_state")
     cards: list[Card] = [
@@ -349,12 +353,17 @@ def _radiate_house(site: SiteConfig, hours: int) -> Card:
         cards.append(_tile(radiate_entity("sensor", "heat_today"), "Heat today"))
     off = _perform("radiate.set_mode", mode="off")
     off["confirmation"] = {"text": "Turn the heating off? Frost protection stays on."}
+    # The tiles take their icons from the integration (icons.json), which change with
+    # the state: a snowflake in frost, a crossed-out boiler with the store off.
     cards += [
         {"type": "heading", "heading": "Heating mode", "heading_style": "subtitle"},
+        _tile(radiate_entity("select", "mode"), "Mode", _FULL),
         _button("Auto", "mdi:calendar-clock", _perform("radiate.set_mode", mode="auto")),
         _button("Frost", "mdi:snowflake", _perform("radiate.set_mode", mode="frost")),
         _button("Off", "mdi:power", off),
         {"type": "heading", "heading": "Hot water", "heading_style": "subtitle"},
+        _tile(radiate_entity("binary_sensor", "store"), "Store"),
+        _tile(radiate_entity("binary_sensor", "store_boost"), "Boost"),
         _button(
             "Boost hot water for 1 hour",
             "mdi:water-boiler",
