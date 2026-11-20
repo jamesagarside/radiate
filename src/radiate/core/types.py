@@ -67,6 +67,9 @@ class LearningConfig:
     """Room model learning (spec 4.3, 4.6)."""
 
     memory_days: float = 730.0  # RLS memory, in days of learning updates
+    # Learn from the TRV reading while a normal room's own sensor is stale. Off: the
+    # `sensor_stale` gate pauses learning until the sensor is back (spec 4.6).
+    learn_on_trv_fallback: bool = False
 
 
 @dataclass(frozen=True, slots=True)

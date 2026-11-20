@@ -98,6 +98,9 @@ class RoomState:
     valve: ValveCheck = field(default_factory=ValveCheck)  # stuck and leaking valve checks
     rejected: tuple[str, ...] = ()  # TRV settings the device did not accept (reconciler)
     rejected_until: float = -1e12  # learning paused until then (spec 4.6 valve trusted)
+    # A normal room's own sensor is stale and its temperature comes from the TRV, or
+    # did within the slope window: the `sensor_stale` gate holds until then.
+    fallback_until: float = -1e12
 
     @property
     def arrival_lag_s(self) -> float:
@@ -227,6 +230,14 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             rs.rejected_until = now + REJECTED_HOLD_S
         temp = _effective_temperature(rc, inp)
         rs.temperature = temp
+        if (
+            rc.role is RoomRole.NORMAL
+            and temp is not None
+            and (inp.temperature is None or inp.temperature_age_s > ROOM_SENSOR_STALE_S)
+        ):
+            # TRV fallback: keep the gate shut until the slope window holds room
+            # sensor readings only again.
+            rs.fallback_until = now + SLOPE_WINDOW_S
         target = _target(cfg, snap, inp)
         rs.preheating = False
         rs.deadline_s = None
@@ -372,6 +383,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 gate = "valve_rejected"
             elif temp is None or rs.slope is None or delta_out is None:
                 gate = "no_data"
+            elif now < rs.fallback_until and not cfg.learning.learn_on_trv_fallback:
+                # The TRV reads its radiator as much as the room (spec 4.6, 7).
+                gate = "sensor_stale"
             elif not inp.trv_available:
                 gate = "trv_offline"
             elif recovering:
@@ -632,6 +646,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             "shower",
             "cooker_spike",
             "store_recovery",
+            "sensor_stale",
         ):
             reasons.append(
                 Reason(

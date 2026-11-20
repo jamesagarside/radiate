@@ -289,11 +289,14 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
 
 def _learning(ctx: _Ctx, raw: dict) -> LearningConfig:
     p = "learning."
-    ctx.unknown(raw, {"memory_days"}, p)
+    ctx.unknown(raw, {"memory_days", "learn_on_trv_fallback"}, p)
     d = LearningConfig()
     return LearningConfig(
         memory_days=ctx.number(
             raw, "memory_days", d.memory_days, MEMORY_DAYS_MIN, MEMORY_DAYS_MAX, p
+        ),
+        learn_on_trv_fallback=ctx.get(
+            raw, "learn_on_trv_fallback", bool, d.learn_on_trv_fallback, p
         ),
     )
 

@@ -205,8 +205,10 @@ def test_shifted_schedule_stays_in_trvzb_steps():
 
 def test_learning_memory():
     assert parse_site(minimal()).house.learning.memory_days == 730
-    site = parse_site(minimal(learning={"memory_days": 90}))
+    assert parse_site(minimal()).house.learning.learn_on_trv_fallback is False
+    site = parse_site(minimal(learning={"memory_days": 90, "learn_on_trv_fallback": True}))
     assert site.house.learning.memory_days == 90
+    assert site.house.learning.learn_on_trv_fallback is True
     with pytest.raises(ConfigError) as err:
         parse_site(minimal(learning={"memory_days": 0.5, "forget": True}))
     assert "learning.memory_days: must be 1 to 3650" in err.value.problems

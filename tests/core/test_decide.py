@@ -1,3 +1,5 @@
+import dataclasses
+
 from radiate.core import (
     BoilerState,
     EngineState,
@@ -9,6 +11,7 @@ from radiate.core import (
     Snapshot,
     decide,
 )
+from radiate.core.types import LearningConfig
 
 CFG = HouseConfig(
     rooms=(
@@ -115,6 +118,47 @@ def test_stale_room_sensor_falls_back_to_trv():
     acts = drive(st, 2, temps, bed={"temperature_age_s": 3600})
     assert acts.valves["bed"].external_temperature is None
     assert abs(st.rooms["bed"].temperature - (18.5 - 1.5)) < 1e-6
+
+
+def test_stale_room_sensor_pauses_learning():
+    # Spec 4.6: the TRV reads its radiator as much as the room, so a room does not
+    # learn from it while its own sensor is stale, and for one slope window after.
+    st = EngineState.new(CFG)
+    for m in range(30):
+        decide(CFG, _quiet(m, bed_age_s=3600), st)
+    assert st.rooms["bed"].learning_gate == "sensor_stale"
+    assert st.rooms["bed"].est.samples == 0
+    assert st.rooms["lounge"].learning_gate is None and st.rooms["lounge"].est.samples > 0
+    for m in range(30, 44):  # the sensor is back; the slope window still holds TRV values
+        decide(CFG, _quiet(m), st)
+    assert st.rooms["bed"].learning_gate == "sensor_stale"
+    for m in range(44, 46):
+        decide(CFG, _quiet(m), st)
+    assert st.rooms["bed"].learning_gate is None and st.rooms["bed"].est.samples > 0
+
+
+def test_learning_on_the_trv_fallback_is_an_option():
+    cfg = dataclasses.replace(CFG, learning=LearningConfig(learn_on_trv_fallback=True))
+    st = EngineState.new(cfg)
+    for m in range(30):
+        decide(cfg, _quiet(m, bed_age_s=3600), st)
+    assert st.rooms["bed"].learning_gate is None and st.rooms["bed"].est.samples > 0
+
+
+def _quiet(minute: int, bed_age_s: float = 0.0) -> Snapshot:
+    """A steady house at its setpoint that the prior model explains: every gate but
+    the sensor's stays open. The bedroom's TRV reads its room + 1.5 K."""
+    rooms = {
+        rid: RoomInput(
+            temperature=None if rid == "loo" else 16.0,
+            temperature_age_s=bed_age_s if rid == "bed" else 0.0,
+            trv_temperature=17.5,
+            setpoint=16.0,
+            trv_heating=False,
+        )
+        for rid in ("bed", "lounge", "loo", "stairs")
+    }
+    return Snapshot(minute * 60.0, 12 * 60, 5.0, rooms, heating_relay=False, store_relay=False)
 
 
 def test_safe_mode_when_no_trvs():
