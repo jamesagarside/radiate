@@ -113,7 +113,7 @@ The server waits up to 40 seconds for MQTT and the first TRV readings, then runs
 
 - Learned room models, arrival lags, lockshield caps, and the boiler guard. A restart in the middle of a burn still honours the minimum burn time.
 - The house ID used in Elastic exports, so it stays the same across restarts.
-- The heating mode (`auto`, `off`, or `frost`).
+- The heating mode (`auto`, `off`, or `frost`), and the demand mode if you changed it through the API.
 - The Elastic export queue, up to 7 days, so an outage or restart loses no metrics.
 - Setpoint overrides from the UI, the API or the Home Assistant climate entity. An override ends at the room's next scheduled setpoint change unless it was set for a duration or until cleared, and one that ends while Radiate is stopped is dropped on restart.
 - The tick history: every tick's inputs and decisions for the last `house.history_days` days. See [Tick history and replay](#tick-history-and-replay).
@@ -170,7 +170,18 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 
 ### boiler
 
-`min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none). Ranges are checked against spec section 5.1.
+`min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none), `demand_mode` (`eco`), `eco_limit_k` (1.5). Ranges are checked against spec section 5.1.
+
+`demand_mode` decides how calling rooms fire the boiler (spec section 5.3):
+
+| Value | Behaviour |
+|---|---|
+| `eco` (default) | Rooms fire the boiler together. The boiler starts when the calling rooms between them need at least 1.5 minimum burns of full radiator output (each room's gap divided by its learned heating gain), or when one room is more than `eco_limit_k` below its target. A small room on its own, such as a toilet, waits until it is colder or other rooms call too. Fewer, longer burns |
+| `comfort` | Any calling room more than `comfort_limit_k` below its target fires the boiler, as does a predicted burn of 1.5 minimum burns. Rooms stay closer to their targets, with more relay starts |
+
+In both modes frost protection and optimum start still fire the boiler. `eco_limit_k` is the most a calling room waits below its target in `eco` mode: 0.5 to 3 K, and at least `comfort_limit_k`.
+
+You can change the demand mode without a restart through the API (`POST /api/v1/settings` with `{"demand_mode": "comfort"}`). That choice is saved in `radiate.db` and overrides `demand_mode` in this file until you send `{"demand_mode": null}`.
 
 `nozzle_lph` is the burner nozzle rating in litres per hour, from the boiler's service sheet. With it, the daily accounting also estimates litres and kWh. Burner time comes from the heating relay, so the litres are an upper bound.
 
@@ -197,6 +208,15 @@ schedules:
     weekdays: "06:30/20 08:30/16 17:00/20 22:30/16"
     weekend: "08:00/20 22:30/16"
 ```
+
+### learning
+
+How Radiate learns each room's model (spec sections 4.3 and 4.6).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `memory_days` | 730 | How long a room's model remembers, in days of learning, 1 to 3650. A long memory keeps one odd week from moving the model. Radiate also watches each model and re-learns it when a real change shows, such as a radiator bled or replaced, so a long memory doesn't stop it following the house |
+| `learn_on_trv_fallback` | `false` | While a room's own sensor is stale, Radiate uses its TRV reading plus `trv_bias_k`. With `false` it doesn't learn from that reading, because the TRV sits beside the radiator. Set `true` to keep learning |
 
 ### balancing
 

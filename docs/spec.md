@@ -1,6 +1,6 @@
 # Radiate specification
 
-Version 0.2, 19 November 2026. Status: checked against the code at commit `925b7a1`; describes what is built and marks what is still planned.
+Version 0.3, 20 November 2026. Status: checked against the code at commit `925b7a1`, then updated with the owner's decisions on learning memory, pooled demand and stale room sensors (section 13); describes what is built and marks what is still planned.
 
 Decisions this builds on: [ADR-0001](adr/0001-standalone-vs-vtherm-companion.md) (standalone), [ADR-0002](adr/0002-deployment-topology.md) (one engine, three editions). Prior art: [coverage matrix](research/coverage-matrix.md).
 
@@ -12,8 +12,8 @@ How to read this page:
 
 - Text without a marker describes the code.
 - **Not yet implemented** marks something planned and not built. Each one links to its section of [implementation status](implementation-status.md).
-- **Open question** marks a behaviour choice for the owner, where the spec and the code disagree and neither is clearly right.
-- Section 13 lists what changed in this revision to match the code.
+- **Open question** marks a behaviour choice for the owner, where the spec and the code disagree and neither is clearly right. None is open in version 0.3.
+- Section 13 lists what changed in this revision.
 
 ---
 
@@ -129,7 +129,13 @@ from burns with few versus many valves open. `η_r ≥ 0.5` means flow-limited (
 
 Online recursive least squares (RLS) per room, parameters `θ_r = [a_r, b_r, d_r]`, regressors `[drive, −(T − T_out), 1]`, target the smoothed `dT/dt`: a least-squares slope over the last 15 min of room temperatures, needing at least 10 min and four readings.
 
-- **Forgetting factor** `λ = 1 − 1/2000`, so the memory is about 2,000 learning updates, one per ungated minute tick: roughly 33 hours of learning. An anti-windup step stops the covariance growing beyond its prior while the input is not exciting. **Open question:** this section aimed at a memory of about 3 days of heating, so seasonal drift is tracked but a single odd day is not, and the code comment also says about 3 days. The value in the code gives about a day and a half. Which memory is wanted?
+- **Memory:** long, set by `learning.memory_days` (1 to 3650, default 730). Learning updates come one per ungated minute tick, so the forgetting factor is `λ = 1 − 1/(memory_days × 1440)`: two years of learning by default, two heating seasons, so an odd week barely moves a model. An anti-windup step stops the covariance growing beyond its prior while the input is not exciting. On 36 days of simulator inputs, the median room's heating gain stays within a range of 2 % of its value with this memory (12 % at worst, the kitchen), against 11 % (36 %) with the 33-hour memory used before. In a 5-day run from priors the long memory costs some comfort while the first days are still in the model (see [simulation](simulation.md#learning-memory-and-change-detection)).
+- **Change detection:** a long memory alone would take months to follow a real change, such as a radiator bled, replaced or silting up, or a valve changed. Each model watches its innovations (the residual before the update, rejected samples included, each clipped to the outlier limit) and re-learns when they stay biased:
+  - **gain:** over about 6 hours of learning (an average over 360 updates), the residual's least-squares slope against the drive is at least 35 % of the heating gain, with enough heating in that window (mean squared drive at least 0.02). Not judged while the gain sits on the bound it is being pushed past.
+  - **level:** over about a day of learning (1,440 updates), the residual's mean is at least half its root mean square.
+
+  Neither is checked in a model's first 2 days of learning from priors. To re-learn, the model adds 30 % of its prior covariance back, widens the outlier limit to the recent residuals, and resets the statistics; the long memory then carries on. Each re-learn raises the reason `learning.relearn`, which goes to the decision log. In simulation, a radiator that loses half its output is re-learned within about a day; the same model without change detection is still far off days later (see [simulation](simulation.md#learning-memory-and-change-detection)). An error-variance rule was tried as well, but in simulation it did not separate a real change from an ordinary day, so it is not used. A large rise in a radiator's output can close the `unexplained_heat` gate and hide some of the evidence; in simulation a radiator whose output rose by 60 % was still re-learned within about a day.
+- Change-detection statistics are saved with each room's model as counts of learning updates, so they need no clock. Saves from before change detection load with fresh statistics.
 - **Priors:** `a = 1.5 ± 1.5 K/h`, `b = 0.08 ± 0.06 /h`, `d = 0 ± 0.05 K/h`. A room with a continuous heat source starts at `d = 0.3 ± 1.0 K/h`, so `d` is free to absorb the range cooker; everywhere else it stays near 0.
 - **Bounds:** `0.1 ≤ a ≤ 12 K/h`, `0.005 ≤ b ≤ 0.6 /h`, `−0.5 ≤ d ≤ 3 K/h`. **Not yet implemented** ([status](implementation-status.md#4-balancing-algorithm)): a diagnostic when a value sits on a bound for 24 h.
 - **Bootstrap:** when Radiate starts with no usable saved state, and when `radiate bootstrap` runs, the standalone database's tick history (up to `house.history_days`, 14 by default) is replayed through `decide` from priors with a throwaway state, so day one is not a cold start. Only the room models, arrival lags and lockshield histograms are kept; the boiler guard and timers come from the saved state. **Not yet implemented** ([status](implementation-status.md#4-balancing-algorithm)): the Home Assistant recorder as a second source.
@@ -217,13 +223,14 @@ A room learns only while every gate is open. The room's `learning_gate` names th
 | `valve_leaking` | the leaking valve check has flagged the room (section 7) | room |
 | `valve_rejected` | the TRV rejected a setting (reconciler), and for an hour after | room |
 | `no_data` | no usable temperature, slope or outdoor difference | room |
+| `sensor_stale` | a `normal` room's own sensor is stale and its temperature comes from the TRV, and for the 15 min slope window after the sensor is back. Off with `learning.learn_on_trv_fallback: true` | room |
 | `trv_offline` | the TRV is unavailable | room |
 | `store_recovery` | the store relay has been on for less than the store's recovery time | house |
 | `setpoint_change` | less than 15 min since the target changed | room |
 
 Passive rooms have no room model, so they never learn.
 
-A stale room sensor does not close a gate: the room falls back to `T_trv` plus the TRV bias and keeps learning. **Open question:** the gate table planned "room reading ≤ 20 min old" as a gate, which would stop learning on the TRV fallback. Should a room learn from its TRV reading while its room sensor is stale? See section 7.
+A room whose sensor is stale still has a temperature: it falls back to `T_trv` plus the TRV bias (section 7). It doesn't learn from that reading by default, because the TRV sits beside its radiator and reads the radiator as much as the room, which no single bias corrects. The `sensor_stale` gate holds until the slope window contains room sensor readings only. To learn from the TRV reading anyway, set `learning.learn_on_trv_fallback: true`. Internal-sensor rooms always use the TRV and are not affected.
 
 **Not yet implemented** ([status](implementation-status.md#4-balancing-algorithm)): ending store recovery early once `T_trv` is seen rising again somewhere, and learning the recovery time (it is fixed, 25 min by default, `store.recovery_min`).
 
@@ -257,7 +264,8 @@ The bias is not refined. A refinement was planned for when the TRV has been clos
 | Minimum off | 10 min | 5 to 30 | Lets the heat exchanger recover; limits starts |
 | Maximum relay starts per hour | 3 | 1 to 6 | Resideo oil default 3 per hour |
 | Valve lead time | 90 s | 30 to 300 | TRVZB motor travel before the burner fires |
-| Comfort limit (pooling) | 0.5 K | 0.2 to 1.5 | Most any room may wait below its target |
+| Comfort limit (`comfort` demand mode) | 0.5 K | 0.2 to 1.5 | Most any calling room waits below its target |
+| Eco limit (`eco` demand mode) | 1.5 K | 0.5 to 3, at least the comfort limit | Most a calling room waits below its target for other rooms to join it |
 | Frost threshold | 7 °C | 5 to 10 | Any room below fires regardless of pooling |
 | Hard frost threshold | 5 °C | fixed | Below it a start also ignores minimum off and starts per hour |
 
@@ -282,14 +290,22 @@ The boiler guard also adopts relay states it did not command (hand-back, section
 
 ### 5.3 Demand pooling
 
-Rooms do not fire the boiler individually. Each tick:
+The **demand mode** decides how calling rooms fire the boiler. It is set by `boiler.demand_mode` in the configuration file (`eco` by default) and can be changed at runtime through `POST /api/v1/settings` (section 8.1) without a restart. The runtime choice is saved in the state database, and each tick's snapshot records the mode it was decided in, so replay decides the same way. Each tick:
 
 - **Predicted burn** `B` = the allocation's `T*` for the current calling set.
-- **Fire** when heating is allowed (mode not `off`, or a room below the frost threshold), at least one room is calling, and any of these holds: a calling room is more than the comfort limit below its target, `B ≥ 1.5 × minimum burn`, a calling room is preheating (optimum start), or a room is below the frost threshold. Below the hard frost threshold the boiler fires regardless.
+- **Pooled demand** `D = Σ_r (target_r − T_r) / a_r` over calling rooms: the time at full radiator output the calling rooms need between them, in minutes. A room that warms quickly needs little of the burner per kelvin, so it counts for less. With the learned gains of the simulated house, the toilet 1.2 K below its target counts 6.5 min and a bedroom 0.5 K below counts 10 min.
+- **Fire** when heating is allowed (mode not `off`, or a room below the frost threshold), at least one room is calling, and either a calling room is preheating (optimum start), a room is below the frost threshold, or the demand mode's rule holds:
+  - `eco` (default): `D ≥ 1.5 × minimum burn` (12 min by default), or a calling room is more than the eco limit (1.5 K) below its target. A room on its own waits until it is colder or other rooms join it. While the valves are opening (lead), `D ≥ 0.75 × 1.5 × minimum burn` keeps the start going, so a 0.1 K reading doesn't call it off.
+  - `comfort`: a calling room is more than the comfort limit (0.5 K) below its target, or `B ≥ 1.5 × minimum burn`. Any room fires the boiler as soon as it is noticeably cold.
+
+  Below the hard frost threshold the boiler fires regardless.
+- **Waiting:** while a calling room waits in `eco` mode with the boiler idle, it carries the reason `demand.pooled` ("Toilet: calling, waiting for more rooms to share a burn (eco)"). `boiler.lead` reports `pooled_demand_min` with its other values.
 - **Stop** when no room is calling or extended. A room stops calling when it reaches its target. Heat sinks never keep the burner on. Minimum burn still holds.
 - **Burn extension:** once per burn, when the boiler is firing and no room calls any more, each room that is not calling, not flagged for fire, has a reading and has its TRV online is checked: if it is predicted to fall below its target minus the hysteresis within the next minimum off + 15 min, it is topped up. Its top-up target is `max(target + 0.3, min(T₀ + 0.5, target + 1.0))`, where `T₀` is its temperature when the top-up started. This turns two short burns into one longer one.
 
-The plan also defined a gain-weighted **pooled demand** `D = Σ_r a_r · f(o_r) · max(0, target − T_r)` over calling rooms, so one cold toilet does not count like a cold lounge. The fire rule never used it, and the code does not compute it. **Open question:** should a small room on its own fire the boiler less readily? Today a toilet that falls more than the comfort limit below its target fires the boiler on its own, like any other room.
+The plan weighted the pooled demand the other way, `D = Σ_r a_r · f(o_r) · max(0, target − T_r)`, so one cold toilet would not count like a cold lounge. The heating gain `a` is a warm-up rate per unit of the room's own thermal mass, though, so a small room with a modest radiator has the largest gain: the simulated toilet learns about 12 K/h against 2 to 5 K/h elsewhere. Multiplying by `a` made the toilet count most. Dividing by it gives the intended effect. Without room areas or radiator outputs (section 2.1), Radiate can't weigh rooms by the heat they need, only by time.
+
+In simulation, `eco` cuts relay starts by 19 % on mild days and 7 % on cold days against `comfort`, with longer burns. The boiler's own thermostat still sets most physical burner starts, so those barely change. On mild days the comfort deficit is the same within the spread between seeds; on cold days with an undersized pump it rises 5 %. See [simulation](simulation.md#eco-and-comfort-demand-modes).
 
 **Not yet implemented** ([status](implementation-status.md#5-boiler-logic)): **store merging** (opt-in), shifting the store window by up to ±30 min to start just before or after a heating burn, so the burner runs once for both.
 
@@ -338,7 +354,7 @@ every 60 s:
 
 `decide` is pure: no clock, no I/O, deterministic. It returns actions (valve settings, relay states, alerts) and a list of **reasons** (code, message, room, values) used by the UI and exported to Elastic.
 
-`record` keeps the last 500 boiler, disturbance and safe mode reasons in memory as the decision log. It also keeps each tick's snapshot and a compact form of its actions (valve settings, relays, boiler state, reason and alert codes) in the state database for `house.history_days` days, 14 by default, with a start entry that describes how the engine state was built at each start. Recording errors are logged and never stop the loop. `radiate replay` runs the recorded snapshots through `decide` again and reports where the actions differ; with the same code and configuration there are none.
+`record` keeps the last 500 boiler, disturbance, safe mode and `learning.relearn` reasons in memory as the decision log. It also keeps each tick's snapshot and a compact form of its actions (valve settings, relays, boiler state, reason and alert codes) in the state database for `house.history_days` days, 14 by default, with a start entry that describes how the engine state was built at each start. Recording errors are logged and never stop the loop. `radiate replay` runs the recorded snapshots through `decide` again and reports where the actions differ; with the same code and configuration there are none.
 
 Order inside `decide`:
 
@@ -358,7 +374,7 @@ Order inside `decide`:
 
 | Failure | Detection | Behaviour |
 |---|---|---|
-| Room sensor stale | no reading for `house.sensor_max_silence_min` (60 min) while the sensor is available, or for 20 min once Zigbee2MQTT reports it unavailable | Use `T_trv` plus the configured TRV bias, and stop sending external temperature, so the TRV reverts to its own sensor after about 2 h. Learning carries on with the TRV reading. **Open question:** the plan switched learning off for that room (section 4.6) |
+| Room sensor stale | no reading for `house.sensor_max_silence_min` (60 min) while the sensor is available, or for 20 min once Zigbee2MQTT reports it unavailable | Use `T_trv` plus the configured TRV bias, and stop sending external temperature, so the TRV reverts to its own sensor after about 2 h. Learning pauses (`sensor_stale`, section 4.6) unless `learning.learn_on_trv_fallback` is `true` |
 | TRV offline | Z2M availability, or nothing heard for twice `house.sensor_max_silence_min` when availability is not reported | Excluded from demand, allocation and learning (`trv_offline`); alert `driver.trv_offline`. **Not yet implemented** ([status](implementation-status.md#7-failure-modes)): treating it as possibly open at its last opening limit in the supply factor |
 | Coordinator or MQTT down | broker disconnected or Zigbee2MQTT offline, which marks every TRV unreachable; or no TRV reachable for any other reason | Enter **safe mode** (alert `safe_mode.no_trvs`): no new start except below the hard frost threshold; a burn Radiate started runs to minimum burn and the relay is switched off; then Radiate sends no relay commands and no heartbeat, so the Shelly watchdog's schedule takes over. TRVs keep their last setpoint and opening limit, which is the lockshield cap unless they were allocated. Radiate keeps reading the relay and follows the watchdog's burns, then hands back as in section 5.7 |
 | Radiate process dies | (no detection needed) | TRVs keep governed settings and their mirrored schedules and run their own thermostats; Shelly watchdog takes over after 10 min |
@@ -382,18 +398,20 @@ Radiate does not write anything special to the valves in safe mode: it cannot re
 
 ### 8.1 Server API (v1)
 
-Request and response bodies are JSON. A body that is not a JSON object returns 400, as does an invalid setpoint or mode; an unknown room returns 404.
+Request and response bodies are JSON. A body that is not a JSON object returns 400, as does an invalid setpoint, mode or setting; an unknown room returns 404.
 
 | Method and path | Body | Purpose |
 |---|---|---|
 | `GET /api/v1/health` | | `{"ok": true}`; never needs a token |
 | `GET /api/v1/house` | | House ID, version, driver name, rooms (id, name, role, heat source, controllable) and boiler guard settings |
-| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler (with short-cycle state, `adopted` for a burn Radiate did not start, and `watchdog_handover` while the watchdog has the relay), store, per-room temperatures, opening limits, demand flags (`calling`, `topup`, and `extend` for a burn extension rather than a heat sink), learning gate, learned model, latest reason, override, detected fire, manual fire flag (`fire_switch`), valve checks (`valve`: `untrusted` for a stuck or leaking valve, `misses`, `leaking`, `leak_burns`, and `rejected` for settings the TRV would not take), daily accounting, 24 h relay timeline, alerts (`alerts` as messages, `alert_details` with `code`, `message` and `room_id`) and driver telemetry |
+| `GET /api/v1/state` | | Live snapshot: mode, outdoor temperature, boiler (with short-cycle state, `adopted` for a burn Radiate did not start, and `watchdog_handover` while the watchdog has the relay), store, per-room temperatures, opening limits, demand flags (`calling`, `topup`, and `extend` for a burn extension rather than a heat sink), learning gate, learned model, latest reason, override, detected fire, manual fire flag (`fire_switch`), valve checks (`valve`: `untrusted` for a stuck or leaking valve, `misses`, `leaking`, `leak_burns`, and `rejected` for settings the TRV would not take), daily accounting, 24 h relay timeline, alerts (`alerts` as messages, `alert_details` with `code`, `message` and `room_id`), driver telemetry, `boiler.pooled_demand_min` (section 5.3) and `settings` (the same object as `GET /api/v1/settings`) |
 | `GET /api/v1/decisions?since=T` | | Decision log entries (`at`, `code`, `message`, `room_id`) after `T`, in the server's monotonic seconds |
 | `POST /api/v1/rooms/{id}/setpoint` | `{"setpoint": 21.0}` | Override the schedule, 5 to 28 °C, until the room's next scheduled change. Optional `"duration_min": 90` holds it for that long instead (up to 7 days); `"until": "cleared"` holds it until `{"setpoint": null}` clears it. Saved across restarts; the response and each room's `override` in `state` give `until` and `expires_in_min` |
 | `POST /api/v1/rooms/{id}/fire` | `{"lit": true}` | Manual fire flag. Not saved across restarts |
 | `POST /api/v1/store/boost` | `{"minutes": 60}` | Boost the store for 0 to 180 minutes; 0 cancels |
 | `POST /api/v1/mode` | `{"mode": "auto"}` | `auto`, `off` or `frost` |
+| `GET /api/v1/settings` | | Settings: `demand_mode` in effect (`eco` or `comfort`), `demand_mode_default` (from `boiler.demand_mode`), `demand_modes` (`["eco", "comfort"]`), `comfort_limit_k`, `eco_limit_k`, `learning_memory_days` and `learn_on_trv_fallback`. Only `demand_mode` can be changed at runtime |
+| `POST /api/v1/settings` | `{"demand_mode": "comfort"}` | Change runtime settings; only the keys given change. `demand_mode` is `eco`, `comfort`, or `null` to follow `boiler.demand_mode` again. Saved across restarts and used from the next tick. Returns `{"ok": true, "settings": {...}}`. An unknown key or value returns 400 |
 | `GET /api/v1/stream` | | WebSocket: the state on connect and after every tick |
 
 Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` needs `Authorization: Bearer <token>`. Browsers cannot set headers on a WebSocket, so `stream` also accepts the token as its first message, `{"token": "<token>"}`; it waits up to 10 s and closes with code 4401 if the token is missing or wrong. In the HA App, requests from the Supervisor's ingress address (`RADIATE_INGRESS_IP`) that carry an `X-Ingress-Path` header are trusted without a token. The web UI at `/` and `/static/` is not protected.
@@ -466,17 +484,19 @@ Hardware and legal:
 3. Heatslave 12/14 nozzle rating and the boiler thermostat setting, for oil accounting and the simulator.
 4. Freedom-to-operate check on EP1936290 and EP2420748 before marketing balancing in Germany or the EU.
 
-Behaviour, where the spec and the code disagree (marked **Open question** above):
-
-5. Learning memory (section 4.3): about 3 days, as planned, or the roughly 33 hours the code's forgetting factor gives?
-6. Pooled demand (section 5.3): should a small room on its own fire the boiler less readily, through a gain-weighted pooled demand?
-7. Stale room sensor (sections 4.6, 7): should a room keep learning from its TRV reading while its room sensor is stale?
+The three behaviour questions raised in version 0.2 (learning memory, pooled demand, learning on a stale room sensor) are decided; see section 13.
 
 ---
 
 ## 13. Changes in this revision
 
-Version 0.2 brings the spec in line with the code. Where the code had deliberately gone another way, the spec now describes the code:
+Version 0.3 settles the three behaviour questions from version 0.2 with the owner's decisions:
+
+- **Learning memory** (4.3): configurable, `learning.memory_days`, default 730 days, with change detection that re-learns a room whose residuals stay biased.
+- **Pooled demand** (5.3): two demand modes. `eco`, the default, pools demand as `Σ gap / a`, so a room on its own waits until it is 1.5 K below its target or other rooms join it. `comfort` keeps the earlier rule. The mode can be changed at runtime through `POST /api/v1/settings` (8.1).
+- **Stale room sensor** (4.6, 7): learning pauses on the TRV fallback (`sensor_stale`), unless `learning.learn_on_trv_fallback` is `true`.
+
+Version 0.2 brought the spec in line with the code. Where the code had deliberately gone another way, the spec now describes the code:
 
 - Supply factor: the bypass sits inside the `κ` term, with `κ` fixed at 0.15 (4.1).
 - Heat availability is on or off after the arrival lag, and the whole drive is smoothed over 15 min, instead of `φ` rising with a 6 min time constant (4.1).

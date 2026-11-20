@@ -167,6 +167,16 @@ Unit K/h. Code: `RoomState.residual`, `RoomEstimator.residual`.
 How far the uncertainty of a room's heating gain has shrunk from its prior, from 0 (nothing learned) to 1.
 Code: `RoomEstimator.confidence`, HA sensor `confidence` (as %), Elastic `model.confidence`.
 
+**Learning memory**:
+How long a room model remembers, in days of learning: one learning update per minute tick that passes every gate. Default 730 days, 1 to 3650. Sets the forgetting factor `λ = 1 − 1/(days × 1440)`.
+Code: `LearningConfig.memory_days`, `RoomEstimator.lam`, `forgetting` in `radiate.core.estimator`, config key `learning.memory_days`.
+_Avoid_: forgetting factor, except for `λ` itself.
+
+**Change detection**:
+A room model checking its own residuals so a long learning memory still follows a real change, such as a radiator bled, replaced or silting up. When the residual's slope against the drive stays at 35 % of the heating gain over about 6 hours of learning, or its mean stays at half its root mean square over about a day, the model re-learns: part of the prior covariance is added back, so new data outweighs the old memory.
+Code: `RoomEstimator.change_detected`, `RoomEstimator.relearn`, `RoomEstimator.relearns`, reason `learning.relearn`.
+_Avoid_: reset (the model keeps what it learned and adapts from there).
+
 **Flow fraction**:
 The share of full flow a valve passes at a given opening limit.
 Symbol `f(o)`, 0 to 1. Code: `flow_fraction` in `radiate.core.valve` (inverse `opening_for`).
@@ -206,7 +216,11 @@ Symbol `η`, dimensionless. Code: `AllocRoom.eta`, `EMITTER_LIMITED_ETA`.
 
 **Learning gate**:
 A rule that stops a sample being used to update a room model. A room is learning when no gate is closed.
-Code: `RoomState.learning_gate`, values `fire`, `fire_holdoff`, `window`, `shower`, `cooker_spike`, `unexplained_heat`, `no_heat`, `valve_untrusted`, `valve_leaking`, `valve_rejected`, `no_data`, `trv_offline`, `store_recovery`, `setpoint_change`, and `starting` before the first tick. Elastic `learning.gate`.
+Code: `RoomState.learning_gate`, values `fire`, `fire_holdoff`, `window`, `shower`, `cooker_spike`, `unexplained_heat`, `no_heat`, `valve_untrusted`, `valve_leaking`, `valve_rejected`, `no_data`, `sensor_stale`, `trv_offline`, `store_recovery`, `setpoint_change`, and `starting` before the first tick. Elastic `learning.gate`.
+
+**Sensor stale gate**:
+The learning gate that pauses a `normal` room while its own sensor is stale and its temperature comes from the TRV reading plus the TRV bias, and for the 15-minute slope window after the sensor is back. The TRV reads its radiator as much as the room. Set `learning.learn_on_trv_fallback: true` to learn from the TRV reading instead.
+Code: gate `sensor_stale`, `RoomState.fallback_until`, `LearningConfig.learn_on_trv_fallback`.
 
 **Disturbance**:
 A detected event that heats or cools a room for reasons other than its radiator. Each one closes a learning gate while it lasts.
@@ -294,12 +308,29 @@ Unit K. Code: `HouseConfig.hysteresis_k`, `HouseConfig.internal_sensor_hysteresi
 The set of calling rooms and how far they are below target, which together decide whether the boiler should fire.
 
 **Demand pooling**:
-Rooms do not fire the boiler one by one. The boiler fires only when a room is more than the comfort limit below target, the predicted burn is at least 1.5 times minimum burn, a room is preheating, or a room is below the frost threshold.
+The rule for when calling rooms fire the boiler, set by the demand mode. In every mode a room preheating or a room below the frost threshold fires it.
 Code: `want_fire` in `decide`.
 
+**Demand mode**:
+How calling rooms fire the boiler. Set by `boiler.demand_mode` and changeable at runtime through the API. Two values:
+
+- `eco` (default): rooms fire the boiler together. The pooled demand must reach 1.5 minimum burns, or one room must be more than the eco limit below its target. A small room on its own waits until it is colder or other rooms join it.
+- `comfort`: any calling room more than the comfort limit below its target fires the boiler, as does a predicted burn of 1.5 minimum burns.
+
+Code: `DemandMode`, `BoilerConfig.demand_mode`, `Snapshot.demand_mode`, `Runtime.demand_mode`, API `POST /api/v1/settings`, `settings.demand_mode` in `state`.
+_Avoid_: economy mode, comfort mode as names for the heating mode (`auto`, `off`, `frost`).
+
+**Pooled demand**:
+The time at full radiator output the calling rooms need between them: the sum of each calling room's gap divided by its heating gain. A room that warms quickly counts for less. Used by the `eco` demand mode.
+Symbol `D`, min. Code: `_pooled_demand_s` in `decide`, `EngineState.pooled_demand_s`, API `boiler.pooled_demand_min`, reason `demand.pooled` for a room left waiting.
+
 **Comfort limit**:
-The most any calling room may sit below its target while demand is pooled. Default 0.5 K.
+In the `comfort` demand mode, the most any calling room may sit below its target before it fires the boiler. Default 0.5 K.
 Code: `BoilerConfig.comfort_limit_k`, config key `boiler.comfort_limit_k`.
+
+**Eco limit**:
+In the `eco` demand mode, the most a calling room waits below its target for other rooms before it fires the boiler on its own. Default 1.5 K, 0.5 to 3 K.
+Code: `BoilerConfig.eco_limit_k`, config key `boiler.eco_limit_k`.
 
 **Predicted burn**:
 How long the current calling rooms need the burner, taken from the target arrival.
@@ -498,7 +529,7 @@ Learning room models from the tick history by replaying it from priors with a th
 Code: `radiate.core.bootstrap`, `Runtime.restore`, `radiate bootstrap`.
 
 **Decision log**:
-The last 500 boiler, disturbance and safe mode reasons, with the time they happened.
+The last 500 boiler, disturbance, safe mode and `learning.relearn` reasons, with the time they happened.
 Code: `Runtime.decisions`, `DecisionRecord`, API `GET /api/v1/decisions`.
 
 **Driver**:
@@ -539,17 +570,10 @@ The local standalone server that runs the control loop for the cloud edition. No
 
 ## Ambiguities
 
-What is still open after the spec was reconciled with the code in November 2026. The earlier items are settled: the spec now uses the terms above, describes the code where the code had deliberately gone another way, and marks planned parts as not yet implemented.
-
-Behaviour, for the owner (each is marked **Open question** in the spec):
-
-1. **Learning memory.** Spec 4.3 aimed at a memory of about 3 days. The forgetting factor, `1 − 1/2000` (`FORGETTING` in `radiate.core.estimator`), gives about 2,000 learning updates, roughly 33 hours, although its comment says about 3 days.
-2. **Pooled demand.** Spec 5.3 defined a gain-weighted pooled demand `D` so one cold toilet does not count like a cold lounge. The fire rule never used it and the code doesn't compute it, so any single calling room more than the comfort limit below its target fires the boiler.
-3. **Learning on a stale room sensor.** The plan stopped a room learning when its room sensor is stale. The code falls back to the TRV reading plus the TRV bias and keeps learning.
+What is still open. The owner's three behaviour questions (learning memory, pooled demand, learning on a stale room sensor) are decided in spec version 0.3 and described above under learning memory, change detection, demand mode and the sensor stale gate. The `LOCKSHIELD_DECAY` and `FORGETTING` comments that disagreed with their values are fixed or gone.
 
 Names in code and UI text, for whoever next touches that code:
 
-4. **Store means two things.** The hot-water store, and `radiate.server.store.Store` (the SQLite state database). Suggest renaming the class or module, for example `StateDb`.
-5. **Heat sink and `boiler.dump_room`.** Prose and UI say heat sink; the reason code is still `boiler.dump_room`. Reason codes reach Elastic, so a rename is an API change.
-6. **"Stuck valve" covers leaking valves.** The HA binary sensor (`valve_untrusted`, named "Stuck valve") and API `valve.untrusted` are on for a stuck or a leaking valve. Suggest a name such as "Valve problem".
-7. **Comments that disagree with their constants.** `LOCKSHIELD_DECAY` in `radiate.core.decide` says "roughly a 3 day half-life", but 0.9995 a sample halves in about 1,400 samples, roughly 23 hours of firing. `FORGETTING` has the same kind of mismatch (item 1).
+1. **Store means two things.** The hot-water store, and `radiate.server.store.Store` (the SQLite state database). Suggest renaming the class or module, for example `StateDb`.
+2. **Heat sink and `boiler.dump_room`.** Prose and UI say heat sink; the reason code is still `boiler.dump_room`. Reason codes reach Elastic, so a rename is an API change.
+3. **"Stuck valve" covers leaking valves.** The HA binary sensor (`valve_untrusted`, named "Stuck valve") and API `valve.untrusted` are on for a stuck or a leaking valve. Suggest a name such as "Valve problem".
