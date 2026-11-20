@@ -40,6 +40,10 @@ GETTING_UP_MIN = 30  # after getting up: bedroom and shared rooms count as in us
 GOING_TO_BED_MIN = 30  # before bed: bedroom counts as in use
 DAY_TYPES = ("weekdays", "weekend")
 DAMP_BELOW_C = 12.0  # below this, walls and window frames can get damp
+# Home Assistant `not_home` must last this long before a person counts as away: longer
+# than a trip to the shops or the school run, shorter than a working day or an evening
+# out. See radiate.config.away.
+PRESENCE_DELAY_MIN = 60
 
 Interval = tuple[int, int]  # [start, end) in minutes of the day
 
@@ -116,6 +120,7 @@ class Household:
     people: tuple[Person, ...]
     rooms: tuple[RoomLink, ...]
     temperatures: Temperatures = field(default_factory=Temperatures)
+    presence_delay_min: int = PRESENCE_DELAY_MIN
 
 
 @dataclass(frozen=True, slots=True)

@@ -28,6 +28,7 @@ from radiate.core.types import (
 
 from .household import (
     DAMP_BELOW_C,
+    PRESENCE_DELAY_MIN,
     Household,
     Person,
     RoomKind,
@@ -628,7 +629,8 @@ def _room_link(
 
 def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) -> Household | None:
     p = "household."
-    ctx.unknown(raw, {"temperatures", "people", "rooms"}, p)
+    ctx.unknown(raw, {"temperatures", "people", "rooms", "presence_delay_min"}, p)
+    delay_min = int(ctx.number(raw, "presence_delay_min", PRESENCE_DELAY_MIN, 0, 720, p))
 
     tp = f"{p}temperatures."
     t_raw = ctx.section(raw, "temperatures", p)
@@ -668,7 +670,12 @@ def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) 
                 f"{p}people.{person.id} has work hours but no office room: "
                 "shared rooms are not heated while they work."
             )
-    return Household(people=tuple(people), rooms=tuple(links), temperatures=temps)
+    return Household(
+        people=tuple(people),
+        rooms=tuple(links),
+        temperatures=temps,
+        presence_delay_min=delay_min,
+    )
 
 
 def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
