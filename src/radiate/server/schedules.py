@@ -28,7 +28,7 @@ from radiate.config.household import (
     compile_household,
     round_half,
 )
-from radiate.config.schedule import DAYS, WeekSchedule
+from radiate.config.schedule import DAYS, MAX_TRANSITIONS, WeekSchedule
 
 from .runtime import Runtime
 
@@ -50,12 +50,13 @@ def schedules_view(rt: Runtime) -> dict:
         link = links.get(rc.id)
         named = driver_weeks.get(rc.id)
         if link is not None and now_compiled is not None and usual is not None:
-            week = named[1] if named else now_compiled.schedules[rc.id]
+            # The live week: what Radiate follows, warm-by times without the valve's preheat.
+            week = named[1] if named else now_compiled.live[rc.id]
             item = _room(rc.id, rc.name, SOURCE_HOUSEHOLD, None, week)
-            item["notes"] = _notes(now_compiled, link)
+            item["notes"] = _notes(now_compiled, rc.id)
             people = _depends_on(hh, link)
             item["people"] = [{"id": pid, "name": names[pid]} for pid in people]
-            item["away"] = _away(rc.name, week, usual.schedules[rc.id], people, rt.away, hh, names)
+            item["away"] = _away(rc.name, week, usual.live[rc.id], people, rt.away, hh, names)
         elif named is not None:
             item = _room(rc.id, rc.name, SOURCE_HAND_WRITTEN, named[0], named[1])
         else:
@@ -128,15 +129,26 @@ def _depends_on(hh: Household, link: RoomLink) -> list[str]:
     return [p.id for p in hh.people if link.people is None or p.id in link.people]
 
 
-def _notes(compiled: CompiledHousehold, link: RoomLink) -> list[str]:
-    """This room's warm periods dropped to fit the TRV, without the room name."""
-    prefix = f"{link.name or link.room_id}, "
+def _notes(compiled: CompiledHousehold, room_id: str) -> list[str]:
+    """Warm periods this room's valve schedule leaves out to fit the TRV, in words.
+
+    Radiate still heats them while it runs; only the valve's fallback copy lacks them.
+    """
     out = []
-    for note in compiled.notes:
-        if note.startswith(prefix):
-            rest = note[len(prefix) :]
-            out.append(f"{rest[:1].upper()}{rest[1:]}.")
+    for d in compiled.dropped:
+        if d.room_id != room_id:
+            continue
+        when = d.day_type[:1].upper() + d.day_type[1:]
+        out.append(
+            f"{when}: the valve's own schedule leaves out {_deg(d.setpoint_c)} "
+            f"{_hhmm(d.start_min)} to {_hhmm(d.end_min)} to fit its limit of "
+            f"{MAX_TRANSITIONS} changes a day. Radiate still heats it while running."
+        )
     return out
+
+
+def _hhmm(minute: int) -> str:
+    return f"{minute // 60:02d}:{minute % 60:02d}"
 
 
 def _away(

@@ -70,15 +70,15 @@ def test_household_rooms_in_minutes_and_words():
     assert [d["day"] for d in bedroom["days"]][:2] == ["monday", "tuesday"]
     assert bedroom["days"][0]["transitions"] == [
         {"minute": 0, "setpoint": 14},
-        {"minute": 360, "setpoint": 19},
+        {"minute": 390, "setpoint": 19},
         {"minute": 510, "setpoint": 14},
-        {"minute": 1290, "setpoint": 19},
+        {"minute": 1320, "setpoint": 19},
         {"minute": 1350, "setpoint": 14},
     ]
-    assert bedroom["days"][0]["text"] == "19° 06:00 to 08:30 and 21:30 to 22:30, otherwise 14°"
+    assert bedroom["days"][0]["text"] == "19° 06:30 to 08:30 and 22:00 to 22:30, otherwise 14°"
     assert bedroom["summary"] == [
-        {"days": "Mon to Fri", "text": "19° 06:00 to 08:30 and 21:30 to 22:30, otherwise 14°"},
-        {"days": "Sat and Sun", "text": "19° 08:00 to 09:00 and 21:30 to 22:30, otherwise 14°"},
+        {"days": "Mon to Fri", "text": "19° 06:30 to 08:30 and 22:00 to 22:30, otherwise 14°"},
+        {"days": "Sat and Sun", "text": "19° 08:30 to 09:00 and 22:00 to 22:30, otherwise 14°"},
     ]
     assert bedroom["people"] == [
         {"id": "early_riser", "name": "Early riser"},
@@ -108,12 +108,12 @@ def test_someone_away_changes_the_week_and_says_why():
         "people": [{"id": "home_worker", "name": "Home worker"}],
         "text": "Bedroom 3 stays at 14° while Home worker is away.",
         "usual": [
-            {"days": "Mon to Fri", "text": "19° 07:30 to 18:00, otherwise 14°"},
+            {"days": "Mon to Fri", "text": "19° 08:00 to 18:00, otherwise 14°"},
             {"days": "Sat and Sun", "text": "14° all day"},
         ],
     }
     bedroom = by_id["bedroom_1"]
-    assert bedroom["days"][2]["text"] == "19° 06:00 to 07:00 and 21:30 to 22:30, otherwise 14°"
+    assert bedroom["days"][2]["text"] == "19° 06:30 to 07:00 and 22:00 to 22:30, otherwise 14°"
     assert bedroom["away"]["text"] == (
         "Bedroom 1 is warm for less of the week while Home worker is away."
     )
@@ -141,7 +141,10 @@ def test_dropped_warm_periods_are_noted_per_room():
     early = data["household"]["people"]["early_riser"]["weekdays"]
     early["out"] = ["08:00-12:00", "13:30-17:00"]  # home for lunch
     by_id = rooms(schedules_view(make(data)))
-    note = "Weekdays: dropped 19° 11:30 to 13:30 to fit the TRV's limit of 6 changes a day."
+    note = (
+        "Weekdays: the valve's own schedule leaves out 19° 11:30 to 13:30 to fit its limit "
+        "of 6 changes a day. Radiate still heats it while running."
+    )
     assert by_id["kitchen"]["notes"] == [note]
     assert by_id["dining"]["notes"] == [note]
     assert by_id["bedroom_1"]["notes"] == []
@@ -273,7 +276,7 @@ const office = byId.bedroom_3;
 assert.equal(office.days.every((d) => w.daySegments(d.transitions, w.weekScale(view.rooms, view.levels), 14).every((s) => !s.warm)), true);
 assert.equal(
   w.usualText(office.away.usual),
-  "Usually Mon to Fri: 19° 07:30 to 18:00, otherwise 14°; Sat and Sun: 14° all day.",
+  "Usually Mon to Fri: 19° 08:00 to 18:00, otherwise 14°; Sat and Sun: 14° all day.",
 );
 console.log("ok");
 """

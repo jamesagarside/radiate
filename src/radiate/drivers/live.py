@@ -94,13 +94,14 @@ class LiveDriver:
         return self._local().weekday()
 
     def schedules(self) -> dict[str, tuple[str | None, WeekSchedule]]:
-        """Each controllable room's week as used now, with its house-file schedule name.
+        """Each controllable room's week as Radiate follows it now, with its schedule name.
 
         The name is None for a household room, whose week is compiled for the people
-        at home (see `set_household_schedules`).
+        at home (see `set_household_schedules`). Household rooms give the live week,
+        with warm-by times; the valve's copy starts each period earlier.
         """
         return {
-            rc.id: (self.site.devices[rc.id].schedule, self.site.schedule_for(rc.id))
+            rc.id: (self.site.devices[rc.id].schedule, self.site.live_schedule_for(rc.id))
             for rc in self.cfg.rooms
             if rc.controllable
         }
