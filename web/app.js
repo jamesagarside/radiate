@@ -7,6 +7,7 @@
 // demo (<html data-transport="demo">) swaps in demo.js, which runs the same engine in
 // a Web Worker, needs no token and never loses its link. Both share this one UI.
 
+import { createSetup } from "./setup.js";
 import { weekView } from "./week.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
@@ -109,6 +110,18 @@ function httpTransport() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+    },
+    // Any method, answering { status, body } instead of throwing on 4xx and 5xx, so
+    // field errors from the household setup can be shown. 401 still asks to sign in.
+    async call(method, path, body) {
+      const init = { method, headers: headers(body === undefined ? {} : { "Content-Type": "application/json" }) };
+      if (body !== undefined) init.body = JSON.stringify(body);
+      const res = await fetch(api(path), init);
+      if (res.status === 401) throw new AuthError(path);
+      const text = await res.text();
+      let parsed = text;
+      try { parsed = JSON.parse(text); } catch { /* plain text */ }
+      return { status: res.status, body: parsed };
     },
     // Safe to call again after signing in: it connects only if not already connected.
     subscribe(stateCb, linkCb) {
@@ -393,6 +406,15 @@ function since(iso, today) {
   return iso.slice(0, 10) === today ? iso.slice(11, 16) : when(iso, today);
 }
 
+// "at 18:00" today, "tomorrow at 18:00", "on Tue 2 Dec at 18:00", "on Tuesday".
+function at(iso, today) {
+  const time = iso.slice(11, 16);
+  const day = dayName(iso.slice(0, 10), today);
+  const on = day === "tomorrow" || day === "yesterday" ? day : `on ${day}`;
+  if (day === "today") return `at ${time}`;
+  return time === "00:00" ? on : `${on} at ${time}`;
+}
+
 function personText(p, away) {
   const today = away.today;
   if (p.away && p.reason === "away_until") return [`Away until ${when(p.until, today)}.`, "Away", "away"];
@@ -400,6 +422,12 @@ function personText(p, away) {
   if (p.until) {
     const back = when(p.until, today);
     return [`Due back ${/^\d/.test(back) ? "at " : ""}${back}. Warming up their rooms.`, "Due back", "back"];
+  }
+  // Not reported within the stale limit: unknown, which Radiate treats as home.
+  if (p.presence?.stale) {
+    const limit = house?.household?.away?.presence_stale_after_min;
+    const gap = limit ? ` for over ${span(limit)}` : " lately";
+    return [`Home Assistant hasn't reported${gap}, so Radiate treats them as home.`, "No update", "stale"];
   }
   if (p.presence?.state === "not_home") {
     const delay = away.presence_delay_min;
@@ -475,6 +503,16 @@ function renderPeople(away) {
   const list = away?.people ?? [];
   $("people").hidden = !list.length;
   $("away-note").hidden = !away?.frost;
+  // A known return within the return warm-up: rooms may already be warming for it.
+  const ret = away?.return;
+  const returnNote = $("return-note");
+  returnNote.hidden = !ret;
+  if (ret) {
+    const due = list.filter((p) => p.until && p.until.slice(0, 16) === ret.at.slice(0, 16));
+    const who = due.length ? due : list.filter((p) => p.until);
+    const whose = who.length ? `${names(who.map((p) => p.name))}'s return` : "a return";
+    returnNote.textContent = `Warming up for ${whose} ${at(ret.at, away.today)}.`;
+  }
   for (const p of list) {
     const n = ensurePerson(p);
     const [text, label, kind] = personText(p, away);
@@ -794,13 +832,71 @@ let houseLoading = false;
 async function loadHouse() {
   if (houseLoading) return;
   houseLoading = true;
-  try { house = await transport.house(); } catch { /* retried on the next render */ }
+  try {
+    house = await transport.house();
+    renderSetupEntry();
+  } catch { /* retried on the next render */ }
   houseLoading = false;
 }
+
+// Household setup (setup.js). Without a household, a call to action above the rooms;
+// with one, "Change household setup" beside the People heading. A server without the
+// setup routes answers 404 and neither shows.
+let setupOffered = null; // a promise of whether the server offers the setup
+let setupOpener = null;
+const setup = createSetup({
+  transport,
+  onOpen() {
+    document.querySelector("main").hidden = true;
+    window.scrollTo(0, 0);
+  },
+  onClose() {
+    document.querySelector("main").hidden = false;
+    if (setupOpener && !setupOpener.closest("[hidden]")) setupOpener.focus();
+    setupOpener = null;
+  },
+  async onSaved(message) {
+    document.querySelector("main").hidden = false;
+    const note = $("setup-saved");
+    note.textContent = message;
+    note.hidden = false;
+    note.focus();
+    clearTimeout(note.timer);
+    note.timer = setTimeout(() => { note.hidden = true; }, 15000);
+    weekSync.key = null; // fetch the new weeks now
+    try { house = await transport.house(); } catch { /* the next render retries */ }
+    renderSetupEntry();
+    refresh();
+  },
+});
+
+async function renderSetupEntry() {
+  setupOffered ??= setup.available();
+  const offered = await setupOffered;
+  if (offered === null) setupOffered = null; // ask again next time, after signing in say
+  const has = Boolean(house?.household);
+  $("setup-cta").hidden = !offered || has;
+  $("setup-change").hidden = !offered || !has;
+}
+
+async function openSetup(e) {
+  setupOpener = e.currentTarget;
+  try {
+    await setup.open();
+  } catch (err) {
+    if (err instanceof AuthError) { askForToken(); return; }
+    const note = $("setup-saved");
+    note.textContent = "Couldn't open the household setup. Try again in a moment.";
+    note.hidden = false;
+  }
+}
+$("setup-start").addEventListener("click", openSetup);
+$("setup-change").addEventListener("click", openSetup);
 
 async function start() {
   try {
     house = await transport.house();
+    renderSetupEntry();
   } catch (err) {
     if (err instanceof AuthError) { askForToken(); return; }
   }

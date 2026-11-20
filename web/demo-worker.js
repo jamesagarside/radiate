@@ -114,7 +114,7 @@ self.onmessage = (ev) => {
       res = { status: 500, body: String(err) };
     }
     post({ type: "response", id: msg.id, ...res });
-    if (res.status === 200 && msg.method === "POST") pushState();
+    if (res.status === 200 && msg.method !== "GET") pushState();
   }
 };
 

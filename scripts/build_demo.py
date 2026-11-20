@@ -28,7 +28,16 @@ SRC = ROOT / "src"
 WEB = ROOT / "web"
 DEFAULT_OUT = ROOT / "dist" / "demo"
 
-STATIC_FILES = ("app.js", "app.css", "week.js", "demo.js", "demo.css", "demo-worker.js")
+STATIC_FILES = (
+    "app.js",
+    "app.css",
+    "week.js",
+    "household.js",
+    "setup.js",
+    "demo.js",
+    "demo.css",
+    "demo-worker.js",
+)
 WORKER = WEB / "demo-worker.js"
 ZIP_NAME = "radiate.zip"
 # A fixed timestamp keeps the zip byte-for-byte reproducible.
