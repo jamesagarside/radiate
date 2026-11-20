@@ -358,6 +358,135 @@ function renderRoom(r) {
   if (!fire.hidden && document.activeElement !== fire) fire.setAttribute("aria-pressed", String(!!r.fire));
 }
 
+// Away, per person (household setup). The server says who counts as away; this only
+// shows it and sets or clears "away until". Times arrive as local ISO strings with an
+// offset ("2026-11-24T18:00+00:00"), so their first 16 characters are house time.
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const people = new Map(); // person id -> card
+const dayNumber = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 86400000;
+
+// "today", "tomorrow", "Tuesday" within the week, else "Tue 2 Dec".
+function dayName(date, today) {
+  const ahead = today ? dayNumber(date) - dayNumber(today) : null;
+  const weekday = new Date(dayNumber(date) * 86400000).getUTCDay();
+  if (ahead === 0) return "today";
+  if (ahead === 1) return "tomorrow";
+  if (ahead === -1) return "yesterday";
+  if (ahead !== null && ahead > 1 && ahead < 7) return WEEKDAYS[weekday];
+  return `${WEEKDAYS[weekday].slice(0, 3)} ${+date.slice(8, 10)} ${MONTHS[+date.slice(5, 7) - 1]}`;
+}
+
+// "Tuesday 18:00", "Tuesday" when back at the start of the day, "18:00" today.
+function when(iso, today) {
+  const time = iso.slice(11, 16);
+  const day = dayName(iso.slice(0, 10), today);
+  if (time === "00:00") return day;
+  return day === "today" ? time : `${day} ${time}`;
+}
+
+// Out since 09:10 today, or since another day.
+function since(iso, today) {
+  return iso.slice(0, 10) === today ? iso.slice(11, 16) : when(iso, today);
+}
+
+function personText(p, away) {
+  const today = away.today;
+  if (p.away && p.reason === "away_until") return [`Away until ${when(p.until, today)}.`, "Away", "away"];
+  if (p.away) return [`Away since ${since(p.presence.since, today)}, from Home Assistant.`, "Away", "away"];
+  if (p.until) {
+    const back = when(p.until, today);
+    return [`Due back ${/^\d/.test(back) ? "at " : ""}${back}. Warming up their rooms.`, "Due back", "back"];
+  }
+  if (p.presence?.state === "not_home") {
+    const delay = away.presence_delay_min;
+    const after = delay != null ? ` Counts as away after ${span(delay)}.` : "";
+    return [`Out since ${since(p.presence.since, today)}.${after}`, "Out", ""];
+  }
+  return ["Home.", "Home", ""];
+}
+
+function ensurePerson(p) {
+  if (people.has(p.id)) return people.get(p.id);
+  const node = $("person-tpl").content.firstElementChild.cloneNode(true);
+  node.querySelector(".name").textContent = p.name;
+  const open = node.querySelector(".away-open");
+  const clear = node.querySelector(".away-clear");
+  const form = node.querySelector(".away-form");
+  const error = node.querySelector(".away-error");
+  clear.setAttribute("aria-label", `${p.name} is back now`);
+  const close = () => {
+    form.hidden = true;
+    open.hidden = false;
+    error.hidden = true;
+    open.focus();
+  };
+  open.addEventListener("click", () => {
+    const today = last?.away?.today;
+    const date = form.elements.date;
+    if (today) {
+      date.min = today;
+      if (!date.value) date.value = new Date((dayNumber(today) + 1) * 86400000).toISOString().slice(0, 10);
+    }
+    form.hidden = false;
+    open.hidden = true;
+    date.focus();
+  });
+  node.querySelector(".away-cancel").addEventListener("click", close);
+  form.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const { date, time } = form.elements;
+    const until = time.value ? `${date.value}T${time.value}` : date.value;
+    const save = form.querySelector('button[type="submit"]');
+    save.disabled = true;
+    error.hidden = true;
+    try {
+      await post(`people/${p.id}/away`, { until });
+    } catch (err) {
+      save.disabled = false;
+      error.hidden = false;
+      const text = String(err?.message ?? "");
+      error.textContent = text.includes("in the future")
+        ? "Not saved: pick a time that has not passed."
+        : text.includes("within") ? "Not saved: pick a date in the next 60 days." : "Not saved. Try again.";
+      return;
+    }
+    save.disabled = false;
+    form.reset();
+    close();
+    refresh();
+  });
+  clear.addEventListener("click", async () => {
+    clear.disabled = true;
+    try { await post(`people/${p.id}/away`, { until: null }); } catch { /* the state shows what holds */ }
+    clear.disabled = false;
+    refresh();
+  });
+  $("people-list").appendChild(node);
+  people.set(p.id, node);
+  return node;
+}
+
+function renderPeople(away) {
+  const list = away?.people ?? [];
+  $("people").hidden = !list.length;
+  $("away-note").hidden = !away?.frost;
+  for (const p of list) {
+    const n = ensurePerson(p);
+    const [text, label, kind] = personText(p, away);
+    n.querySelector(".person-state").textContent = text;
+    const badge = n.querySelector(".badge");
+    badge.textContent = label;
+    badge.dataset.kind = kind;
+    // Clearing ends an away until; presence from Home Assistant clears itself.
+    n.querySelector(".away-clear").hidden = !p.until;
+    const open = n.querySelector(".away-open");
+    open.textContent = p.until ? "Change" : "Set away";
+    open.setAttribute("aria-label", p.until ? `Change when ${p.name} is back` : `Set ${p.name} away`);
+  }
+}
+
 function lane(el, intervals, window) {
   el.textContent = "";
   for (const [a, b] of intervals) {
@@ -411,6 +540,7 @@ function render(s) {
     $("banner-text").textContent = `Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time. Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
   }
   renderDryRun(s.telemetry);
+  renderPeople(s.away);
   for (const r of s.rooms) renderRoom(r);
   renderAlerts(s.alerts);
 

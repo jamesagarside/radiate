@@ -246,6 +246,33 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .meta { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .fire { justify-self: start; }
 
+/* People: away per person. Away is a calm, user-made state, so it is cool like a held
+   setpoint; due back is warming up, amber like preheating. */
+.people { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.person { padding: 14px 16px; display: grid; gap: 8px; align-content: start; }
+.person header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.person h3 { font-size: 0.98rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.badge[data-kind="away"] { background: var(--cool-soft); color: var(--cool); }
+.badge[data-kind="back"] { background: var(--warn-soft); color: var(--warn); }
+.person-state { font-size: 0.84rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.person-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.person-actions .link { font-size: 0.84rem; }
+.away-form { display: grid; gap: 8px; }
+.away-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+.away-fields label { display: grid; gap: 2px; font-size: 0.78rem; font-weight: 600; flex: 1 1 120px; min-width: 0; }
+.away-fields .muted { font-weight: 400; }
+.away-fields input {
+  font: inherit; font-size: 0.9rem; font-variant-numeric: tabular-nums; padding: 5px 8px; border-radius: 10px;
+  border: 1px solid var(--muted); background: var(--surface); color: var(--text); min-width: 0;
+}
+.away-hint { font-size: 0.75rem; }
+.away-buttons { display: flex; gap: 8px; }
+.away-error { color: var(--warn); font-size: 0.84rem; }
+.away-note {
+  margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; font-size: 0.85rem;
+  background: var(--cool-soft); color: var(--cool);
+}
+
 .alerts {
   padding: 12px 16px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn);
   font-size: 0.9rem; display: grid; gap: 6px; justify-items: start;
@@ -269,7 +296,7 @@ body[data-link="stale"] .status { color: var(--warn); }
 
 /* Touch: every control at least 44 px, without bulking up the desktop layout. */
 @media (pointer: coarse) {
-  .btn, .seg button, .signin-row input { min-height: 44px; }
+  .btn, .seg button, .signin-row input, .away-fields input { min-height: 44px; }
   .seg button { min-width: 44px; }
   .notice-more summary { padding-block: 12px; }
   .step { width: 44px; height: 44px; }

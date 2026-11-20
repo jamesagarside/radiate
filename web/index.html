@@ -74,6 +74,12 @@
       </dl>
     </section>
 
+    <section id="people" aria-labelledby="people-h" hidden>
+      <h2 id="people-h" class="section-h">People</h2>
+      <p class="away-note" id="away-note" hidden>Everyone is away. Rooms are held at frost protection until someone is home or due back.</p>
+      <div class="people" id="people-list"></div>
+    </section>
+
     <section aria-labelledby="rooms-h">
       <h2 id="rooms-h" class="section-h">Rooms</h2>
       <div class="rooms" id="rooms"></div>
@@ -112,6 +118,32 @@
       <p class="reason"></p>
       <footer class="meta"></footer>
       <button class="btn fire" hidden>Fire lit</button>
+    </article>
+  </template>
+
+  <template id="person-tpl">
+    <article class="card person">
+      <header>
+        <h3 class="name"></h3>
+        <span class="badge"></span>
+      </header>
+      <p class="person-state"></p>
+      <div class="person-actions">
+        <button type="button" class="btn away-open">Set away</button>
+        <button type="button" class="link away-clear" hidden>Back now</button>
+      </div>
+      <form class="away-form" hidden>
+        <div class="away-fields">
+          <label>Away until <input type="date" name="date" required></label>
+          <label>Back at <span class="muted">(optional)</span> <input type="time" name="time"></label>
+        </div>
+        <p class="away-hint muted">Without a time, they count as back from the start of that day.</p>
+        <div class="away-buttons">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn away-cancel">Cancel</button>
+        </div>
+        <p class="away-error" role="alert" hidden></p>
+      </form>
     </article>
   </template>
 
