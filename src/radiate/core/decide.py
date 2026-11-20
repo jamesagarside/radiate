@@ -711,7 +711,8 @@ def _pooled_demand_s(st: EngineState, calling: list[RoomConfig]) -> float:
 def _preheat_due(cfg: HouseConfig, rs: RoomState, inp: RoomInput, temp: float, out: float) -> bool:
     """Optimum start: is it time to heat towards the next scheduled setpoint?"""
     nxt, in_s = inp.next_setpoint, inp.next_setpoint_in_s
-    if nxt is None or in_s is None or in_s > PREHEAT_MAX_S or nxt <= temp + cfg.hysteresis_k:
+    horizon = PREHEAT_MAX_S if inp.preheat_max_s is None else inp.preheat_max_s
+    if nxt is None or in_s is None or in_s > horizon or nxt <= temp + cfg.hysteresis_k:
         return False
     # Assume most of the house heats at once (mornings), so the supply factor is low.
     n = sum(1 for r in cfg.rooms if r.controllable)

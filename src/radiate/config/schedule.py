@@ -54,6 +54,19 @@ class DaySchedule:
     def trvzb(self) -> str:
         return " ".join(f"{m // 60:02d}:{m % 60:02d}/{_fmt(sp)}" for m, sp in self.transitions)
 
+    def describe(self) -> str:
+        """The day in words: `19° 06:00 to 08:30 and 21:30 to 22:30, otherwise 14°`."""
+        base = self.transitions[0][1]
+        ends = [m for m, _ in self.transitions[1:]] + [1440]
+        groups: dict[float, list[str]] = {}
+        for (start, sp), end in zip(self.transitions, ends, strict=True):
+            if sp != base:
+                groups.setdefault(sp, []).append(f"{hhmm(start)} to {hhmm(end)}")
+        if not groups:
+            return f"{_fmt(base)}° all day"
+        parts = [f"{_fmt(sp)}° {' and '.join(spans)}" for sp, spans in groups.items()]
+        return f"{', '.join(parts)}, otherwise {_fmt(base)}°"
+
 
 @dataclass(frozen=True, slots=True)
 class WeekSchedule:
@@ -93,9 +106,30 @@ class WeekSchedule:
             tuple(DaySchedule(tuple((m, move(sp)) for m, sp in d.transitions)) for d in self.days)
         )
 
+    def describe(self) -> list[tuple[str, str]]:
+        """Runs of identical days with their description: `("Mon to Fri", "19° ...")`."""
+        runs: list[tuple[int, int]] = []
+        for i, day in enumerate(self.days):
+            if runs and self.days[runs[-1][0]] == day:
+                runs[-1] = (runs[-1][0], i)
+            else:
+                runs.append((i, i))
+        out = []
+        for a, b in runs:
+            first, last = DAYS[a][:3].capitalize(), DAYS[b][:3].capitalize()
+            label = (
+                first if a == b else f"{first} and {last}" if b == a + 1 else f"{first} to {last}"
+            )
+            out.append((label, self.days[a].describe()))
+        return out
+
     def trvzb_payload(self) -> dict[str, str]:
         """Zigbee2MQTT `/set` payload that writes the whole week to a TRVZB."""
         return {f"weekly_schedule_{name}": self.days[i].trvzb() for i, name in enumerate(DAYS)}
+
+
+def hhmm(minute: int) -> str:
+    return f"{minute // 60:02d}:{minute % 60:02d}"
 
 
 def _fmt(sp: float) -> str:

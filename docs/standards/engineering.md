@@ -14,7 +14,7 @@ Radiate is one engine packaged three ways (ADR-0002). The control loop always ru
 | `src/radiate/config` | YAML configuration and schedules | Pure parsing; every problem collected and reported together |
 | `src/radiate/drivers` | Zigbee2MQTT, MQTT, Shelly, the live driver | Pure mapping plus thin transport |
 | `src/radiate/server` | Runtime, HTTP and WebSocket API, demo driver, SQLite state database | The one runtime for every edition |
-| `src/radiate/export` | Elastic export | Never blocks the control loop |
+| `src/radiate/export` | Elastic export, Home Assistant dashboard | Never blocks the control loop |
 | `src/radiate/sim` | Thermal simulator of the reference house | Drives the same `decide` as live |
 | `app/radiate` | Home Assistant App packaging | `run.py` uses the standard library only |
 | `web` | Web UI | See [design standards](design.md) |

@@ -66,6 +66,98 @@ Code: `HeatSource`, config key `rooms[].heat_source`.
 Temperature outside the house, from an optional sensor. The core assumes 5 °C when there is no reading.
 Symbol `T_out`, °C. Code: `Snapshot.outdoor`, config key `house.outdoor_sensor`.
 
+## Household
+
+**Household**:
+The people who live in the house, their routines, and how each room is used. Radiate compiles it into one weekly schedule per room, so nothing downstream of the schedule changes.
+Code: `Household`, `compile_household` in `radiate.config.household`, config key `household`. The week each room follows now: API `GET /api/v1/schedules`, `schedules_view` in `radiate.server.schedules`, the web UI's Schedules section.
+
+**Household setup**:
+The web UI's wizard for the household: People, Routines, Rooms, Temperatures and the Result, the week each room will follow. It saves a saved household.
+Code: `web/setup.js`, `web/household.js` (the draft and `toSection`), `HouseholdSetup` in `radiate.server.setup`, API `GET`, `PUT` and `DELETE /api/v1/household` and `POST /api/v1/household/preview`.
+
+**Saved household**:
+A household saved from the household setup, in `<data_dir>/household.yaml`. It replaces the house file's `household` section for the server, `check-config` and `radiate schedules` given the same data directory. Deleting it goes back to the house file's.
+Code: `radiate.config.saved`, `apply_saved`, `parse_household` and `apply_household` in `radiate.config.site`, `SiteConfig.household_source`, `SiteConfig.file_household`, `SiteConfig.saved_problems`; reason `household.setup`.
+_Avoid_: wizard file, override file.
+
+**Person**:
+Someone who lives in the house. Has an ID, a display name shown only in the UI, and a routine for weekdays and one for the weekend. Can set their own getting-up time, bedtime and weekend days.
+Code: `Person` (`getting_up_min`, `bedtime_min`, `weekend_days`), config key `household.people`.
+
+**Routine**:
+When a person gets up, is out, works from home, and goes to bed, on weekdays or at the weekend.
+Code: `Routine` (`up_min`, `bed_min`, `out`, `work`), config keys `household.people.<id>.weekdays` and `.weekend`.
+
+**Use level**:
+How much a room is used: in use, occasional or unused. Each level has one house-wide temperature, 19, 16 and 14 °C by default. A room's level can differ at weekends.
+Code: `UseLevel`, `Temperatures`, config keys `household.rooms.<id>.use` and `household.temperatures`.
+
+**Night temperature**:
+The temperature every room in a household drops to overnight, from the last person going to bed until shortly before the first gets up. 14 °C by default. A room can set its own.
+°C. Code: `Temperatures.night_c`, `RoomLink.night_c`, config keys `household.temperatures.night` and `household.rooms.<id>.night_temperature`.
+
+**Room kind**:
+How a household room's people use it, which decides when it is warm: `shared` (while any of its people is at home, up and not working), `bedroom` (getting up and going to bed), `office` (working hours), `while_home` (while any of its people is at home and up, working or not) or `all_day` (from the first person up to the last in bed).
+Code: `RoomKind`, `RoomLink.kind`, config key `household.rooms.<id>.kind`. The room's people are `RoomLink.people`.
+
+**Household settings**:
+The durations, temperatures and choices that turn routines into schedules and decide how away behaves. Every one has a default and an allowed range, house-wide, and some can be set per person or per room. The API returns them with the defaults filled in.
+Code: `Timing`, `AwaySettings`, `LIMITS`, `household_view` in `radiate.config.household`; config keys `household.timing`, `household.away`, `household.weekend_days`; API `household` in `GET /api/v1/house`.
+
+**Weekend days**:
+The days that use each person's weekend routine and each room's weekend use level. Saturday and Sunday by default. A person can have their own.
+Code: `Household.weekend_days`, `Person.weekend_days`, config keys `household.weekend_days` and `household.people.<id>.weekend_days`.
+
+**Getting-up time, bedtime**:
+How long a bedroom or shared room counts as in use after someone gets up, and how long a bedroom counts as in use before they go to bed. 30 minutes each by default, house-wide or per person.
+Minutes. Code: `Timing.getting_up_min`, `Timing.bedtime_min`, `Person.getting_up_min`, `Person.bedtime_min`, config keys `household.timing.getting_up_min`, `household.timing.bedtime_min`.
+
+**Merge gap**:
+Warm periods this close together, or closer, join into one, measured on the valve schedule. 30 minutes by default.
+Minutes. Code: `Timing.merge_gap_min`, config key `household.timing.merge_gap_min`.
+
+**Fixed preheat**:
+How early each warm period starts in a room's valve schedule, so the room is warm in time when the valve runs the schedule without Radiate. 30 minutes by default, house-wide or per room.
+Minutes. Code: `Timing.preheat_min`, `RoomLink.preheat_min`, config keys `household.timing.preheat_min` and `household.rooms.<id>.preheat_min`.
+_Avoid_: preheat on its own for this; optimum start is the learned feature.
+
+**Valve schedule, live schedule**:
+The two weeks a household room compiles to. The valve schedule starts each warm period by the fixed preheat and fits the TRVZB's six changes a day; the schedule mirror and the Shelly fallback use it. The live schedule is what Radiate follows while it runs: each warm period starts when the room is needed, and optimum start decides how early to heat. With `live_preheat: fixed` the two are the same.
+Code: `CompiledHousehold.schedules` and `CompiledHousehold.live`, `SiteConfig.schedule_for` and `SiteConfig.live_schedule_for`, `LivePreheat`, config key `household.timing.live_preheat`.
+
+**Dropped period**:
+A warm period left out of a room's valve schedule to fit the TRVZB's limit. Radiate still heats it while running.
+Code: `DroppedPeriod` (`room_id`, `day_type`, `days`, `start_min`, `end_min`, `setpoint_c`, `text`), `CompiledHousehold.dropped`, `CompiledHousehold.notes`.
+
+**Away**:
+A person treated as not at home, so their part of every routine is dropped when compiling. A person counts as away through an away until, or through presence that has said not home for the presence delay. When the set of people away changes, the runtime recompiles the household.
+Code: `effective_away`, `status` in `radiate.config.away`; `compile_household(away=...)`; `Runtime.away`, `Runtime.presence`. API `GET /api/v1/people`, `away` in `state`.
+
+**Away until**:
+A person's own statement that they are away until a local date and time, set in the web UI, the API or Home Assistant. It counts at once and clears itself at that time. With optimum start it counts right up to that time; with a fixed preheat it stops counting the preheat before it. It wins over a home that presence reported before it was set; arriving home after it was set ends it.
+Code: `Presence.away_until`, `Runtime.set_away`, `Runtime.clear_away`, `Household.return_lead_min`, `RETURN_LEAD_S`, API `POST /api/v1/people/{id}/away`, HA services `radiate.set_away`, `radiate.clear_away`.
+
+**Presence**:
+Whether Home Assistant reports a person as home or not home, and since when. The integration maps a Radiate person to a `person` entity and reports it when it changes and every 15 minutes; `unknown` and `unavailable` are not reported.
+Code: `Presence.state`, `Presence.since`, `Presence.reported_at`, `Runtime.report_presence`, API `POST /api/v1/people/{id}/presence`, radiate-ha `custom_components/radiate/presence.py`, `PRESENCE_HEARTBEAT_MIN`.
+
+**Presence delay**:
+How long presence must say not home before the person counts as away, so short trips do not cool their rooms. 60 minutes by default.
+Minutes. Code: `PRESENCE_DELAY_MIN`, `AwaySettings.presence_delay_min`, config key `household.away.presence_delay_min`.
+
+**Stale presence**:
+Presence that Home Assistant has not reported again within the stale limit, 60 minutes by default. It counts as unknown, not away, so a not home left behind when Home Assistant stops reporting cannot hold anyone away for ever.
+Minutes. Code: `stale` in `radiate.config.away`, `AwaySettings.presence_stale_after_min`, config key `household.away.presence_stale_after_min`, `presence.stale` in the API; reason `away.presence_stale`.
+
+**Return warm-up**:
+How early Radiate can start warming rooms for someone due back from an away until. Within it the return becomes each room's next setpoint, so optimum start heats as early as the room needs. 180 minutes by default.
+Minutes. Code: `next_return`, `Return` in `radiate.config.away`, `Runtime.returning`, `Runtime._apply_return`, `RoomInput.preheat_max_s`, `AwaySettings.return_warmup_min`, config key `household.away.return_warmup_min`, `away.return` in the API; reason `away.return`.
+
+**Everyone away**:
+Every person in the household counts as away. In the `auto` heating mode, the runtime then runs the core in `frost` until someone is home, or until the return warm-up before someone is due back. With `everyone_away: unused` it keeps the household's schedules instead, which hold every room at its unused temperature. The chosen heating mode is not changed, so `off` and `frost` still apply.
+Code: `Runtime.everyone_away`, `Runtime.effective_mode`, `EveryoneAway`, config key `household.away.everyone_away`, `away.frost` in `state`; reasons `away.everyone`, `away.ended`.
+
 ## Valve actuation
 
 **Actuation**:
@@ -138,7 +230,7 @@ The part of the TRV writer that resends a setting when the TRV's reported value 
 Code: `TrvWriter.plan`, `TrvWriter.failed`, `RECONCILE_GRACE_S`, `MAX_ATTEMPTS`, alert `driver.write_failed`, `RoomInput.trv_rejected`, learning gate `valve_rejected`, API `rooms[].valve.rejected`.
 
 **Schedule mirror**:
-Radiate writes each room's weekly schedule into its TRVZB and runs the valve in `auto` mode, so the valve follows the schedule if Radiate stops.
+Radiate writes each room's weekly schedule into its TRVZB and runs the valve in `auto` mode, so the valve follows the schedule if Radiate stops. For a household room it writes the valve schedule, which includes the fixed preheat.
 Code: `TrvOptions.schedule_mirror`, `WeekSchedule.trvzb_payload`, config key `trv.schedule_mirror`.
 
 ## Room model and learning
@@ -268,8 +360,8 @@ Code: `HouseConfig.comfort_horizon_s`.
 _Avoid_: comfort limit (that is the boiler's pooling threshold in K).
 
 **Optimum start**:
-Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag.
-Code: `_preheat_due`, `RoomState.preheating`, UI badge "Preheating".
+Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag. It looks up to three hours ahead, or as far as the return warm-up for a return.
+Code: `_preheat_due`, `PREHEAT_MAX_S`, `RoomInput.preheat_max_s`, `RoomState.preheating`, UI badge "Preheating".
 _Avoid_: preheat as a noun for the feature; use "preheating" for the room state.
 
 **Deadline**:
@@ -421,12 +513,12 @@ The boiler start forced by a room below the frost threshold.
 Code: `frost`, `hard_frost` in `decide`.
 
 **Mode**:
-The house-wide heating mode: `auto` (follow schedules), `frost` (hold every room at the frost threshold), or `off` (no heating, frost protection still active).
-Code: `Mode`, API `POST /api/v1/mode`, HA service `radiate.set_mode`.
+The house-wide heating mode: `auto` (follow schedules), `frost` (hold every room at the frost threshold), or `off` (no heating, frost protection still active). The mode a person chose is `Runtime.mode`; while everyone is away, the core runs in the effective mode, `frost` in place of `auto`.
+Code: `Mode`, `Runtime.mode`, `Runtime.effective_mode`, API `POST /api/v1/mode`, HA service `radiate.set_mode`, HA select `mode` (shows the mode the person chose).
 
 **Store**:
 The hot-water store inside the boiler, enabled by its own relay channel on a schedule.
-Code: `StoreConfig`, `Snapshot.store_relay`, `Actions.store_relay`.
+Code: `StoreConfig`, `Snapshot.store_relay`, `Actions.store_relay`, HA binary sensor `store`.
 _Avoid_: tank, cylinder, DHW.
 
 **Store window**:
@@ -435,7 +527,7 @@ Code: `StoreConfig.windows`, config key `store.windows`.
 
 **Store boost**:
 The store relay turned on outside its windows for a set time, 60 minutes by default.
-Code: `Snapshot.store_boost`, `Runtime.store_boost_until`, API `POST /api/v1/store/boost`, HA service `radiate.boost_store`.
+Code: `Snapshot.store_boost`, `Runtime.store_boost_until`, API `POST /api/v1/store/boost`, HA service `radiate.boost_store`, HA binary sensor `store_boost`.
 
 **Store recovery**:
 The period after the store relay turns on when the boiler heats the store first and radiators get no flow (hot-water priority). Heat availability is 0 and learning is gated.
@@ -549,7 +641,7 @@ The server object that owns configuration, engine state and a driver, runs ticks
 Code: `Runtime` in `radiate.server.runtime`.
 
 **State database**:
-The SQLite file that holds engine state, the house ID, the mode, the Elastic export queue and the tick history.
+The SQLite file that holds engine state, the house ID, the mode, overrides, away state, the Elastic export queue and the tick history.
 Code: `radiate.server.store.Store`, file `<data_dir>/radiate.db`.
 _Avoid_: "store" on its own, which means the hot-water store.
 

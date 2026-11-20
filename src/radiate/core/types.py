@@ -125,6 +125,9 @@ class RoomInput:
     setpoint: float = 18.0
     next_setpoint: float | None = None  # next scheduled setpoint, for optimum start
     next_setpoint_in_s: float | None = None
+    # How far ahead optimum start may look for `next_setpoint`. None: the core's own
+    # horizon (decide.PREHEAT_MAX_S). The runtime widens it for a return after an absence.
+    preheat_max_s: float | None = None
     window_open: bool | None = None
     fire_switch: bool | None = None
     # TRV settings the device did not accept after the reconciler's retries (spec 4.5),

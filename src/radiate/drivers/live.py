@@ -9,6 +9,7 @@ kept in `intended` instead (spec 4.5 one-valve rollout).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import time
 from collections import deque
@@ -17,7 +18,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from radiate.config import SiteConfig
+from radiate.config import SiteConfig, WeekSchedule
 from radiate.core import Actions, Mode, Reason, RoomInput, Snapshot
 from radiate.core.types import RoomRole
 
@@ -92,14 +93,75 @@ class LiveDriver:
         t = self._local()
         return t.hour * 60 + t.minute
 
+    def wall_weekday(self) -> int:
+        return self._local().weekday()
+
+    def schedules(self) -> dict[str, tuple[str | None, WeekSchedule]]:
+        """Each controllable room's week as Radiate follows it now, with its schedule name.
+
+        The name is None for a household room, whose week is compiled for the people
+        at home (see `set_household_schedules`). Household rooms give the live week,
+        with warm-by times; the valve's copy starts each period earlier.
+        """
+        return {
+            rc.id: (self.site.devices[rc.id].schedule, self.site.live_schedule_for(rc.id))
+            for rc in self.cfg.rooms
+            if rc.controllable
+        }
+
     def next_change_s(self, room_id: str) -> float | None:
         """Seconds until the room's schedule next changes its setpoint."""
         rc = next((r for r in self.cfg.rooms if r.id == room_id), None)
         if rc is None or not rc.controllable:
             return None
         t = self._local()
-        _, in_s = self.site.schedule_for(room_id).next_change(t.weekday(), t.hour * 60 + t.minute)
+        week = self.site.live_schedule_for(room_id)
+        _, in_s = week.next_change(t.weekday(), t.hour * 60 + t.minute)
         return in_s - t.second
+
+    def replace_household(self, site: SiteConfig) -> None:
+        """Use `site`'s household from now on: a new setup saved from the web UI.
+
+        Rooms it covers follow its weeks; every other room goes back to the house
+        file's schedule. Only the household changes: devices and settings stay as they
+        are. The runtime hands over the weeks for the people away straight after.
+        """
+        self.site = dataclasses.replace(
+            self.site,
+            devices={
+                rid: dataclasses.replace(dev, schedule=site.devices[rid].schedule)
+                if rid in site.devices
+                else dev
+                for rid, dev in self.site.devices.items()
+            },
+            household=site.household,
+            household_schedules=dict(site.household_schedules),
+            household_live=dict(site.household_live),
+        )
+
+    def set_household_schedules(
+        self,
+        schedules: dict[str, WeekSchedule],
+        live: dict[str, WeekSchedule] | None = None,
+    ) -> None:
+        """Use these weeks for the household's rooms from now on (away changed).
+
+        `schedules` are the valve's weeks: the schedule mirror and the Shelly fallback
+        read them through `site.schedule_for`. `live` are the weeks Radiate follows:
+        snapshots and overrides ending at the next change read them through
+        `site.live_schedule_for`. Without `live`, Radiate follows the valve's weeks.
+        The mirror writes a changed week to the TRV on the next apply, or only logs it
+        in dry run, like every other write.
+        """
+        known = {rid: week for rid, week in schedules.items() if rid in self.site.devices}
+        live_known = {
+            rid: week for rid, week in (live or known).items() if rid in self.site.devices
+        }
+        self.site = dataclasses.replace(
+            self.site,
+            household_schedules={**self.site.household_schedules, **known},
+            household_live={**self.site.household_live, **live_known},
+        )
 
     # --- inbound -----------------------------------------------------------------------
 
@@ -165,7 +227,7 @@ class LiveDriver:
             if rc.id in fire:
                 inp.fire_switch = True
             if rc.controllable:
-                week = self.site.schedule_for(rc.id)
+                week = self.site.live_schedule_for(rc.id)
                 if rc.id in overrides:
                     inp.setpoint = overrides[rc.id]
                 else:
@@ -247,12 +309,7 @@ class LiveDriver:
 
     def _mirror(self, room_id: str) -> dict[str, str]:
         """The room's schedule in the frame its TRV compares setpoints with."""
-        week = self.site.schedule_for(room_id)
-        rc = self.cfg.room(room_id)
-        if rc.role is RoomRole.INTERNAL_SENSOR_ONLY:
-            # The TRV reads about room - bias; spec 4.6 and decide._trv_setpoint.
-            week = week.shifted(-rc.trv_bias_k)
-        return week.trvzb_payload()
+        return self.site.mirror_payload(room_id)
 
     def _send(self, write: Write) -> None:
         if write.delay_s > 0:

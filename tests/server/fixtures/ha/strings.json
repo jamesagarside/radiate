@@ -1,0 +1,183 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Radiate",
+        "description": "Enter the address of your Radiate server. If you installed the Radiate app in Home Assistant, it is found automatically.",
+        "data": {
+          "url": "Server URL",
+          "token": "Access token"
+        },
+        "data_description": {
+          "url": "Address and port of the Radiate server, as shown in its logs.",
+          "token": "Leave empty if the server has no token set"
+        }
+      },
+      "hassio_confirm": {
+        "title": "Radiate app found",
+        "description": "Add the Radiate app running on this Home Assistant?"
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Radiate server. Check the URL and that it is running.",
+      "invalid_auth": "The access token was rejected."
+    },
+    "abort": {
+      "already_configured": "This Radiate house is already set up.",
+      "cannot_connect": "Could not reach the Radiate app."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "People and presence",
+        "description": "Pick the Home Assistant person for each Radiate person: {people}. Radiate counts a person as away once they have been out for its presence delay. Leave a person empty to set their away by hand."
+      }
+    },
+    "abort": {
+      "cannot_connect": "Could not reach the Radiate server. Check that it is running.",
+      "no_people": "The Radiate server has no people. Add a household section to the house file first."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "boiler_firing": { "name": "Boiler firing" },
+      "store": { "name": "Hot-water store" },
+      "store_boost": { "name": "Hot-water boost" },
+      "fire": { "name": "Fire detected" },
+      "valve_untrusted": { "name": "Stuck valve" },
+      "away": { "name": "{person} away" }
+    },
+    "climate": {
+      "room": { "name": "Heating" }
+    },
+    "select": {
+      "demand_mode": {
+        "name": "Demand mode",
+        "state": {
+          "eco": "Eco",
+          "comfort": "Comfort"
+        }
+      },
+      "mode": {
+        "name": "Heating mode",
+        "state": {
+          "auto": "Auto",
+          "frost": "Frost",
+          "off": "Off"
+        }
+      }
+    },
+    "sensor": {
+      "temperature": { "name": "Temperature" },
+      "opening_limit": { "name": "Opening limit" },
+      "heating_gain": { "name": "Heating gain" },
+      "loss_rate": { "name": "Loss rate" },
+      "arrival_lag": { "name": "Arrival lag" },
+      "confidence": { "name": "Model confidence" },
+      "learning": { "name": "Learning" },
+      "boiler_state": {
+        "name": "Boiler state",
+        "state": {
+          "idle": "Idle",
+          "lead": "Opening valves",
+          "firing": "Firing",
+          "rest": "Resting"
+        }
+      },
+      "starts_last_hour": { "name": "Burner starts, last hour" },
+      "predicted_burn": { "name": "Predicted burn" },
+      "pooled_demand": { "name": "Pooled demand" },
+      "outdoor_temperature": { "name": "Outdoor temperature" },
+      "short_cycle_extra_off": { "name": "Short-cycle extra off time" },
+      "burner_hours_today": { "name": "Burner hours today" },
+      "relay_starts_today": { "name": "Starts today" },
+      "oil_today": { "name": "Oil used today" },
+      "heat_today": { "name": "Heat delivered today" },
+      "balance_score_yesterday": { "name": "Balance score, yesterday" },
+      "alerts": { "name": "Alerts" }
+    },
+    "switch": {
+      "fire_switch": { "name": "Fire lit" }
+    }
+  },
+  "exceptions": {
+    "duration_needed": {
+      "message": "Give a duration in minutes when the override ends after a duration."
+    },
+    "duration_conflict": {
+      "message": "A duration only applies when the override ends after a duration."
+    },
+    "unknown_person": {
+      "message": "Radiate has no person {person}. Use a person ID from the house file, or a person entity mapped in the Radiate options."
+    }
+  },
+  "selector": {
+    "override_until": {
+      "options": {
+        "next_change": "Next scheduled change",
+        "duration": "After a duration",
+        "cleared": "Until cleared"
+      }
+    }
+  },
+  "services": {
+    "boost_store": {
+      "name": "Boost hot water",
+      "description": "Turn the hot-water store on for a while, outside its schedule.",
+      "fields": {
+        "minutes": { "name": "Minutes", "description": "How long to boost, up to 180 minutes." }
+      }
+    },
+    "set_mode": {
+      "name": "Set heating mode",
+      "description": "Auto follows schedules. Frost holds every room at the frost threshold. Off stops heating but keeps frost protection.",
+      "fields": {
+        "mode": { "name": "Mode", "description": "auto, frost or off." }
+      }
+    },
+    "set_override": {
+      "name": "Set override",
+      "description": "Hold a room at a temperature until its next scheduled change, for a number of minutes, or until you clear it.",
+      "fields": {
+        "temperature": { "name": "Temperature", "description": "Setpoint to hold, 5 to 28 °C." },
+        "until": {
+          "name": "Until",
+          "description": "When the override ends. Leave it empty to end at the next scheduled change, or set a duration."
+        },
+        "duration_min": {
+          "name": "Duration",
+          "description": "How long to hold the setpoint, in minutes, up to 7 days."
+        }
+      }
+    },
+    "clear_override": {
+      "name": "Clear override",
+      "description": "Return a room to its schedule."
+    },
+    "set_away": {
+      "name": "Set away",
+      "description": "Count a person as away until a date and time. Their rooms follow the people at home. If everyone is away, the house keeps frost protection until someone is due back.",
+      "fields": {
+        "person": {
+          "name": "Person",
+          "description": "Radiate person ID, or their mapped person entity."
+        },
+        "until": {
+          "name": "Until",
+          "description": "When they are back. Their rooms warm up shortly before."
+        }
+      }
+    },
+    "clear_away": {
+      "name": "Clear away",
+      "description": "Count a person as home again.",
+      "fields": {
+        "person": {
+          "name": "Person",
+          "description": "Radiate person ID, or their mapped person entity."
+        }
+      }
+    }
+  }
+}

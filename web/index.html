@@ -79,6 +79,26 @@
       </dl>
     </section>
 
+    <p class="away-note setup-saved" id="setup-saved" role="status" tabindex="-1" hidden></p>
+
+    <section class="card setup-cta" id="setup-cta" aria-labelledby="setup-cta-h" hidden>
+      <div>
+        <h2 id="setup-cta-h">Set up your household</h2>
+        <p class="muted">Tell Radiate who lives here, when you're usually up, out and in bed, and how you use each room. It builds every room's heating schedule from your answers. It takes a few minutes, and you can change anything later.</p>
+      </div>
+      <button type="button" class="btn btn-primary" id="setup-start">Set up your household</button>
+    </section>
+
+    <section id="people" aria-labelledby="people-h" hidden>
+      <div class="section-row">
+        <h2 id="people-h" class="section-h">People</h2>
+        <button type="button" class="link" id="setup-change" hidden>Change household setup</button>
+      </div>
+      <p class="away-note" id="away-note" hidden>Everyone is away. Rooms are held at frost protection until someone is home or due back.</p>
+      <p class="away-note" id="return-note" hidden></p>
+      <div class="people" id="people-list"></div>
+    </section>
+
     <section aria-labelledby="rooms-h">
       <h2 id="rooms-h" class="section-h">Rooms</h2>
       <div class="rooms" id="rooms"></div>
@@ -89,7 +109,36 @@
       <ul id="alerts-list"></ul>
       <button class="btn alerts-more" id="alerts-more" type="button" aria-expanded="false" aria-controls="alerts-list" hidden></button>
     </section>
+
+    <section id="week" aria-labelledby="week-h" hidden>
+      <h2 id="week-h" class="section-h">Schedules</h2>
+      <div class="week-head">
+        <p class="muted">The week each room follows. Blocks are warm periods, darker when warmer.</p>
+        <p class="week-legend" id="week-legend" hidden></p>
+      </div>
+      <p class="away-note" id="week-frost" hidden>Everyone is away, so rooms are held at frost protection. These weeks apply again when someone is home or due back.</p>
+      <div class="weeks" id="week-list"></div>
+    </section>
   </main>
+
+  <section class="setup" id="setup" aria-labelledby="setup-h" hidden>
+    <div class="setup-head">
+      <h2 id="setup-h" tabindex="-1">Set up your household</h2>
+      <button type="button" class="link" id="setup-close">Close</button>
+    </div>
+    <ol class="setup-steps" id="setup-steps" aria-label="Steps"></ol>
+    <div class="setup-source" id="setup-source" hidden></div>
+    <p class="setup-resume" id="setup-resume" hidden>Picking up where you left off. <button type="button" class="link" id="setup-restart">Start again</button></p>
+    <form class="card setup-form" id="setup-form" novalidate>
+      <div class="setup-summary" id="setup-summary" role="alert" tabindex="-1" hidden></div>
+      <div class="setup-body" id="setup-body"></div>
+      <div class="setup-nav">
+        <button type="button" class="btn" id="setup-back">Back</button>
+        <p class="setup-progress" id="setup-progress" aria-live="polite"></p>
+        <button type="submit" class="btn btn-primary" id="setup-next">Next</button>
+      </div>
+    </form>
+  </section>
 
   <template id="room-tpl">
     <article class="card room">
@@ -117,6 +166,32 @@
       <p class="reason"></p>
       <footer class="meta"></footer>
       <button class="btn fire" hidden>Fire lit</button>
+    </article>
+  </template>
+
+  <template id="person-tpl">
+    <article class="card person">
+      <header>
+        <h3 class="name"></h3>
+        <span class="badge"></span>
+      </header>
+      <p class="person-state"></p>
+      <div class="person-actions">
+        <button type="button" class="btn away-open">Set away</button>
+        <button type="button" class="link away-clear" hidden>Back now</button>
+      </div>
+      <form class="away-form" hidden>
+        <div class="away-fields">
+          <label>Away until <input type="date" name="date" required></label>
+          <label>Back at <span class="muted">(optional)</span> <input type="time" name="time"></label>
+        </div>
+        <p class="away-hint muted">Without a time, they count as back from the start of that day.</p>
+        <div class="away-buttons">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn away-cancel">Cancel</button>
+        </div>
+        <p class="away-error" role="alert" hidden></p>
+      </form>
     </article>
   </template>
 

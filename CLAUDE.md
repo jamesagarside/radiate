@@ -31,9 +31,10 @@ Do not publish personal details (house name, location) in this repo.
 - Oil combi boiler, on/off only (Worcester Heatslave 12/14, older non-condensing, internal hot-water store kept hot by the boiler).
 - Shelly 2PM Gen4 at the boiler: channel 1 = central heating demand, channel 2 = hot-water store schedule. To be wired by an OFTEC engineer.
 - 9 radiators. 8 have Sonoff TRVZB valves (Zigbee2MQTT). The stairs radiator has a manual valve left slightly open and acts as the system's open path/bypass; Radiate cannot control it.
-- 8 Sonoff SNZB-02B temperature/humidity sensors: three bedrooms, bathroom, dining room, lounge, kitchen, stairs. The toilet valve runs on its internal sensor.
+- 8 Sonoff SNZB-02B temperature/humidity sensors: three bedrooms, bathroom, dining room, lounge, kitchen, toilet. The stairs has no sensor. Each valve takes its room sensor's reading through `external_temperature_input`, pushed by a Home Assistant automation until Radiate runs. `examples/reference-house.yaml` still models the toilet as an internal-sensor room to exercise that role.
 - Lounge has an open fire; kitchen has an Aga (range cooker). No back boilers. Learning must pause when these rooms are heated by them.
-- SMLIGHT SLZB-06U PoE Zigbee coordinator. Home Assistant on dedicated hardware, not the owner's Kubernetes homelab.
+- Sonoff Dongle Max Zigbee coordinator over TCP (EmberZNet), channel 25. Zigbee2MQTT 2.x and Mosquitto run on the owner's Kubernetes homelab next to Home Assistant, deployed by GitOps (that repo, not this one).
+- Home Assistant recorder keeps 14 days; the dashboard's Analysis view reads long-term statistics beyond that.
 - Owner wants metrics exportable to Elastic.
 
 ## Key technical facts

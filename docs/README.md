@@ -26,6 +26,10 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 - [ADR-0003](adr/0003-separate-home-assistant-integration.md): the Home Assistant integration lives in its own Apache-2.0 repository, radiate-ha.
 - [ADR template](adr/template.md): copy it for a new decision.
 
+## Proposals
+
+- [Household setup](proposals/household-setup.md): build heating schedules from how people live (routines, room use levels and away) instead of writing them by hand.
+
 ## Research
 
 - [Prior art and gap analysis](research/prior-art.md): open-source and commercial products, and what none of them do.

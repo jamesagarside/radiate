@@ -1,5 +1,5 @@
-"""Command line: `radiate serve`, `sim`, `check-config`, `discover`, `replay`, `bootstrap` and
-`shelly`."""
+"""Command line: `radiate serve`, `sim`, `check-config`, `discover`, `schedules`, `dashboard`,
+`replay`, `bootstrap` and `shelly`."""
 
 from __future__ import annotations
 
@@ -22,14 +22,12 @@ def _serve(args: argparse.Namespace) -> None:
     )
     if args.demo == bool(args.config):
         sys.exit("Use exactly one of --demo or --config <file>.")
-    site = _load(args.config) if args.config else None
-    if site is not None:
+    # The data directory decides which household saved from the web UI applies.
+    site = _load(args.config, args.data_dir) if args.config else None
+    if site is not None and args.dry_run:
         import dataclasses
 
-        if args.dry_run:
-            site = dataclasses.replace(site, dry_run=True)
-        if args.data_dir:
-            site = dataclasses.replace(site, data_dir=args.data_dir)
+        site = dataclasses.replace(site, dry_run=True)
 
     async def main() -> None:
         import aiohttp
@@ -37,11 +35,9 @@ def _serve(args: argparse.Namespace) -> None:
         session = aiohttp.ClientSession()
         cleanup = []
         if site is None:
-            from radiate.server.demo import DemoDriver
-            from radiate.server.runtime import Runtime
-            from radiate.sim.reference import house_config
+            from radiate.server.demo import demo_runtime
 
-            runtime = Runtime(house_config(), DemoDriver())
+            runtime = demo_runtime()
             queue = None
             interval = 60.0 / args.speed  # one simulated minute per 1/speed real minutes
             banner = f"Radiate demo ({args.speed:g}x)"
@@ -94,9 +90,12 @@ async def _start_live(site, session):
     from radiate.drivers.shelly import ShellyBoiler, ShellyRpc, watchdog_code
     from radiate.export.elastic import MAX_BUFFER
     from radiate.server.runtime import Runtime
+    from radiate.server.setup import HouseholdSetup, SavedFile
     from radiate.server.store import SqliteQueue, Store
 
     log = logging.getLogger("radiate")
+    if site.household_source == "saved":
+        log.info("household: saved from the web UI, in %s", Path(site.data_dir))
     for note in site.notes:
         log.info("config: %s", note)
     store = Store(Path(site.data_dir) / "radiate.db")
@@ -142,7 +141,10 @@ async def _start_live(site, session):
         await asyncio.sleep(1)
     await asyncio.sleep(10 if transport.connected else 0)
 
-    runtime = Runtime(site.house, driver, store=store)
+    runtime = Runtime(
+        site.house, driver, store=store, household=site.household, timezone=site.timezone
+    )
+    runtime.setup = HouseholdSetup(site, SavedFile(site.data_dir))
     for problem in runtime.restore():
         log.warning("restore: %s", problem)
 
@@ -176,9 +178,25 @@ def _sim(args: argparse.Namespace) -> None:
         print(f"{k:{width}}  {b[k]:>11}  {r[k]:>8}")
 
 
+def _household_line(site) -> str | None:
+    from radiate.config.saved import saved_path
+
+    if site.household_source == "saved":
+        return (
+            f"household: saved from the web UI in {saved_path(site.data_dir)}, "
+            "in place of the house file's"
+        )
+    if site.household_source == "house_file":
+        return "household: from the house file"
+    return None
+
+
 def _check_config(args: argparse.Namespace) -> None:
-    site = _load(args.path)
+    site = _load(args.path, args.data_dir)
     print(f"{args.path}: OK")
+    line = _household_line(site)
+    if line:
+        print(f"  {line}")
     for r in site.house.rooms:
         dev = site.devices[r.id]
         parts = [f"role={r.role.value}"]
@@ -196,11 +214,87 @@ def _check_config(args: argparse.Namespace) -> None:
         print(f"  note: {note}")
 
 
-def _load(path: str):
+class _AnyEnv(dict):
+    """Environment for `radiate dashboard`: every variable counts as set.
+
+    The dashboard needs no secrets or hosts, so an unset `${NAME}` is filled with "0"
+    (valid wherever the file expects a number) instead of failing the file.
+    """
+
+    def __contains__(self, key: object) -> bool:
+        return True
+
+    def __missing__(self, key: str) -> str:
+        return "0"
+
+
+def _dashboard(args: argparse.Namespace) -> None:
+    from radiate.config import ConfigError, load_site
+    from radiate.export.dashboard import dashboard_yaml
+
+    try:
+        site = load_site(args.path, env=_AnyEnv(os.environ))
+    except ConfigError as err:
+        sys.exit(str(err))
+    except OSError as err:
+        sys.exit(f"cannot read {args.path}: {err.strerror}")
+    try:
+        text = dashboard_yaml(site, args.title, args.hours, radiate=args.radiate)
+    except ValueError as err:
+        sys.exit(str(err))
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"wrote {args.output}: {len(site.house.rooms)} rooms", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+
+
+def _schedules(args: argparse.Namespace) -> None:
+    import json
+
+    from radiate.config import ConfigError, load_site
+    from radiate.config.household import compile_household
+
+    try:
+        # Schedules need no secrets or hosts, like the dashboard.
+        site = load_site(args.path, env=_AnyEnv(os.environ), data_dir=args.data_dir)
+    except ConfigError as err:
+        sys.exit(str(err))
+    except OSError as err:
+        sys.exit(f"cannot read {args.path}: {err.strerror}")
+    rooms = [r for r in site.house.rooms if r.controllable]
+    if args.trvzb:
+        # What the schedule mirror writes, in each TRV's own frame.
+        payload = {
+            site.devices[r.id].trv: site.mirror_payload(r.id)
+            for r in rooms
+            if site.devices[r.id].trv
+        }
+        print(json.dumps(payload, indent=2))
+        return
+    line = _household_line(site)
+    if line and site.household_source == "saved":
+        print(line[0].upper() + line[1:] + ".")
+    for r in rooms:
+        source = site.devices[r.id].schedule
+        print(f"{r.name}: " + ("from the household" if source is None else f"schedule {source}"))
+        described = site.schedule_for(r.id).describe()
+        width = max(len(label) for label, _ in described)
+        for label, text in described:
+            print(f"  {label:<{width}}  {text}")
+    notes = compile_household(site.household).notes if site.household else ()
+    if notes:
+        print("Notes:")
+        for note in notes:
+            print(f"  {note}")
+
+
+def _load(path: str, data_dir: str | None = None):
     from radiate.config import ConfigError, load_site
 
     try:
-        return load_site(path)
+        return load_site(path, data_dir=data_dir)
     except ConfigError as err:
         sys.exit(str(err))
     except OSError as err:
@@ -243,6 +337,12 @@ def _shelly(args: argparse.Namespace) -> None:
                 sys.exit(1)
 
     asyncio.run(main())
+
+
+DATA_DIR_HELP = (
+    "override house.data_dir: a household saved from the web UI there replaces the house "
+    "file's, as it does for serve"
+)
 
 
 def _discover(args: argparse.Namespace) -> None:
@@ -428,7 +528,34 @@ def build_parser() -> argparse.ArgumentParser:
     m.set_defaults(func=_sim)
     c = sub.add_parser("check-config", help="validate a house configuration file")
     c.add_argument("path")
+    c.add_argument("--data-dir", help=DATA_DIR_HELP)
     c.set_defaults(func=_check_config)
+    d = sub.add_parser("dashboard", help="print a Home Assistant dashboard for the house")
+    d.add_argument("path", help="house configuration file")
+    d.add_argument("--title", default="Heating", help="dashboard title")
+    d.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="window for the live trends and history on the Rooms view (1 to 336)",
+    )
+    d.add_argument("-o", "--output", help="write the YAML to this file instead of stdout")
+    d.add_argument(
+        "--no-radiate",
+        dest="radiate",
+        action="store_false",
+        help="leave out Radiate's own entities, for a house running Zigbee2MQTT only",
+    )
+    d.set_defaults(func=_dashboard)
+    w = sub.add_parser("schedules", help="print each room's weekly schedule")
+    w.add_argument("path", help="house configuration file")
+    w.add_argument(
+        "--trvzb",
+        action="store_true",
+        help="print the Zigbee2MQTT /set payload for each TRV as JSON",
+    )
+    w.add_argument("--data-dir", help=DATA_DIR_HELP)
+    w.set_defaults(func=_schedules)
     sh = sub.add_parser("shelly", help="check the boiler relay or install its watchdog")
     sh.add_argument("action", choices=["status", "install-watchdog"])
     sh.add_argument("--config", required=True)

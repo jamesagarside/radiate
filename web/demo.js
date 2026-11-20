@@ -116,7 +116,8 @@ export function createDemoTransport() {
         const p = pending.get(msg.id);
         pending.delete(msg.id);
         if (!p) return;
-        if (msg.status === 200) p.resolve(msg.body);
+        if (p.raw) p.resolve({ status: msg.status, body: msg.body });
+        else if (msg.status === 200) p.resolve(msg.body);
         else p.reject(new Error(typeof msg.body === "string" ? msg.body : `HTTP ${msg.status}`));
       } else if (msg.type === "error") {
         const err = panel.querySelector(".demo-error");
@@ -133,20 +134,24 @@ export function createDemoTransport() {
   // Pause the simulation while the tab is hidden; it resumes where it left off.
   document.addEventListener("visibilitychange", () => worker.postMessage({ type: "pause", paused: document.hidden }));
 
-  const request = async (method, path, body) => {
+  // `raw`: answer { status, body } whatever the status, like the HTTP transport's call().
+  const request = async (method, path, body, raw = false) => {
     await ready;
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve, reject, raw });
       worker.postMessage({ type: "request", id, method, path, body });
     });
   };
 
   return {
-    house: () => ready,
+    // Asked again each time: the household setup changes what it says.
+    house: () => request("GET", "house"),
     // If start-up failed the loading panel says so; leave the status line alone.
     state: () => ready.then(() => latest, () => new Promise(() => {})),
+    get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body),
+    call: (method, path, body) => request(method, path, body, true),
     subscribe(onState) {
       listeners.add(onState);
     },
