@@ -158,7 +158,7 @@ class HouseholdSetup:
             self.saved.write(household_section(household))
         except OSError as err:
             raise SetupError(
-                500, {"message": f"Could not save to {self.saved.where}: {err.strerror}"}
+                500, {"message": f"Can't write {self.saved.where}: {err.strerror}"}
             ) from None
         self._use(rt, apply_household(self.site, household, "saved"))
         return self.view()
@@ -169,7 +169,7 @@ class HouseholdSetup:
             self.saved.delete()
         except OSError as err:
             raise SetupError(
-                500, {"message": f"Could not delete {self.saved.where}: {err.strerror}"}
+                500, {"message": f"Can't delete {self.saved.where}: {err.strerror}"}
             ) from None
         self._use(rt, apply_household(self.site, self.site.file_household, "house_file"))
         return self.view()

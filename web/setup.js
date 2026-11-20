@@ -728,7 +728,7 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
       showErrors(true);
       return;
     }
-    status.textContent = "Save to start using it. Radiate rebuilds every room's schedule and sends it to the valves.";
+    status.textContent = "Save to start using it. Radiate then rebuilds every room's schedule from your answers.";
     box.textContent = "";
     const dropped = H.droppedText(result.rooms);
     for (const n of notes) {

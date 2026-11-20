@@ -332,7 +332,7 @@ def test_a_save_that_cannot_be_written_changes_nothing(tmp_path):
     rt = make(blocked)  # the data dir is a file: writing fails
     with pytest.raises(RequestError) as err:
         handle(rt, "PUT", "household", {"household": draft()})
-    assert err.value.status == 500 and "Could not save" in err.value.body["message"]
+    assert err.value.status == 500 and "Can't write" in err.value.body["message"]
     assert rt.household.people[0].id == "early_riser"
 
 
