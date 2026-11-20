@@ -150,6 +150,35 @@ async def schedules(request: web.Request) -> web.Response:
     return web.json_response(schedules_view(_rt(request)))
 
 
+async def _household(request: web.Request, method: str, with_body: bool) -> web.Response:
+    """The household setup (`bridge.household`). Errors with field paths go as JSON."""
+    rt = _rt(request)
+    try:
+        bridge.setup(rt)  # 404 before the body is read
+        body = await _json(request) if with_body else None
+        return web.json_response(bridge.household(rt, method, body))
+    except bridge.RequestError as err:
+        if err.body is not None:
+            return web.json_response(err.body, status=err.status)
+        raise _http_error(err) from err
+
+
+async def household(request: web.Request) -> web.Response:
+    return await _household(request, "GET", with_body=False)
+
+
+async def household_preview(request: web.Request) -> web.Response:
+    return await _household(request, "PREVIEW", with_body=True)
+
+
+async def household_save(request: web.Request) -> web.Response:
+    return await _household(request, "PUT", with_body=True)
+
+
+async def household_revert(request: web.Request) -> web.Response:
+    return await _household(request, "DELETE", with_body=False)
+
+
 async def set_away(request: web.Request) -> web.Response:
     return await _post(
         request, bridge.set_away, request.match_info["person_id"], lookup=bridge.person
@@ -221,6 +250,10 @@ def create_app(
             web.post("/api/v1/mode", set_mode),
             web.get("/api/v1/people", people),
             web.get("/api/v1/schedules", schedules),
+            web.get("/api/v1/household", household),
+            web.post("/api/v1/household/preview", household_preview),
+            web.put("/api/v1/household", household_save),
+            web.delete("/api/v1/household", household_revert),
             web.post("/api/v1/people/{person_id}/away", set_away),
             web.post("/api/v1/people/{person_id}/presence", set_presence),
             web.get(STREAM_PATH, stream),

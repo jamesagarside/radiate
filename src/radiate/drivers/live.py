@@ -116,6 +116,26 @@ class LiveDriver:
         _, in_s = week.next_change(t.weekday(), t.hour * 60 + t.minute)
         return in_s - t.second
 
+    def replace_household(self, site: SiteConfig) -> None:
+        """Use `site`'s household from now on: a new setup saved from the web UI.
+
+        Rooms it covers follow its weeks; every other room goes back to the house
+        file's schedule. Only the household changes: devices and settings stay as they
+        are. The runtime hands over the weeks for the people away straight after.
+        """
+        self.site = dataclasses.replace(
+            self.site,
+            devices={
+                rid: dataclasses.replace(dev, schedule=site.devices[rid].schedule)
+                if rid in site.devices
+                else dev
+                for rid, dev in self.site.devices.items()
+            },
+            household=site.household,
+            household_schedules=dict(site.household_schedules),
+            household_live=dict(site.household_live),
+        )
+
     def set_household_schedules(
         self,
         schedules: dict[str, WeekSchedule],

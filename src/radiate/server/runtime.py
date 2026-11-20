@@ -65,6 +65,9 @@ class Driver(Protocol):
     # Optional: `set_household_schedules(schedules, live=...)`, the household's rooms
     # compiled again for the people at home: the valve's weeks and the weeks live
     # control follows. The driver uses them from then on.
+    # Optional: `replace_household(site)`, a new household from the web UI's setup
+    # (radiate.server.setup): which rooms it covers, and the house file's schedule for
+    # every other room. `set_household_schedules` follows straight after.
 
 
 OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
@@ -119,8 +122,10 @@ class Runtime:
     everyone_away: bool = False
     # The next known return while it is within the household's return warm-up.
     returning: Return | None = None
+    setup: object | None = None  # radiate.server.setup.HouseholdSetup; None: not offered
     _compiled: dict[frozenset[str], CompiledHousehold] = field(default_factory=dict)
     _stale: frozenset[str] = frozenset()  # people whose presence has gone stale
+    _rebuild: bool = False  # the household changed: push its weeks even if away did not
     _return_logged: float | None = None
     _saved_at: float | None = None
     _away_log: list[Reason] = field(default_factory=list)  # for the exporter, next tick
@@ -356,6 +361,32 @@ class Runtime:
         fresh = replace(p, state=state, since=min(since, now), reported_at=now)
         self._put_presence(person_id, fresh)
 
+    def set_household(self, household: Household | None) -> None:
+        """Use a new household from now on, as saved from the web UI's setup.
+
+        Compiles it for the people away now and hands the weeks to the driver, exactly
+        as a change of who is away does. Away and presence of people no longer in the
+        household are forgotten; everyone else keeps theirs.
+        """
+        self.household = household
+        self._compiled.clear()
+        keep = set(self.people)
+        self.presence = {pid: p for pid, p in self.presence.items() if pid in keep}
+        self._stale = frozenset(pid for pid in self._stale if pid in keep)
+        self._save_away()
+        if household is None:
+            self.away, self.everyone_away, self.returning = frozenset(), False, None
+        message = (
+            f"Household setup changed: schedules rebuilt for {len(household.rooms)} rooms"
+            if household
+            else "Household setup removed: rooms follow their schedules from the house file"
+        )
+        reason = Reason("household.setup", message)
+        self._log(self.driver.clock(), reason)
+        self._away_log.append(reason)
+        self._rebuild = True
+        self._update_away()
+
     def _update_away(self) -> None:
         """Tidy away state, then recompile the household if who is away changed."""
         if self.household is None:
@@ -380,19 +411,22 @@ class Runtime:
             )
             reasons.append(Reason("away.presence_stale", message))
         self._stale = gone_stale
-        if away != self.away:
+        if away != self.away or self._rebuild:
+            changed = away != self.away
             self.away = away
+            self._rebuild = False
             compiled = self._compile(away)
             setter = getattr(self.driver, "set_household_schedules", None)
             if callable(setter):
                 setter(compiled.schedules, live=compiled.live)
-            # Counts only: names are shown in the UI, never logged or exported.
-            reasons.append(
-                Reason(
-                    "away.schedules",
-                    f"Schedules rebuilt: {len(away)} of {len(self.people)} people away",
+            if changed:
+                # Counts only: names are shown in the UI, never logged or exported.
+                reasons.append(
+                    Reason(
+                        "away.schedules",
+                        f"Schedules rebuilt: {len(away)} of {len(self.people)} people away",
+                    )
                 )
-            )
         everyone = everyone_away(self.people, away)
         if everyone != self.everyone_away:
             self.everyone_away = everyone

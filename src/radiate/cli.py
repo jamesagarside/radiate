@@ -21,14 +21,12 @@ def _serve(args: argparse.Namespace) -> None:
     )
     if args.demo == bool(args.config):
         sys.exit("Use exactly one of --demo or --config <file>.")
-    site = _load(args.config) if args.config else None
-    if site is not None:
+    # The data directory decides which household saved from the web UI applies.
+    site = _load(args.config, args.data_dir) if args.config else None
+    if site is not None and args.dry_run:
         import dataclasses
 
-        if args.dry_run:
-            site = dataclasses.replace(site, dry_run=True)
-        if args.data_dir:
-            site = dataclasses.replace(site, data_dir=args.data_dir)
+        site = dataclasses.replace(site, dry_run=True)
 
     async def main() -> None:
         import aiohttp
@@ -36,11 +34,9 @@ def _serve(args: argparse.Namespace) -> None:
         session = aiohttp.ClientSession()
         cleanup = []
         if site is None:
-            from radiate.server.demo import DemoDriver
-            from radiate.server.runtime import Runtime
-            from radiate.sim.reference import house_config
+            from radiate.server.demo import demo_runtime
 
-            runtime = Runtime(house_config(), DemoDriver())
+            runtime = demo_runtime()
             queue = None
             interval = 60.0 / args.speed  # one simulated minute per 1/speed real minutes
             banner = f"Radiate demo ({args.speed:g}x)"
@@ -93,9 +89,12 @@ async def _start_live(site, session):
     from radiate.drivers.shelly import ShellyBoiler, ShellyRpc, watchdog_code
     from radiate.export.elastic import MAX_BUFFER
     from radiate.server.runtime import Runtime
+    from radiate.server.setup import HouseholdSetup, SavedFile
     from radiate.server.store import SqliteQueue, Store
 
     log = logging.getLogger("radiate")
+    if site.household_source == "saved":
+        log.info("household: saved from the web UI, in %s", Path(site.data_dir))
     for note in site.notes:
         log.info("config: %s", note)
     store = Store(Path(site.data_dir) / "radiate.db")
@@ -144,6 +143,7 @@ async def _start_live(site, session):
     runtime = Runtime(
         site.house, driver, store=store, household=site.household, timezone=site.timezone
     )
+    runtime.setup = HouseholdSetup(site, SavedFile(site.data_dir))
     for problem in runtime.restore():
         log.warning("restore: %s", problem)
 
@@ -166,9 +166,25 @@ def _sim(args: argparse.Namespace) -> None:
         print(f"{k:{width}}  {b[k]:>11}  {r[k]:>8}")
 
 
+def _household_line(site) -> str | None:
+    from radiate.config.saved import saved_path
+
+    if site.household_source == "saved":
+        return (
+            f"household: saved from the web UI in {saved_path(site.data_dir)}, "
+            "in place of the house file's"
+        )
+    if site.household_source == "house_file":
+        return "household: from the house file"
+    return None
+
+
 def _check_config(args: argparse.Namespace) -> None:
-    site = _load(args.path)
+    site = _load(args.path, args.data_dir)
     print(f"{args.path}: OK")
+    line = _household_line(site)
+    if line:
+        print(f"  {line}")
     for r in site.house.rooms:
         dev = site.devices[r.id]
         parts = [f"role={r.role.value}"]
@@ -230,7 +246,7 @@ def _schedules(args: argparse.Namespace) -> None:
 
     try:
         # Schedules need no secrets or hosts, like the dashboard.
-        site = load_site(args.path, env=_AnyEnv(os.environ))
+        site = load_site(args.path, env=_AnyEnv(os.environ), data_dir=args.data_dir)
     except ConfigError as err:
         sys.exit(str(err))
     except OSError as err:
@@ -245,6 +261,9 @@ def _schedules(args: argparse.Namespace) -> None:
         }
         print(json.dumps(payload, indent=2))
         return
+    line = _household_line(site)
+    if line and site.household_source == "saved":
+        print(line[0].upper() + line[1:] + ".")
     for r in rooms:
         source = site.devices[r.id].schedule
         print(f"{r.name}: " + ("from the household" if source is None else f"schedule {source}"))
@@ -259,11 +278,11 @@ def _schedules(args: argparse.Namespace) -> None:
             print(f"  {note}")
 
 
-def _load(path: str):
+def _load(path: str, data_dir: str | None = None):
     from radiate.config import ConfigError, load_site
 
     try:
-        return load_site(path)
+        return load_site(path, data_dir=data_dir)
     except ConfigError as err:
         sys.exit(str(err))
     except OSError as err:
@@ -308,6 +327,12 @@ def _shelly(args: argparse.Namespace) -> None:
     asyncio.run(main())
 
 
+DATA_DIR_HELP = (
+    "override house.data_dir: a household saved from the web UI there replaces the house "
+    "file's, as it does for serve"
+)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="radiate")
     sub = p.add_subparsers(required=True)
@@ -327,6 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
     m.set_defaults(func=_sim)
     c = sub.add_parser("check-config", help="validate a house configuration file")
     c.add_argument("path")
+    c.add_argument("--data-dir", help=DATA_DIR_HELP)
     c.set_defaults(func=_check_config)
     d = sub.add_parser("dashboard", help="print a Home Assistant dashboard for the house")
     d.add_argument("path", help="house configuration file")
@@ -352,6 +378,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print the Zigbee2MQTT /set payload for each TRV as JSON",
     )
+    w.add_argument("--data-dir", help=DATA_DIR_HELP)
     w.set_defaults(func=_schedules)
     sh = sub.add_parser("shelly", help="check the boiler relay or install its watchdog")
     sh.add_argument("action", choices=["status", "install-watchdog"])

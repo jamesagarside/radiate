@@ -20,6 +20,7 @@ from radiate.core.types import RoomConfig
 
 from .runtime import Runtime
 from .schedules import schedules_view
+from .setup import HouseholdSetup, SetupError
 
 SETPOINT_MIN_C = 5.0
 SETPOINT_MAX_C = 28.0
@@ -27,12 +28,17 @@ BOOST_MAX_MIN = 180
 
 
 class RequestError(Exception):
-    """A request the API rejects; `status` is the HTTP status code to send."""
+    """A request the API rejects; `status` is the HTTP status code to send.
 
-    def __init__(self, status: int, text: str) -> None:
+    `body`, when set, is sent as JSON instead of `text`: the household setup's
+    field-level errors.
+    """
+
+    def __init__(self, status: int, text: str, body: dict | None = None) -> None:
         super().__init__(text)
         self.status = status
         self.text = text
+        self.body = body
 
 
 def require_object(body: Any) -> dict:
@@ -170,10 +176,38 @@ def set_mode(rt: Runtime, body: Any) -> dict:
     return {"ok": True}
 
 
+def setup(rt: Runtime) -> HouseholdSetup:
+    if not isinstance(rt.setup, HouseholdSetup):
+        raise RequestError(404, "household setup is not available")
+    return rt.setup
+
+
+def household(rt: Runtime, method: str, body: Any = None) -> dict:
+    """The household setup: GET reads it, PUT saves a draft, DELETE goes back to the
+    house file's. `household/preview` (POST) compiles a draft without saving it."""
+    s = setup(rt)
+    try:
+        if method == "GET":
+            return s.view()
+        if method == "PREVIEW":
+            return s.preview(rt, body)
+        if method == "PUT":
+            return s.save(rt, body)
+        if method == "DELETE":
+            return s.revert(rt)
+    except SetupError as err:
+        raise RequestError(err.status, str(err) or "invalid household", err.body) from err
+    raise RequestError(405, "method not allowed")
+
+
 def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
     """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`."""
     method = method.upper()
     parts = [p for p in path.strip("/").split("/") if p]
+    if parts == ["household"] and method in ("GET", "PUT", "DELETE"):
+        return household(rt, method, body)
+    if parts == ["household", "preview"] and method == "POST":
+        return household(rt, "PREVIEW", body)
     if method == "GET":
         if parts == ["house"]:
             return rt.house()
@@ -227,11 +261,9 @@ class DemoSession:
     """
 
     def __init__(self, start_hour: float = 5.5, seed: int = 7) -> None:
-        from radiate.sim.reference import house_config
+        from .demo import demo_runtime
 
-        from .demo import DemoDriver
-
-        self.rt = Runtime(house_config(), DemoDriver(start_hour=start_hour, seed=seed))
+        self.rt = demo_runtime(start_hour=start_hour, seed=seed)
 
     def step(self, count: int = 1) -> None:
         for _ in range(count):
@@ -249,4 +281,5 @@ class DemoSession:
         try:
             return json.dumps({"status": 200, "body": handle(self.rt, method, path, body)})
         except RequestError as err:
-            return json.dumps({"status": err.status, "body": err.text})
+            body = err.body if err.body is not None else err.text
+            return json.dumps({"status": err.status, "body": body})

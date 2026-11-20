@@ -13,6 +13,9 @@ The runtime does not hold schedules; the driver does. Drivers may offer:
 
 Without `schedules()`, household rooms still show (compiled here) and hand-written rooms
 are left out. Names of people are for the UI only: never logged or exported.
+
+`preview_view` gives the same view for a household that is not in use yet, for the
+web UI's setup: what `schedules_view` will say once it is saved.
 """
 
 from __future__ import annotations
@@ -20,8 +23,10 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from radiate.config.away import everyone_away
 from radiate.config.household import (
     CompiledHousehold,
+    EveryoneAway,
     Household,
     RoomLink,
     UseLevel,
@@ -29,6 +34,7 @@ from radiate.config.household import (
     round_half,
 )
 from radiate.config.schedule import DAYS, MAX_TRANSITIONS, WeekSchedule
+from radiate.core import Mode
 
 from .runtime import Runtime
 
@@ -37,12 +43,44 @@ SOURCE_HAND_WRITTEN = "hand_written"
 
 
 def schedules_view(rt: Runtime) -> dict:
-    hh = rt.household
-    now_compiled = compile_household(hh, away=rt.away) if hh else None
-    usual = compile_household(hh) if hh and rt.away else now_compiled
+    # Everyone away in auto: the core holds frost, whatever the weeks say.
+    frost = rt.everyone_away and rt.effective_mode() is not rt.mode
+    return _view(rt, rt.household, rt.away, _driver_weeks(rt), frost)
+
+
+def preview_view(
+    rt: Runtime, household: Household, own: dict[str, tuple[str, WeekSchedule]]
+) -> dict:
+    """The week view as it will be once `household` replaces the one in use.
+
+    Compiled for the people away now who are in it. `own` holds the schedule each room
+    has of its own in the house file, as (name, week): rooms the household leaves out
+    show it.
+    """
+    people = {p.id for p in household.people}
+    away = rt.away & people
+    linked = {r.room_id for r in household.rooms}
+    weeks = {rid: named for rid, named in own.items() if rid not in linked}
+    frost = (
+        rt.mode is Mode.AUTO
+        and rt.returning is None
+        and everyone_away(tuple(p.id for p in household.people), away)
+        and household.away.everyone_away is EveryoneAway.FROST
+    )
+    return _view(rt, household, away, weeks, frost)
+
+
+def _view(
+    rt: Runtime,
+    hh: Household | None,
+    away: frozenset[str],
+    driver_weeks: dict[str, tuple[str | None, WeekSchedule]],
+    frost: bool,
+) -> dict:
+    now_compiled = compile_household(hh, away=away) if hh else None
+    usual = compile_household(hh) if hh and away else now_compiled
     links = {r.room_id: r for r in hh.rooms} if hh else {}
-    names = _names(rt)
-    driver_weeks = _driver_weeks(rt)
+    names = _names(hh)
     rooms = []
     for rc in rt.cfg.rooms:
         if not rc.controllable:
@@ -56,7 +94,7 @@ def schedules_view(rt: Runtime) -> dict:
             item["notes"] = _notes(now_compiled, rc.id)
             people = _depends_on(hh, link)
             item["people"] = [{"id": pid, "name": names[pid]} for pid in people]
-            item["away"] = _away(rc.name, week, usual.live[rc.id], people, rt.away, hh, names)
+            item["away"] = _away(rc.name, week, usual.live[rc.id], people, away, hh, names)
         elif named is not None:
             item = _room(rc.id, rc.name, SOURCE_HAND_WRITTEN, named[0], named[1])
         else:
@@ -65,8 +103,7 @@ def schedules_view(rt: Runtime) -> dict:
     return {
         "now": {"weekday": _weekday(rt), "minute": rt.driver.wall_minutes()},
         "levels": _levels(hh),
-        # Everyone away in auto: the core holds frost, whatever the weeks say.
-        "frost": rt.everyone_away and rt.effective_mode() is not rt.mode,
+        "frost": frost,
         "rooms": rooms,
     }
 
@@ -104,10 +141,10 @@ def _weekday(rt: Runtime) -> int:
     return datetime.fromtimestamp(rt._wall(), ZoneInfo(rt.timezone)).weekday()
 
 
-def _names(rt: Runtime) -> dict[str, str]:
-    if rt.household is None:
+def _names(hh: Household | None) -> dict[str, str]:
+    if hh is None:
         return {}
-    return {p.id: p.name or p.id.replace("_", " ").capitalize() for p in rt.household.people}
+    return {p.id: p.name or p.id.replace("_", " ").capitalize() for p in hh.people}
 
 
 def _levels(hh: Household | None) -> dict | None:
