@@ -103,10 +103,14 @@ class HouseholdSetup:
 
     # --- requests ------------------------------------------------------------------------
 
-    def view(self) -> dict:
+    def view(self, rt: Runtime | None = None) -> dict:
         """`GET household`: the setup in use and everything the wizard needs."""
         site = self.site
         return {
+            # The `person` entities Home Assistant last reported, to link people to:
+            # {"persons": [{"entity_id", "name"}], "reported_at"}, or None without a
+            # report (no integration, or one too old to send it).
+            "ha_persons": rt.ha_persons_view() if rt is not None else None,
             # Where the household in use comes from: "saved" (this setup), "house_file"
             # or None (no household yet).
             "source": site.household_source,
@@ -161,7 +165,7 @@ class HouseholdSetup:
                 500, {"message": f"Can't write {self.saved.where}: {err.strerror}"}
             ) from None
         self._use(rt, apply_household(self.site, household, "saved"))
-        return self.view()
+        return self.view(rt)
 
     def revert(self, rt: Runtime) -> dict:
         """`DELETE household`: forget the saved setup and use the house file's again."""
@@ -172,7 +176,7 @@ class HouseholdSetup:
                 500, {"message": f"Can't delete {self.saved.where}: {err.strerror}"}
             ) from None
         self._use(rt, apply_household(self.site, self.site.file_household, "house_file"))
-        return self.view()
+        return self.view(rt)
 
     # --- helpers -------------------------------------------------------------------------
 
