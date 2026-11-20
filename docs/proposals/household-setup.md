@@ -1,6 +1,13 @@
 # Proposal: household setup
 
-**Status:** compiler, away, household settings and a read-only week view built; wizard not yet. 20 November 2026. The `household` section of the house file and `radiate schedules` are described in [configuration](../configuration.md#household), its settings in [household settings](../configuration.md#household-settings), and away in [configuration](../configuration.md#away).
+**Status:** compiler, away, household settings, a read-only week view and the setup wizard built. 20 November 2026. The `household` section of the house file and `radiate schedules` are described in [configuration](../configuration.md#household), its settings in [household settings](../configuration.md#household-settings), away in [configuration](../configuration.md#away), and where the wizard saves in [set up in the web UI](../configuration.md#set-up-in-the-web-ui).
+
+Not built yet:
+
+- Dragging an edge in the week view to make a room-level adjustment.
+- Mapping people to Home Assistant `person` entities in the wizard. The integration's options do it instead.
+- Rooms from Home Assistant areas or Zigbee2MQTT devices. The wizard lists the rooms in the house file.
+- Checking the wizard visually in a browser. Its logic and markup are tested; the layout hasn't been seen on screen.
 
 Radiate should ask how a household lives and build the heating schedules from the answers. People shouldn't write schedules, and they shouldn't set a temperature for every room and time slot.
 
@@ -102,13 +109,22 @@ How it was built:
 
 ## Setup in the UI
 
-Setup is a short wizard in the web UI, also reachable from Home Assistant through ingress:
+Setup is a short wizard in the web UI, also reachable from Home Assistant through ingress. Without a household, the web UI shows a "Set up your household" card above the rooms; with one, "Change household setup" sits beside the People heading.
 
-1. **People:** names and, optionally, their Home Assistant `person` entities.
+1. **People:** names, adding and removing people. Mapping them to Home Assistant `person` entities stays in the integration's options.
 2. **Routines:** one screen per person: when you get up, whether you go out on weekdays and when you're back, when you go to bed, and whether weekends are different.
 3. **Rooms:** set each room's use level, pick who uses it, and mark offices. Rooms come from the house file or Home Assistant areas.
 4. **Temperatures:** the four house-wide values (in use, occasional, unused, night), with the damp guidance below.
 5. **Result:** a week view per room showing the compiled schedule, with any warm intervals that were dropped to fit the TRV called out in words.
+
+How it was built:
+
+- The answers are prefilled, from the household in use or, for a new one, one person and every room in use (a room with "bed" in its name starts as a bedroom), so a household can click straight through and adjust later.
+- Each step has an "Advanced" disclosure for the settings behind it, each with a one-line explanation and its default: away and presence on People; getting-up time, bedtime and weekend days for each person on Routines; a room's own temperatures and preheat on Rooms; the house-wide timing and weekend days on Temperatures.
+- Before moving on, the server checks the step with the same parser and limits as the house file (`POST /api/v1/household/preview`). Each error comes back with its path and shows next to its answer, with a summary at the top of the step.
+- The Result step shows the compiled week for every room with `web/week.js`, warm periods dropped to fit the TRV in words, and **Save**.
+- Saving never touches the house file. The household goes to `<data_dir>/household.yaml` and replaces the house file's `household` section; "Use the house file's setup instead" deletes it. The server recompiles and hands the new weeks to the driver, as when someone goes away.
+- Leaving part-way keeps a draft in the browser, and the wizard picks up from it next time.
 
 The week view is built, read-only, as the web UI's Schedules section. It reads `GET /api/v1/schedules` and draws each room's week as seven 24-hour bars, with the temperature written above each warm period, hour ticks, a now marker and each day in words. A room that someone being away has changed says so ("Bedroom 3 stays at 14° while Home worker is away.") and shows its usual week. Rooms with a hand-written schedule show it too. The bar comes from pure helpers in `web/week.js`, so the wizard can add draggable edges to the same component.
 
@@ -120,13 +136,13 @@ Afterwards, the same screens edit the answers. Dragging an edge in the week view
 
 | Piece | Location |
 |---|---|
-| People, routines, levels and room links | `household` section of the house file (built), written by the wizard (not built) |
+| People, routines, levels and room links | `household` section of the house file, or `<data_dir>/household.yaml` saved by the wizard, which replaces it (built) |
 | Compile to `WeekSchedule`s | `radiate.config.household`, pure, tested on the reference house (built). It takes the people who are away as an argument, ready for presence |
 | Print the result | `radiate schedules`, with `--trvzb` for the payload each TRV receives (built) |
 | Presence from `person` entities | The Home Assistant integration passes presence to the server through the API, alongside existing overrides (built) |
 | Away without Home Assistant | Server state in SQLite, like overrides, set from the web UI (built) |
 | Week view | `web/week.js`, read from `GET /api/v1/schedules` (built, read-only) |
-| Wizard | `web/` (not built) |
+| Wizard | `web/setup.js` and `web/household.js`, through `GET`, `PUT` and `DELETE /api/v1/household` and `POST /api/v1/household/preview` in `radiate.server.setup` (built) |
 
 ## Worked example
 

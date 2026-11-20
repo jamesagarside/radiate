@@ -335,13 +335,15 @@ done
 - The heating mode.
 - The Elastic export queue.
 
+`<data_dir>/household.yaml` holds the household set up in the web UI, if any. It replaces the house file's `household` section, so pass the same data directory to `radiate check-config` and `radiate schedules` with `--data-dir` to see what the server uses. See [set up in the web UI](configuration.md#set-up-in-the-web-ui).
+
 Radiate saves engine state every 5 minutes and when it stops cleanly. Setpoint overrides are not saved.
 
 If the database is lost or unreadable, Radiate starts from its priors and learns again. It also gets a new house ID, so Elastic sees a new house.
 
 ### Backups
 
-- Back up your configuration file and the data folder.
+- Back up your configuration file and the data folder, which includes any household set up in the web UI.
 - For a consistent copy while the server runs, use `sqlite3 radiate.db ".backup radiate-backup.db"`. Otherwise stop the server and copy all three files.
 - Home Assistant backups include the App's `/data` and config folders.
 

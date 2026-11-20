@@ -68,7 +68,7 @@ mqtt:
 | `timezone` | `Europe/London` | Time zone for schedules and the store windows |
 | `dry_run` | `true` | Read devices, write nothing |
 | `outdoor_sensor` | none | Zigbee2MQTT name of an outdoor temperature sensor. Without one, the model assumes 5 °C |
-| `data_dir` | `./data` | Folder for `radiate.db` |
+| `data_dir` | `./data` | Folder for `radiate.db`, and for `household.yaml` when you set up the household in the web UI |
 | `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale |
 
 ### mqtt
@@ -204,6 +204,23 @@ Each routine has these keys:
 | `preheat_min` | Replaces `timing.preheat_min` in this room, for example a slow room with a small radiator |
 
 A room in `household.rooms` can't also set `schedule` in the `rooms` section. Rooms not listed keep their `schedule`. A passive room has no valve, so it can't be listed.
+
+#### Set up in the web UI
+
+You can set up the household in the web UI instead of writing this section. Without a household, the web UI shows **Set up your household**; with one, **Change household setup** sits beside the People heading. Five short steps ask about the people, their routines, how each room is used and the temperatures, then show the week each room will follow.
+
+The web UI doesn't change the house file, which may be read-only or managed by the Home Assistant App. It saves the household in `household.yaml` in the data directory (`house.data_dir`, or `--data-dir`), in the same form as this section under a `household:` key, so you can paste it into a house file.
+
+When `household.yaml` exists, it replaces the house file's `household` section. The house file's other sections still apply, and a room the saved household leaves out follows its own `schedule`. To go back to the house file's setup, choose **Use the house file's setup instead** in the wizard, or delete the file and restart Radiate.
+
+`check-config` and `radiate schedules` read `household.yaml` from the same data directory as the server, so they agree with it. Give them `--data-dir` when the server runs with one:
+
+```bash
+radiate check-config radiate.yaml --data-dir /data
+radiate schedules radiate.yaml --data-dir /data
+```
+
+`check-config` says which household applies. If the saved household no longer fits the house file, for example because a room was removed, Radiate uses the house file's setup instead, `check-config` notes why, and the wizard shows it.
 
 #### Household settings
 

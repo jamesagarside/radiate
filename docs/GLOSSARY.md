@@ -72,6 +72,15 @@ Symbol `T_out`, °C. Code: `Snapshot.outdoor`, config key `house.outdoor_sensor`
 The people who live in the house, their routines, and how each room is used. Radiate compiles it into one weekly schedule per room, so nothing downstream of the schedule changes.
 Code: `Household`, `compile_household` in `radiate.config.household`, config key `household`. The week each room follows now: API `GET /api/v1/schedules`, `schedules_view` in `radiate.server.schedules`, the web UI's Schedules section.
 
+**Household setup**:
+The web UI's wizard for the household: People, Routines, Rooms, Temperatures and the Result, the week each room will follow. It saves a saved household.
+Code: `web/setup.js`, `web/household.js` (the draft and `toSection`), `HouseholdSetup` in `radiate.server.setup`, API `GET`, `PUT` and `DELETE /api/v1/household` and `POST /api/v1/household/preview`.
+
+**Saved household**:
+A household saved from the household setup, in `<data_dir>/household.yaml`. It replaces the house file's `household` section for the server, `check-config` and `radiate schedules` given the same data directory. Deleting it goes back to the house file's.
+Code: `radiate.config.saved`, `apply_saved`, `parse_household` and `apply_household` in `radiate.config.site`, `SiteConfig.household_source`, `SiteConfig.file_household`, `SiteConfig.saved_problems`; reason `household.setup`.
+_Avoid_: wizard file, override file.
+
 **Person**:
 Someone who lives in the house. Has an ID, a display name shown only in the UI, and a routine for weekdays and one for the weekend. Can set their own getting-up time, bedtime and weekend days.
 Code: `Person` (`getting_up_min`, `bedtime_min`, `weekend_days`), config key `household.people`.
