@@ -90,6 +90,21 @@ class LiveDriver:
         t = self._local()
         return t.hour * 60 + t.minute
 
+    def wall_weekday(self) -> int:
+        return self._local().weekday()
+
+    def schedules(self) -> dict[str, tuple[str | None, WeekSchedule]]:
+        """Each controllable room's week as used now, with its house-file schedule name.
+
+        The name is None for a household room, whose week is compiled for the people
+        at home (see `set_household_schedules`).
+        """
+        return {
+            rc.id: (self.site.devices[rc.id].schedule, self.site.schedule_for(rc.id))
+            for rc in self.cfg.rooms
+            if rc.controllable
+        }
+
     def next_change_s(self, room_id: str) -> float | None:
         """Seconds until the room's schedule next changes its setpoint."""
         rc = next((r for r in self.cfg.rooms if r.id == room_id), None)

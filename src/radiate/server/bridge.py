@@ -19,6 +19,7 @@ from radiate.core import Mode
 from radiate.core.types import RoomConfig
 
 from .runtime import Runtime
+from .schedules import schedules_view
 
 SETPOINT_MIN_C = 5.0
 SETPOINT_MAX_C = 28.0
@@ -182,6 +183,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return {"ok": True}
         if parts == ["people"]:
             return rt.away_view()
+        if parts == ["schedules"]:
+            return schedules_view(rt)
     elif method == "POST":
         if parts == ["mode"]:
             return set_mode(rt, body)

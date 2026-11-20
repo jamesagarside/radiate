@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from radiate.config.schedule import DaySchedule, WeekSchedule
 from radiate.core import Actions, Mode, Snapshot
 from radiate.sim.house import SimHouse
-from radiate.sim.reference import ROOMS, build_house, next_change, setpoint
+from radiate.sim.reference import OCCUPIED, ROOMS, RoomSpec, build_house, next_change, setpoint
 from radiate.sim.runner import STEP_S, Disturbances, _apply, _apply_disturbances, _snapshot
 
 
@@ -23,6 +24,13 @@ class DemoDriver:
 
     def wall_minutes(self) -> int:
         return int((self.house.now % 86400) // 60)
+
+    def wall_weekday(self) -> int:
+        return int(self.house.now // 86400) % 7  # simulated day 0 is a Monday
+
+    def schedules(self) -> dict[str, tuple[str | None, WeekSchedule]]:
+        """The simulator's schedule for each valved room, the same every day."""
+        return {s.id: ("reference", _week(s)) for s in ROOMS if s.trv}
 
     def next_change_s(self, room_id: str) -> float | None:
         spec = next((s for s in ROOMS if s.id == room_id), None)
@@ -78,3 +86,12 @@ class DemoDriver:
             "stairs_c": round(self.house.rooms["stairs"].t, 1),
             "simulated": True,
         }
+
+
+def _week(spec: RoomSpec) -> WeekSchedule:
+    transitions: list[tuple[int, float]] = []
+    for minute in sorted({0, *(edge for period in OCCUPIED for edge in period)}):
+        sp = setpoint(spec, minute)
+        if minute < 1440 and (not transitions or transitions[-1][1] != sp):
+            transitions.append((minute, sp))
+    return WeekSchedule((DaySchedule(tuple(transitions)),) * 7)
