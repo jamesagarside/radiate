@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import RadiateConfigEntry
 from .entity import RadiateEntity
+from .presence import away_entities
 
 
 async def async_setup_entry(
@@ -39,6 +40,7 @@ async def async_setup_entry(
         if room["controllable"] and "valve" in first.get(room["id"], {})
     ]
     async_add_entities(entities)
+    async_add_entities(away_entities(coordinator))
 
 
 class BoilerFiring(RadiateEntity, BinarySensorEntity):
