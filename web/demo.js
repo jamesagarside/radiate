@@ -146,6 +146,7 @@ export function createDemoTransport() {
     house: () => ready,
     // If start-up failed the loading panel says so; leave the status line alone.
     state: () => ready.then(() => latest, () => new Promise(() => {})),
+    get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body),
     subscribe(onState) {
       listeners.add(onState);
