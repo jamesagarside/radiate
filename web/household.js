@@ -7,7 +7,9 @@
 //              weekend_days }], each routine { up, bed, periods: [{ type, from, to }] }
 //              with type "out" or "work";
 //   rooms: [{ id, name, schedule, own, use, weekendUse, weekendDifferent, kind, people,
-//             temperature, night_temperature, unused_temperature, preheat_min }];
+//             temperature, night_temperature, unused_temperature, preheat_min, adjust }];
+//             `adjust` is the room's adjustments, kept as they are: the wizard doesn't
+//             ask about them, the week view changes them, and saving here keeps them.
 //   temperatures, timing, away, weekend_days: as in the house file, every value set.
 // `toSection(draft)` turns it into the house file's `household` section, which the
 // server checks with the same parser as the house file. Errors come back with paths
@@ -198,6 +200,7 @@ export function draftFrom(view) {
       night_temperature: null,
       unused_temperature: null,
       preheat_min: null,
+      adjust: [],
     };
     if (link) {
       const use = link.use;
@@ -209,6 +212,7 @@ export function draftFrom(view) {
       for (const key of ["temperature", "night_temperature", "unused_temperature", "preheat_min"]) {
         room[key] = link[key] ?? null;
       }
+      room.adjust = clone(link.adjust ?? []);
     } else if (section && r.schedule) {
       room.own = true; // the house file's household leaves it on its own schedule
     } else if (!section && /bed/i.test(r.name)) {
@@ -259,6 +263,7 @@ export function toSection(draft) {
     for (const key of ["temperature", "night_temperature", "unused_temperature", "preheat_min"]) {
       if (r[key] != null) item[key] = r[key];
     }
+    if (r.adjust?.length) item.adjust = clone(r.adjust);
     rooms[r.id] = item;
   }
   return {
