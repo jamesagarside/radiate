@@ -322,8 +322,8 @@ async def test_people_routes_need_the_token(client):
 async def test_people_house_and_state(client):
     house = await (await client.get("/api/v1/house", headers=H)).json()
     assert house["people"] == [
-        {"id": "early_riser", "name": "Early riser"},
-        {"id": "home_worker", "name": "Home worker"},
+        {"id": "early_riser", "name": "Early riser", "ha_person": None},
+        {"id": "home_worker", "name": "Home worker", "ha_person": None},
     ]
     people = await (await client.get("/api/v1/people", headers=H)).json()
     assert people["everyone"] is False and people["presence_delay_min"] == 60

@@ -131,6 +131,11 @@ class Runtime:
     everyone_away: bool = False
     # The next known return while it is within the household's return warm-up.
     returning: Return | None = None
+    # The `person` entities Home Assistant last reported, [{"entity_id", "name"}], and
+    # when (wall-clock seconds). Memory only: the integration reports them again at
+    # start-up and every 15 minutes. None: never reported.
+    ha_persons: list[dict] | None = None
+    ha_persons_at: float | None = None
     setup: object | None = None  # radiate.server.setup.HouseholdSetup; None: not offered
     _compiled: dict[frozenset[str], CompiledHousehold] = field(default_factory=dict)
     _stale: frozenset[str] = frozenset()  # people whose presence has gone stale
@@ -447,6 +452,24 @@ class Runtime:
         # Every report, a repeat included, refreshes the presence (the heartbeat).
         fresh = replace(p, state=state, since=min(since, now), reported_at=now)
         self._put_presence(person_id, fresh)
+
+    def report_ha_persons(self, persons: list[dict]) -> None:
+        """The `person` entities Home Assistant has, for the setup wizard to offer.
+
+        Each is `{"entity_id": "person.sam", "name": "Sam"}`. Only kept to show; linking
+        a person is the household's `ha_person`, and presence still comes per person.
+        """
+        self.ha_persons = sorted(persons, key=lambda p: (p["name"].casefold(), p["entity_id"]))
+        self.ha_persons_at = self._wall()
+
+    def ha_persons_view(self) -> dict | None:
+        """The last report of Home Assistant's `person` entities, or None without one."""
+        if self.ha_persons is None or self.ha_persons_at is None:
+            return None
+        return {
+            "persons": [dict(p) for p in self.ha_persons],
+            "reported_at": local_iso(self.ha_persons_at, self.timezone),
+        }
 
     def set_household(self, household: Household | None) -> None:
         """Use a new household from now on, as saved from the web UI's setup.
@@ -774,8 +797,16 @@ class Runtime:
                 "max_starts_per_hour": self.cfg.boiler.max_starts_per_hour,
             },
             # The household's people, for clients that show them or map them to
-            # Home Assistant `person` entities. Empty without a household.
-            "people": [{"id": p["id"], "name": p["name"]} for p in self.away_view()["people"]],
+            # Home Assistant `person` entities. Empty without a household. `ha_person`
+            # is the `person` entity the household links them to, or None.
+            "people": [
+                {
+                    "id": p.id,
+                    "name": p.name or p.id.replace("_", " ").capitalize(),
+                    "ha_person": p.ha_person,
+                }
+                for p in (self.household.people if self.household else ())
+            ],
             # Every household setting with its default filled in, and the allowed
             # ranges, for a setup wizard. None without a household.
             "household": household_view(self.household) if self.household else None,

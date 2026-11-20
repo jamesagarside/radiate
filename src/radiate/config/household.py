@@ -227,6 +227,9 @@ class Person:
     getting_up_min: int | None = None  # None: the household's
     bedtime_min: int | None = None
     weekend_days: frozenset[int] | None = None  # Monday = 0. None: the household's
+    # The Home Assistant `person` entity whose presence counts for this person, such as
+    # `person.sam`. The integration uses it unless its own options map the person.
+    ha_person: str | None = None
 
     def routine(self, day_type: str) -> Routine:
         return self.weekend if day_type == "weekend" else self.weekdays
@@ -453,6 +456,7 @@ def household_view(household: Household) -> dict:
                 "getting_up_min": _or(p.getting_up_min, t.getting_up_min),
                 "bedtime_min": _or(p.bedtime_min, t.bedtime_min),
                 "weekend_days": _day_names(_or(p.weekend_days, household.weekend_days)),
+                "ha_person": p.ha_person,
                 "inherited": [k for k, v in own.items() if v is None],
             }
         )
@@ -609,6 +613,8 @@ def household_section(household: Household) -> dict:
                 item[key] = getattr(p, key)
         if p.weekend_days is not None:
             item["weekend_days"] = _short_days(p.weekend_days)
+        if p.ha_person is not None:
+            item["ha_person"] = p.ha_person
         people[p.id] = item
     out["people"] = people
 

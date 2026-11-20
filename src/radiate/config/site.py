@@ -66,6 +66,9 @@ from .schedule import (
 
 DEFAULT_TRV_BIAS_K = -1.5
 _ID = re.compile(r"^[a-z0-9_]{1,40}$")
+# A Home Assistant `person` entity ID: `person.` and an object ID of lower case letters,
+# digits and `_` that doesn't start or end with `_`, as Home Assistant requires.
+HA_PERSON = re.compile(r"^person\.(?!_)[a-z0-9_]{1,100}(?<!_)$")
 _ENV = re.compile(r"\$\{([A-Z0-9_]+)\}")
 _WINDOW = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-4]):([0-5]\d)$")
 _CLOCK = re.compile(r"^([01]\d|2[0-4]):([0-5]\d)$")
@@ -638,6 +641,7 @@ def _use(ctx: _Ctx, raw: Any, path: str) -> tuple[UseLevel, UseLevel] | None:
 
 def _people(ctx: _Ctx, raw: dict, p: str) -> list[Person]:
     people: list[Person] = []
+    linked: dict[str, str] = {}  # Home Assistant person entity: who it is linked to
     if not raw:
         ctx.err(f"{p}people", "at least one person is required")
     for pid, item in raw.items():
@@ -650,7 +654,15 @@ def _people(ctx: _Ctx, raw: dict, p: str) -> list[Person]:
             continue
         ctx.unknown(
             item,
-            {"name", "weekdays", "weekend", "getting_up_min", "bedtime_min", "weekend_days"},
+            {
+                "name",
+                "weekdays",
+                "weekend",
+                "getting_up_min",
+                "bedtime_min",
+                "weekend_days",
+                "ha_person",
+            },
             f"{at}.",
         )
         name = ctx.get(item, "name", str, "", f"{at}.")
@@ -661,6 +673,9 @@ def _people(ctx: _Ctx, raw: dict, p: str) -> list[Person]:
         getting_up = _minutes(ctx, item, "getting_up_min", "timing.getting_up_min", f"{at}.")
         bedtime = _minutes(ctx, item, "bedtime_min", "timing.bedtime_min", f"{at}.")
         weekend_days = _weekend_days(ctx, item.get("weekend_days"), f"{at}.weekend_days")
+        ha_person = _ha_person(ctx, item, f"{at}.", linked)
+        if ha_person is not None:
+            linked[ha_person] = name or str(pid)
         if weekdays is not None and weekend is not None:
             people.append(
                 Person(
@@ -671,9 +686,27 @@ def _people(ctx: _Ctx, raw: dict, p: str) -> list[Person]:
                     getting_up_min=getting_up,
                     bedtime_min=bedtime,
                     weekend_days=weekend_days,
+                    ha_person=ha_person,
                 )
             )
     return people
+
+
+def _ha_person(ctx: _Ctx, item: dict, path: str, linked: dict[str, str]) -> str | None:
+    """An optional Home Assistant `person` entity ID, linked to one person at most.
+
+    Empty or null means not linked.
+    """
+    raw = ctx.get(item, "ha_person", str, "", path).strip()
+    if not raw:
+        return None
+    if not HA_PERSON.match(raw):
+        ctx.err(f"{path}ha_person", "must be a person entity ID, such as person.sam")
+        return None
+    if raw in linked:
+        ctx.err(f"{path}ha_person", f"{linked[raw]} is already linked to {raw}")
+        return None
+    return raw
 
 
 def _minutes(ctx: _Ctx, raw: dict, key: str, limit: str, path: str) -> int | None:

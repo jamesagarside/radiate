@@ -15,6 +15,7 @@ from collections.abc import Coroutine
 from typing import Any
 
 from radiate.config.away import parse_local
+from radiate.config.site import HA_PERSON
 from radiate.core import DemandMode, Mode
 from radiate.core.types import RoomConfig
 
@@ -109,6 +110,37 @@ def set_presence(rt: Runtime, person_id: str, body: Any) -> dict:
     return {"ok": True, "person": rt.person_view(pid)}
 
 
+HA_PERSONS_MAX = 200
+HA_NAME_MAX = 100
+
+
+def set_ha_persons(rt: Runtime, body: Any) -> dict:
+    """The `person` entities Home Assistant can see, for the setup wizard to offer.
+
+    `{"persons": [{"entity_id": "person.sam", "name": "Sam"}, ...]}`. Replaces the last
+    report. A missing or empty name shows the entity ID instead.
+    """
+    raw = require_object(body).get("persons")
+    if not isinstance(raw, list):
+        raise RequestError(400, "persons must be a list")
+    if len(raw) > HA_PERSONS_MAX:
+        raise RequestError(400, f"persons must have at most {HA_PERSONS_MAX} items")
+    persons: dict[str, dict] = {}
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise RequestError(400, f"persons[{i}] must be an object")
+        entity_id = item.get("entity_id")
+        if not isinstance(entity_id, str) or not HA_PERSON.match(entity_id):
+            raise RequestError(400, f"persons[{i}].entity_id must be a person entity ID")
+        name = item.get("name")
+        if name is not None and not isinstance(name, str):
+            raise RequestError(400, f"persons[{i}].name must be a string")
+        name = (name or "").strip()[:HA_NAME_MAX] or entity_id
+        persons[entity_id] = {"entity_id": entity_id, "name": name}
+    rt.report_ha_persons(list(persons.values()))
+    return {"ok": True, "count": len(persons)}
+
+
 def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
     """Override a room's setpoint.
 
@@ -188,7 +220,7 @@ def household(rt: Runtime, method: str, body: Any = None) -> dict:
     s = setup(rt)
     try:
         if method == "GET":
-            return s.view()
+            return s.view(rt)
         if method == "PREVIEW":
             return s.preview(rt, body)
         if method == "PUT":
@@ -256,6 +288,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return set_settings(rt, body)
         if parts == ["store", "boost"]:
             return boost_store(rt, body)
+        if parts == ["ha", "persons"]:
+            return set_ha_persons(rt, body)
         if len(parts) == 3 and parts[0] == "people":
             if parts[2] == "away":
                 return set_away(rt, parts[1], body)

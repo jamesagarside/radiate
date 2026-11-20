@@ -191,6 +191,10 @@ async def set_presence(request: web.Request) -> web.Response:
     )
 
 
+async def set_ha_persons(request: web.Request) -> web.Response:
+    return await _post(request, bridge.set_ha_persons)
+
+
 async def settings(request: web.Request) -> web.Response:
     return web.json_response(_rt(request).settings())
 
@@ -264,6 +268,7 @@ def create_app(
             web.delete("/api/v1/household", household_revert),
             web.post("/api/v1/people/{person_id}/away", set_away),
             web.post("/api/v1/people/{person_id}/presence", set_presence),
+            web.post("/api/v1/ha/persons", set_ha_persons),
             web.get("/api/v1/settings", settings),
             web.post("/api/v1/settings", set_settings),
             web.get(STREAM_PATH, stream),
