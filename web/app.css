@@ -273,6 +273,60 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
   background: var(--cool-soft); color: var(--cool);
 }
 
+/* Schedules: the week each room follows (week.js). Read-only and rebuilt only when a
+   week changes, so nothing here animates. A block is a warm period; its fill follows
+   the temperature (--level, 0 to 1) and the temperature is written above it, so colour
+   is never the only signal. The heat-coloured edge keeps faint blocks visible. */
+.week-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 10px; font-size: 0.84rem; }
+.week-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.week-key { display: inline-flex; align-items: center; gap: 6px; }
+.weeks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.week { padding: 14px 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.week header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.week h3 { font-size: 0.98rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+/* Changed because someone is away: cool, like the People section's away state. */
+.week[data-away="true"] { border-color: var(--cool); }
+.week-away { padding: 6px 10px; border-radius: 8px; font-size: 0.84rem; background: var(--cool-soft); color: var(--cool); }
+.week-usual, .week-meta { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.week-days { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.week-day { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: end; gap: 8px; }
+.week-dname { font-size: 0.75rem; line-height: 16px; color: var(--muted); }
+.week-day[aria-current="date"] .week-dname { color: var(--text); font-weight: 600; }
+.week-lane { display: grid; gap: 1px; min-width: 0; }
+.week-labels { position: relative; height: 14px; font-size: 0.72rem; line-height: 14px; color: var(--ember); font-variant-numeric: tabular-nums; }
+.week-labels span { position: absolute; top: 0; white-space: nowrap; }
+.week-track {
+  position: relative; height: 16px; border-radius: 4px; background-color: var(--surface-2);
+  /* A faint line every 3 hours. */
+  background-image: repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 12.5%);
+}
+.week-block, .week-swatch { border-radius: 3px; box-shadow: inset 0 0 0 1px var(--heat); }
+.week-block { position: absolute; top: 0; bottom: 0; }
+.week-block::before, .week-swatch::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: var(--heat); opacity: calc(0.3 + var(--level, 1) * 0.7);
+}
+.week-swatch { position: relative; width: 14px; height: 10px; }
+.week-swatch[data-base="true"] { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.week-swatch[data-base="true"]::before { display: none; }
+.week-now {
+  position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px;
+  /* The halo keeps it visible on a block in both themes. */
+  background: var(--text); box-shadow: 0 0 0 1px var(--surface); pointer-events: none;
+}
+.week > .week-now { display: none; } /* until it is placed in today's row */
+.week-ticks { position: relative; height: 1.3em; margin-left: 42px; font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.week-ticks span { position: absolute; top: 0; transform: translateX(-50%); }
+.week-ticks span:nth-child(1) { left: 0; transform: none; }
+.week-ticks span:nth-child(2) { left: 25%; }
+.week-ticks span:nth-child(3) { left: 50%; }
+.week-ticks span:nth-child(4) { left: 75%; }
+.week-ticks span:nth-child(5) { left: 100%; transform: translateX(-100%); }
+.week-summary { margin: 0; display: grid; gap: 2px; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+.week-summary div { display: flex; flex-wrap: wrap; gap: 0 6px; }
+.week-summary dt { font-weight: 600; }
+.week-summary dd { margin: 0; color: var(--muted); }
+
 .alerts {
   padding: 12px 16px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn);
   font-size: 0.9rem; display: grid; gap: 6px; justify-items: start;

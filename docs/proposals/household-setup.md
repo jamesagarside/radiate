@@ -1,6 +1,6 @@
 # Proposal: household setup
 
-**Status:** compiler, away and household settings built; wizard not yet. 20 November 2026. The `household` section of the house file and `radiate schedules` are described in [configuration](../configuration.md#household), its settings in [household settings](../configuration.md#household-settings), and away in [configuration](../configuration.md#away).
+**Status:** compiler, away, household settings and a read-only week view built; wizard not yet. 20 November 2026. The `household` section of the house file and `radiate schedules` are described in [configuration](../configuration.md#household), its settings in [household settings](../configuration.md#household-settings), and away in [configuration](../configuration.md#away).
 
 Radiate should ask how a household lives and build the heating schedules from the answers. People shouldn't write schedules, and they shouldn't set a temperature for every room and time slot.
 
@@ -110,6 +110,8 @@ Setup is a short wizard in the web UI, also reachable from Home Assistant throug
 4. **Temperatures:** the four house-wide values (in use, occasional, unused, night), with the damp guidance below.
 5. **Result:** a week view per room showing the compiled schedule, with any warm intervals that were dropped to fit the TRV called out in words.
 
+The week view is built, read-only, as the web UI's Schedules section. It reads `GET /api/v1/schedules` and draws each room's week as seven 24-hour bars, with the temperature written above each warm period, hour ticks, a now marker and each day in words. A room that someone being away has changed says so ("Bedroom 3 stays at 14° while Home worker is away.") and shows its usual week. Rooms with a hand-written schedule show it too. The bar comes from pure helpers in `web/week.js`, so the wizard can add draggable edges to the same component.
+
 Afterwards, the same screens edit the answers. Dragging an edge in the week view creates a room-level adjustment that survives recompiling, so a person can say "the kitchen stays warm until 23:00" without rewriting routines.
 
 **Copy and defaults** follow the [design standards](../standards/design.md): plain words ("Away until Tuesday", "Unused rooms"), sentence case, 24-hour times. Setting the unused or night temperature below 12 °C shows a note: "Below 12° walls and window frames can get damp, especially in older houses."
@@ -123,7 +125,8 @@ Afterwards, the same screens edit the answers. Dragging an edge in the week view
 | Print the result | `radiate schedules`, with `--trvzb` for the payload each TRV receives (built) |
 | Presence from `person` entities | The Home Assistant integration passes presence to the server through the API, alongside existing overrides (built) |
 | Away without Home Assistant | Server state in SQLite, like overrides, set from the web UI (built) |
-| Wizard and week view | `web/` |
+| Week view | `web/week.js`, read from `GET /api/v1/schedules` (built, read-only) |
+| Wizard | `web/` (not built) |
 
 ## Worked example
 

@@ -13,6 +13,7 @@ from aiohttp import WSMsgType, web
 
 from . import bridge
 from .runtime import Runtime
+from .schedules import schedules_view
 
 RUNTIME = web.AppKey("runtime", Runtime)
 TOKEN = web.AppKey("token", str)
@@ -145,6 +146,10 @@ async def people(request: web.Request) -> web.Response:
     return web.json_response(_rt(request).away_view())
 
 
+async def schedules(request: web.Request) -> web.Response:
+    return web.json_response(schedules_view(_rt(request)))
+
+
 async def set_away(request: web.Request) -> web.Response:
     return await _post(
         request, bridge.set_away, request.match_info["person_id"], lookup=bridge.person
@@ -215,6 +220,7 @@ def create_app(
             web.post("/api/v1/store/boost", boost_store),
             web.post("/api/v1/mode", set_mode),
             web.get("/api/v1/people", people),
+            web.get("/api/v1/schedules", schedules),
             web.post("/api/v1/people/{person_id}/away", set_away),
             web.post("/api/v1/people/{person_id}/presence", set_presence),
             web.get(STREAM_PATH, stream),

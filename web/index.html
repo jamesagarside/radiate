@@ -90,6 +90,16 @@
       <ul id="alerts-list"></ul>
       <button class="btn alerts-more" id="alerts-more" type="button" aria-expanded="false" aria-controls="alerts-list" hidden></button>
     </section>
+
+    <section id="week" aria-labelledby="week-h" hidden>
+      <h2 id="week-h" class="section-h">Schedules</h2>
+      <div class="week-head">
+        <p class="muted">The week each room follows. Blocks are warm periods, darker when warmer.</p>
+        <p class="week-legend" id="week-legend" hidden></p>
+      </div>
+      <p class="away-note" id="week-frost" hidden>Everyone is away, so rooms are held at frost protection. These weeks apply again when someone is home or due back.</p>
+      <div class="weeks" id="week-list"></div>
+    </section>
   </main>
 
   <template id="room-tpl">

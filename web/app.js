@@ -1,11 +1,13 @@
 // Radiate UI: renders /api/v1/state, live over WebSocket with polling fallback.
 // Elements are created once and updated in place so transitions can retarget.
 //
-// All server traffic goes through a transport: { house(), state(), post(path, body),
-// subscribe(onState, onLink) }. The default talks HTTP and WebSocket to the Radiate
+// All server traffic goes through a transport: { house(), state(), get(path),
+// post(path, body), subscribe(onState, onLink) }. The default talks HTTP and WebSocket to the Radiate
 // server and reports the link as "live", "lost" or "auth" through onLink. The static
 // demo (<html data-transport="demo">) swaps in demo.js, which runs the same engine in
 // a Web Worker, needs no token and never loses its link. Both share this one UI.
+
+import { weekView } from "./week.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -100,6 +102,7 @@ function httpTransport() {
     },
     house: async () => (await send("house")).json(),
     state: async () => (await send("state")).json(),
+    get: async (path) => (await send(path)).json(),
     async post(path, body) {
       await send(path, {
         method: "POST",
@@ -487,6 +490,44 @@ function renderPeople(away) {
   }
 }
 
+// Schedules: the week each room follows (week.js). Weeks change rarely, so they are
+// fetched, not streamed: at start, when who is away changes, after midnight and every
+// 10 minutes. Each state moves the now marker. An older server without the route
+// answers 404 and the section stays hidden.
+const WEEK_REFRESH_MS = 10 * 60 * 1000;
+const week = weekView({ list: $("week-list"), legendEl: $("week-legend"), frostEl: $("week-frost") });
+const weekSync = { key: null, minute: null, at: 0, loading: false, gone: false, shown: false };
+
+async function loadWeek() {
+  if (weekSync.loading || weekSync.gone || !transport.get) return;
+  weekSync.loading = true;
+  weekSync.at = Date.now();
+  try {
+    const view = await transport.get("schedules");
+    $("week").hidden = !view.rooms.length;
+    week.update(view);
+    weekSync.shown = true;
+    if (last) week.tick(last.minute_of_day);
+  } catch (err) {
+    if (/HTTP 404|not found/.test(String(err?.message))) weekSync.gone = true;
+    else if (err instanceof AuthError) askForToken();
+    else weekSync.at = Date.now() - WEEK_REFRESH_MS + 30000; // try again in 30 s
+  }
+  weekSync.loading = false;
+}
+
+function syncWeek(s) {
+  const key = JSON.stringify([s.away?.everyone, (s.away?.people ?? []).map((p) => [p.id, p.away])]);
+  const midnight = weekSync.minute != null && s.minute_of_day < weekSync.minute;
+  weekSync.minute = s.minute_of_day;
+  if (key !== weekSync.key || midnight || Date.now() - weekSync.at > WEEK_REFRESH_MS) {
+    weekSync.key = key;
+    loadWeek();
+  } else if (weekSync.shown) {
+    week.tick(s.minute_of_day);
+  }
+}
+
 function lane(el, intervals, window) {
   el.textContent = "";
   for (const [a, b] of intervals) {
@@ -543,6 +584,7 @@ function render(s) {
   renderPeople(s.away);
   for (const r of s.rooms) renderRoom(r);
   renderAlerts(s.alerts);
+  syncWeek(s);
 
   lastAt = new Date();
   delete document.body.dataset.link;
