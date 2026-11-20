@@ -25,6 +25,10 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 - [ADR-0002](adr/0002-deployment-topology.md): one engine packaged three ways, and the cloud never sits in the control loop.
 - [ADR template](adr/template.md): copy it for a new decision.
 
+## Proposals
+
+- [Household setup](proposals/household-setup.md): build heating schedules from how people live (routines, room use levels and away) instead of writing them by hand.
+
 ## Research
 
 - [Prior art and gap analysis](research/prior-art.md): open-source and commercial products, and what none of them do.
