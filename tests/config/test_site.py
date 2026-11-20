@@ -5,7 +5,7 @@ import yaml
 
 from radiate.config import ConfigError, load_site, parse_day, parse_site, parse_week
 from radiate.config.schedule import ScheduleError
-from radiate.core.types import HeatSource, RoomRole
+from radiate.core.types import DemandMode, HeatSource, RoomRole
 from radiate.sim.reference import ROOMS, setpoint
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "reference-house.yaml"
@@ -201,6 +201,19 @@ def test_shifted_schedule_stays_in_trvzb_steps():
     up = week.shifted(1.5)
     assert up.days[0].trvzb() == "00:00/17.5 06:30/19.5 22:30/17.5"
     assert parse_week("00:00/34").shifted(3).days[0].trvzb() == "00:00/35"
+
+
+def test_demand_mode():
+    boiler = parse_site(minimal()).house.boiler
+    assert boiler.demand_mode is DemandMode.ECO and boiler.eco_limit_k == 1.5
+    boiler = parse_site(minimal(boiler={"demand_mode": "comfort", "eco_limit_k": 2})).house.boiler
+    assert boiler.demand_mode is DemandMode.COMFORT and boiler.eco_limit_k == 2.0
+    with pytest.raises(ConfigError) as err:
+        parse_site(minimal(boiler={"demand_mode": "turbo", "eco_limit_k": 4}))
+    assert "boiler.demand_mode: must be eco or comfort" in err.value.problems
+    assert "boiler.eco_limit_k: must be 0.5 to 3" in err.value.problems
+    with pytest.raises(ConfigError, match="eco_limit_k: must be at least comfort_limit_k"):
+        parse_site(minimal(boiler={"comfort_limit_k": 1.2, "eco_limit_k": 1.0}))
 
 
 def test_learning_memory():

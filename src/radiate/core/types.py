@@ -34,6 +34,13 @@ class BoilerState(StrEnum):
     REST = "rest"  # minimum off time running
 
 
+class DemandMode(StrEnum):
+    """How calling rooms fire the boiler (spec 5.3)."""
+
+    ECO = "eco"  # pooled demand: a room on its own waits for others or a wider limit
+    COMFORT = "comfort"  # any calling room past the comfort limit fires the boiler
+
+
 @dataclass(frozen=True, slots=True)
 class RoomConfig:
     id: str
@@ -60,6 +67,8 @@ class BoilerConfig:
     hard_frost_c: float = 5.0
     output_kw: float = 13.0
     nozzle_lph: float | None = None
+    demand_mode: DemandMode = DemandMode.ECO  # the default; the runtime can change it
+    eco_limit_k: float = 1.5  # eco: the most a calling room waits below its target
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +154,9 @@ class Snapshot:
     # How long the driver went without reading the heating relay before this snapshot
     # (Shelly unreachable). After a few minutes the watchdog may have switched it.
     heating_relay_unseen_s: float = 0.0
+    # The demand mode chosen at runtime (spec 5.3). None: `BoilerConfig.demand_mode`.
+    # In the snapshot so the tick history records it and replay decides the same way.
+    demand_mode: DemandMode | None = None
 
 
 @dataclass(slots=True)

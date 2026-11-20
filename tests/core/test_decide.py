@@ -2,6 +2,7 @@ import dataclasses
 
 from radiate.core import (
     BoilerState,
+    DemandMode,
     EngineState,
     HeatSource,
     HouseConfig,
@@ -272,3 +273,77 @@ def test_internal_sensor_room_confidence_is_capped():
         rs.est.p[0][0] = 0.0
     assert st.rooms["loo"].est.confidence == 0.5
     assert st.rooms["bed"].est.confidence == 1.0
+
+
+# --- demand modes (spec 5.3) ------------------------------------------------------------
+
+
+def _learned(cfg: HouseConfig = CFG) -> EngineState:
+    """Learned gains like the simulated house: the small toilet warms fastest."""
+    st = EngineState.new(cfg)
+    st.rooms["bed"].est.theta[0] = 3.0
+    st.rooms["lounge"].est.theta[0] = 4.0
+    st.rooms["loo"].est.theta[0] = 11.0
+    return st
+
+
+def _demand(cfg: HouseConfig, st: EngineState, temps: dict[str, float], minutes: int = 5, **kw):
+    relay, acts = False, None
+    for m in range(minutes):
+        s = snap(m * 60.0, temps, relay=relay, **kw)
+        s.demand_mode = kw.get("mode")
+        acts = decide(cfg, s, st)
+        relay = acts.heating_relay
+    return acts
+
+
+def _with_mode(mode: DemandMode) -> HouseConfig:
+    return dataclasses.replace(CFG, boiler=dataclasses.replace(CFG.boiler, demand_mode=mode))
+
+
+WARM = {"bed": 20.0, "lounge": 20.0, "loo": 20.0, "stairs": 20.0}
+
+
+def test_eco_is_the_default_demand_mode():
+    assert CFG.boiler.demand_mode is DemandMode.ECO and CFG.boiler.eco_limit_k == 1.5
+
+
+def test_comfort_fires_for_one_cold_toilet():
+    cfg = _with_mode(DemandMode.COMFORT)
+    acts = _demand(cfg, _learned(cfg), {**WARM, "loo": 18.8})  # 1.2 K below
+    assert acts.heating_relay
+
+
+def test_eco_toilet_alone_waits_until_the_eco_limit():
+    st = _learned()
+    acts = _demand(CFG, st, {**WARM, "loo": 18.8})
+    assert st.rooms["loo"].calling and not acts.heating_relay
+    assert acts.boiler_state is BoilerState.IDLE
+    # 1.2 K over an 11 K/h gain: about 6.5 minutes of radiator output, under 12.
+    assert 6 * 60 < st.pooled_demand_s < 7 * 60
+    waiting = [r for r in acts.reasons if r.code == "demand.pooled"]
+    assert [r.room_id for r in waiting] == ["loo"]
+    acts = _demand(CFG, st, {**WARM, "loo": 18.4})  # 1.6 K below: past the eco limit
+    assert acts.heating_relay
+
+
+def test_eco_fires_when_rooms_pool_their_demand():
+    st = _learned()
+    # The toilet (6.5 min) and the bedroom 0.5 K below (10 min) together pass 12 min.
+    acts = _demand(CFG, st, {**WARM, "loo": 18.8, "bed": 19.5})
+    assert acts.heating_relay
+    assert not any(r.code == "demand.pooled" for r in acts.reasons)
+
+
+def test_eco_still_fires_for_frost():
+    st = _learned()
+    acts = _demand(CFG, st, {**WARM, "bed": 6.5}, setpoint=7.0)
+    assert acts.heating_relay
+
+
+def test_runtime_demand_mode_overrides_the_configuration():
+    acts = _demand(CFG, _learned(), {**WARM, "loo": 18.8}, mode=DemandMode.COMFORT)
+    assert acts.heating_relay
+    eco = _with_mode(DemandMode.COMFORT)
+    acts = _demand(eco, _learned(eco), {**WARM, "loo": 18.8}, mode=DemandMode.ECO)
+    assert not acts.heating_relay

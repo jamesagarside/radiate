@@ -29,6 +29,7 @@ from .health import (
 from .types import (
     Actions,
     BoilerState,
+    DemandMode,
     HeatSource,
     HouseConfig,
     Mode,
@@ -64,6 +65,8 @@ PREHEAT_MARGIN = 1.2
 INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
 LOCKSHIELD_DECAY = 0.9995  # per firing sample: half-life of about 23 hours of firing
 REJECTED_HOLD_S = 3600.0  # learning stays paused this long after a TRV rejected a setting
+POOL_BURNS = 1.5  # demand worth a burn: this many minimum burns (spec 5.3)
+ECO_LEAD_HOLD = 0.75  # share of that pooled demand that keeps a valve lead going
 # Disturbances that can warm a TRV with its valve shut, so the leak check looks away.
 # Not `unexplained_heat`: the check compares the TRV with the room, which sun or guests
 # warm together, and a strong leak itself raises `unexplained_heat`.
@@ -138,6 +141,7 @@ class EngineState:
     # Set by a restore after downtime or on a first start: how long the relay went
     # unobserved. Used once, on the next tick, by the boiler guard's hand-back.
     relay_unseen_s: float = 0.0
+    pooled_demand_s: float = 0.0  # this tick's pooled demand (spec 5.3)
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -486,19 +490,37 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     )
     preheat = any(st.rooms[rc.id].preheating for rc in calling)
     predicted_burn_s = alloc.t_star_h * 3600 if calling else 0.0
-
-    want_fire = (
-        heating_allowed
-        and bool(calling)
-        and (
-            max_gap > bcfg.comfort_limit_k
-            or predicted_burn_s >= 1.5 * bcfg.min_burn_s
-            or frost
-            or preheat
-        )
-    )
+    st.pooled_demand_s = _pooled_demand_s(st, calling)
+    demand_mode = snap.demand_mode or bcfg.demand_mode
+    worth_a_burn = POOL_BURNS * bcfg.min_burn_s
+    if demand_mode is DemandMode.COMFORT:
+        # Any calling room past the comfort limit, or a long enough predicted burn.
+        demand = max_gap > bcfg.comfort_limit_k or predicted_burn_s >= worth_a_burn
+    else:
+        # Eco: rooms fire the boiler together. A room on its own waits until it is
+        # past the wider eco limit, or until other rooms join it. Once the valves are
+        # opening, a reading 0.1 K higher does not call the start off.
+        pooled = worth_a_burn * (ECO_LEAD_HOLD if guard.state is BoilerState.LEAD else 1.0)
+        demand = st.pooled_demand_s >= pooled or max_gap > bcfg.eco_limit_k
+    want_fire = heating_allowed and bool(calling) and (demand or frost or preheat)
     if hard_frost:
         want_fire = True
+    if (
+        not want_fire
+        and calling
+        and heating_allowed
+        and demand_mode is DemandMode.ECO
+        and guard.state is BoilerState.IDLE
+    ):
+        for rc in calling:
+            reasons.append(
+                Reason(
+                    "demand.pooled",
+                    f"{rc.name}: calling, waiting for more rooms to share a burn (eco)",
+                    rc.id,
+                    values={"pooled_demand_min": st.pooled_demand_s / 60},
+                )
+            )
 
     # Burn extension and minimum-burn tail: keep useful sinks open rather than stopping.
     if guard.state is BoilerState.FIRING and not calling and heating_allowed:
@@ -595,7 +617,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     )
     if guard.state is not prev_state:
         reasons.append(
-            _boiler_reason(prev_state, guard.state, len(calling), predicted_burn_s, max_gap)
+            _boiler_reason(
+                prev_state, guard.state, len(calling), predicted_burn_s, max_gap, st.pooled_demand_s
+            )
         )
 
     # --- 6: openings ---------------------------------------------------------------------
@@ -670,6 +694,18 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         watchdog_handover=handover,
         day_summary=day_summary,
     )
+
+
+def _pooled_demand_s(st: EngineState, calling: list[RoomConfig]) -> float:
+    """Pooled demand (spec 5.3): the full radiator output the calling rooms need
+    between them, as seconds, each room's gap divided by its heating gain. A room that
+    warms quickly needs little of the burner per kelvin, so it counts for less."""
+    total_h = 0.0
+    for rc in calling:
+        rs = st.rooms[rc.id]
+        if rs.temperature is not None:
+            total_h += max(0.0, rs.target - rs.temperature) / max(rs.est.a, 1e-6)
+    return total_h * 3600
 
 
 def _preheat_due(cfg: HouseConfig, rs: RoomState, inp: RoomInput, temp: float, out: float) -> bool:
@@ -855,13 +891,18 @@ def _adopt_reason(kind: str, unseen_s: float) -> Reason:
 
 
 def _boiler_reason(
-    prev: BoilerState, new: BoilerState, n: int, burn_s: float, gap: float
+    prev: BoilerState, new: BoilerState, n: int, burn_s: float, gap: float, pooled_s: float
 ) -> Reason:
     if new is BoilerState.LEAD:
         return Reason(
             "boiler.lead",
             f"{n} room(s) calling, predicted burn {burn_s / 60:.0f} min: opening valves",
-            values={"rooms": n, "predicted_burn_min": burn_s / 60, "max_gap_k": gap},
+            values={
+                "rooms": n,
+                "predicted_burn_min": burn_s / 60,
+                "max_gap_k": gap,
+                "pooled_demand_min": pooled_s / 60,
+            },
         )
     if new is BoilerState.FIRING:
         return Reason("boiler.firing", "Burner called")
