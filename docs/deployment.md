@@ -208,45 +208,15 @@ Each time it starts, the App announces itself to the Supervisor with its host na
 
 ## HACS integration
 
-The integration is a thin client of the server's API. It adds entities and services to Home Assistant but contains no control logic, so heating carries on if Home Assistant stops. It needs Home Assistant 2025.2 or later and [HACS](https://hacs.xyz/).
+The Home Assistant integration lives in its own repository, [radiate-ha](https://github.com/jamesagarside/radiate-ha), which lists its entities and services. It's a thin client of the server's API: it adds entities and services to Home Assistant but contains no control logic, so heating carries on if Home Assistant stops. It needs Home Assistant 2025.2 or later and [HACS](https://hacs.xyz/).
 
-1. In HACS, open the top-right menu, select **Custom repositories**, add `https://github.com/jamesagarside/radiate` with the type **Integration**, then download **Radiate**.
+1. In HACS, open the top-right menu, select **Custom repositories**, add `https://github.com/jamesagarside/radiate-ha` with the type **Integration**, then download **Radiate**.
 2. Restart Home Assistant.
 3. Add the integration:
    - With the App: accept the discovered **Radiate** under **Settings** > **Devices & services**.
    - With a standalone server: go to **Settings** > **Devices & services** > **Add integration** > **Radiate**, and enter the server URL, for example `http://192.0.2.20:8099`, plus the token if you set one.
 
-The integration polls the server every 30 seconds and creates the entities below. If an older server does not report a value, the integration leaves that entity out.
-
-For each room Radiate controls:
-
-- A climate entity. Setting its target temperature (5 to 28 °C in 0.5 °C steps) creates a setpoint override that ends at the room's next scheduled change and survives a server restart. Its attributes show the opening limit, learning state, latest reason, and the override's setpoint (`override_setpoint`), how it ends (`override_until`) and minutes left (`override_expires_in_min`).
-- Sensors: temperature, opening limit, heating gain, loss rate, arrival lag, model confidence and learning state.
-- A Stuck valve binary sensor (problem class). It turns on when the room stays cold through burns that warm other rooms, or warms while its valve should be shut. Either way the valve needs checking.
-
-For each room with an open fire or stove (an episodic heat source):
-
-- A Fire lit switch. Turn it on when you light the fire, so Radiate closes the room's radiator, leaves the room out of boiler demand and pauses its learning. The server forgets it when it restarts.
-- A Fire detected binary sensor, on while Radiate treats the fire as lit, either because of the switch or because the room is warming faster than the radiator explains.
-
-Rooms Radiate cannot control, such as a bypass radiator, get a temperature sensor only.
-
-For the house:
-
-- A Demand mode select (`select.radiate_demand_mode`, unique ID `<house id>_house_demand_mode`) with the options **Eco** and **Comfort**. Eco, the default, runs fewer and longer burns: a room on its own can wait until other rooms need heat too, so they share a burn. Comfort fires the boiler as soon as any room is noticeably cold. The change applies from the server's next tick and survives a restart. Choosing the mode set in the configuration file (`boiler.demand_mode`, shown in the `default_mode` attribute) makes the server follow that file again. The web UI's Eco and Comfort control does the same.
-- Pooled demand (`sensor.radiate_pooled_demand`, unique ID `<house id>_house_pooled_demand`), a diagnostic sensor in minutes: how long the calling rooms need the radiators at full output between them. In eco mode a room waits until this reaches 1.5 times the minimum burn, or until it's more than the eco limit below its target.
-- Boiler state, boiler firing, starts in the last hour, predicted burn and outdoor temperature.
-- Short-cycle extra off time, in minutes. Radiate adds this to the minimum off time for 24 hours after it sees short-cycling. Attributes give the hours left and the effective minimum off.
-- Burner hours today and starts today, plus oil used today (litres) and heat delivered today (kWh) when the configuration has a nozzle rating. They reset at local midnight. Until a burner-firing signal exists they count relay time, so litres and kWh are an upper bound.
-- Balance score for yesterday, 0 to 100. It is higher when rooms reached their setpoints closer together.
-- Alerts: the number of current alerts, with each one's code, message and room in the `alerts` attribute.
-
-Services:
-
-- `radiate.boost_store`: `minutes`, 0 to 180, default 60.
-- `radiate.set_mode`: `auto`, `frost` or `off`.
-- `radiate.set_override`: target one or more Radiate climate entities with a `temperature`. By default the override ends at the room's next scheduled change. Set `duration_min` (1 to 10080) to hold it for that long, or `until: cleared` to hold it until you clear it.
-- `radiate.clear_override`: returns the targeted rooms to their schedules.
+If you added the old `https://github.com/jamesagarside/radiate` custom repository, remove it in HACS and add `radiate-ha` instead. The integration's domain hasn't changed, so its entities and settings carry over.
 
 ## Elastic export
 

@@ -563,7 +563,7 @@ _Avoid_: add-on.
 
 **Integration**:
 The thin Home Assistant client of the server API, installed through HACS. It has no control logic.
-Code: `custom_components/radiate/`.
+Code: `custom_components/radiate/` in the [radiate-ha](https://github.com/jamesagarside/radiate-ha) repository.
 
 **Edge**:
 The local standalone server that runs the control loop for the cloud edition. Not built yet.

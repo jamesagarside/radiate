@@ -16,31 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv venv --python 3.13 && uv pip install -e ".[dev]"
-      - run: uv run --no-sync ruff check src tests custom_components
-      - run: uv run --no-sync ruff format --check src tests custom_components
+      - run: uv run --no-sync ruff check src tests scripts
+      - run: uv run --no-sync ruff format --check src tests scripts
       - run: uv run --no-sync pytest -q
 
-  home-assistant:
-    name: Home Assistant integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv venv --python 3.13 && uv pip install pytest-homeassistant-custom-component
-      - run: uv run --no-sync pytest -q tests/ha
-
-  hassfest:
-    name: hassfest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: home-assistant/actions/hassfest@master
-
-  hacs:
-    name: HACS validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: hacs/action@main
-        with:
-          category: integration
-          ignore: brands

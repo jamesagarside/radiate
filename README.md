@@ -35,9 +35,9 @@ To run against real devices, describe your house in a YAML file, check it, and s
 
 The server records every tick, so `radiate replay` shows what Radiate would have done during a dry run, and `radiate bootstrap` relearns the room models from that history. Before you turn dry run off, install the boiler watchdog with `radiate shelly install-watchdog`. See [replay and bootstrap](docs/deployment.md#replay-and-bootstrap) and [Shelly watchdog](docs/deployment.md#shelly-watchdog).
 
-To run Radiate in Docker, on a Raspberry Pi, as a Home Assistant App or with the HACS integration, see [deployment](docs/deployment.md).
+To run Radiate in Docker, on a Raspberry Pi or as a Home Assistant App, see [deployment](docs/deployment.md). For entities and services in Home Assistant, install the [radiate-ha](https://github.com/jamesagarside/radiate-ha) integration through HACS.
 
-Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). The Home Assistant integration tests run in a separate environment; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Why
 
@@ -96,9 +96,12 @@ The [documentation index](docs/README.md) lists everything. The main pages:
 - [Feature coverage matrix](docs/research/coverage-matrix.md)
 - [ADR-0001: standalone, not a VTherm companion](docs/adr/0001-standalone-vs-vtherm-companion.md)
 - [ADR-0002: one engine, three editions](docs/adr/0002-deployment-topology.md)
+- [ADR-0003: Home Assistant integration in its own repository](docs/adr/0003-separate-home-assistant-integration.md)
 - Source analyses: [Versatile Thermostat](docs/research/vtherm.md), [Better Thermostat](docs/research/better-thermostat.md), [commercial products](docs/research/commercial.md), [provenance](docs/research/provenance.md)
 - [Reverse-engineering and clean-room policy](docs/research/reverse-engineering-policy.md)
 
 ## Licence
 
 [Elastic License 2.0](LICENSE) (ELv2). Free to use, modify and self-host. You may not offer Radiate as a hosted or managed service, or remove licensing notices. ELv2 is source-available rather than OSI-approved open source.
+
+The Home Assistant integration, [radiate-ha](https://github.com/jamesagarside/radiate-ha), is a separate repository under the Apache License 2.0.

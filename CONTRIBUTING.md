@@ -28,26 +28,23 @@ The main suite covers the core, configuration, drivers, server and simulator:
 .venv/bin/pytest
 ```
 
-The Home Assistant integration tests need `pytest-homeassistant-custom-component`, which pins its own Home Assistant version, so they run in a separate environment, `.venv-ha`:
+The Home Assistant integration lives in its own repository, [radiate-ha](https://github.com/jamesagarside/radiate-ha), with its own tests. `tests/server/test_ha_contract.py` checks that the server still returns every field the integration is tested with. If you drop or rename an API field, change radiate-ha first, then regenerate the fixtures in both repositories:
 
 ```bash
-uv venv .venv-ha --python 3.13
-uv pip install --python .venv-ha pytest-homeassistant-custom-component
-.venv-ha/bin/pytest tests/ha
+.venv/bin/python scripts/ha_fixtures.py tests/server/fixtures/ha
+.venv/bin/python scripts/ha_fixtures.py ../radiate-ha/tests/fixtures
 ```
-
-CI also runs hassfest and HACS validation on the integration.
 
 ## Lint and format
 
 CI fails on any ruff finding or unformatted file:
 
 ```bash
-.venv/bin/ruff check src tests custom_components
-.venv/bin/ruff format --check src tests custom_components
+.venv/bin/ruff check src tests scripts
+.venv/bin/ruff format --check src tests scripts
 ```
 
-Run `.venv/bin/ruff format src tests custom_components` to fix formatting.
+Run `.venv/bin/ruff format src tests scripts` to fix formatting.
 
 ## Check the simulator
 
@@ -72,7 +69,6 @@ Never run Radiate against a real boiler or real valves with dry run off, or inst
 ## Pull request checklist
 
 - Tests added or updated, and `pytest` passes.
-- `tests/ha` passes, if you changed `custom_components/radiate`.
 - `ruff check` and `ruff format --check` pass.
 - Simulator compared before and after, if you changed the core.
 - Docs updated: the spec, configuration, deployment or glossary, as the change needs.
