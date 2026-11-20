@@ -177,6 +177,7 @@ def run(
     zigbee_outage: tuple[float, float] | None = None,
     watchdog_windows: tuple[tuple[int, int], ...] = WATCHDOG_SCHEDULE,
     leaking_valves: dict[str, float] | None = None,
+    radiator_output: dict[str, tuple[float, float]] | None = None,
 ) -> Result:
     """One closed-loop run.
 
@@ -185,6 +186,9 @@ def run(
     `zigbee_outage`: no TRV reachable for that span, so Radiate enters safe mode.
     `seized_valves`: no flow at any opening. `leaking_valves`: room id to the share of
     full flow that still passes when the valve is shut (lost calibration).
+    `radiator_output`: room id to (time in s, share of the radiator's rated output from
+    then on), for a radiator that changes part-way, such as one that silts up (share
+    below 1) or is bled or replaced (above 1).
     """
     d = disturbances or Disturbances()
     cfg = cfg or house_config()
@@ -196,6 +200,9 @@ def run(
         house.rooms[rid].radiator.leak = share
     if pump_qmax is not None:
         house.pump_qmax = pump_qmax
+    output_changes = sorted(
+        (at, rid, share) for rid, (at, share) in (radiator_output or {}).items()
+    )
     st = engine or EngineState.new(cfg)
     res = Result(controller, days - warmup_days, engine=st)
     watchdog = Watchdog(windows=watchdog_windows)
@@ -221,6 +228,9 @@ def run(
             burner_s_before = house.boiler.burner_on_s or -1.0
 
         draw = _apply_disturbances(house, d, day, minute, dist_state)
+        while output_changes and house.now >= output_changes[0][0]:
+            _, rid, share = output_changes.pop(0)
+            house.rooms[rid].radiator.rated_w *= share
         if oil_out_at_s is not None and house.now >= oil_out_at_s:
             house.boiler.output_w = 0.0  # tank empty: the burner runs but makes no heat
 
