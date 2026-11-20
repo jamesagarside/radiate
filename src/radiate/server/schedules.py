@@ -5,6 +5,11 @@ shows straight away, with the usual week and a sentence saying why it changed.
 Hand-written rooms show their schedule from the house file. Words come from
 `WeekSchedule.describe`, the same text `radiate schedules` prints.
 
+Household rooms also carry what the week view needs to adjust them: each day's warm
+periods (the edges a person can drag), what the room's adjustments changed, the
+adjustments in words, and the week its routines alone give when they differ. Saving an
+adjustment goes through the household setup's PUT, like any other answer.
+
 The runtime does not hold schedules; the driver does. Drivers may offer:
 
 - `schedules() -> dict[room id, (schedule name or None, WeekSchedule)]`: the week the
@@ -30,8 +35,10 @@ from radiate.config.household import (
     Household,
     RoomLink,
     UseLevel,
+    adjustment_item,
     compile_household,
     round_half,
+    without_adjustments,
 )
 from radiate.config.schedule import DAYS, MAX_TRANSITIONS, WeekSchedule
 from radiate.core import Mode
@@ -79,6 +86,8 @@ def _view(
 ) -> dict:
     now_compiled = compile_household(hh, away=away) if hh else None
     usual = compile_household(hh) if hh and away else now_compiled
+    adjusted = hh is not None and any(r.adjust for r in hh.rooms)
+    routine = compile_household(without_adjustments(hh), away=away) if adjusted else now_compiled
     links = {r.room_id: r for r in hh.rooms} if hh else {}
     names = _names(hh)
     rooms = []
@@ -95,6 +104,7 @@ def _view(
             people = _depends_on(hh, link)
             item["people"] = [{"id": pid, "name": names[pid]} for pid in people]
             item["away"] = _away(rc.name, week, usual.live[rc.id], people, away, hh, names)
+            _adjustments(item, link, now_compiled, routine)
         elif named is not None:
             item = _room(rc.id, rc.name, SOURCE_HAND_WRITTEN, named[0], named[1])
         else:
@@ -104,8 +114,31 @@ def _view(
         "now": {"weekday": _weekday(rt), "minute": rt.driver.wall_minutes()},
         "levels": _levels(hh),
         "frost": frost,
+        # Which days room adjustments mean by "weekdays" and "weekend". None: no household.
+        "weekend_days": [DAYS[d] for d in sorted(hh.weekend_days)] if hh else None,
         "rooms": rooms,
     }
+
+
+def _adjustments(
+    item: dict, link: RoomLink, now: CompiledHousehold, routine: CompiledHousehold | None
+) -> None:
+    """A household room's adjustments, and the warm periods the week view can drag.
+
+    Each day gets `periods`, the live week's warm periods, and `adjusted`, what the
+    room's adjustments changed in it. `routine` is the week its routines alone give, in
+    words, when the adjustments change it.
+    """
+    for i, day in enumerate(item["days"]):
+        day["periods"] = [{"start": a, "end": b} for a, b in now.periods[link.room_id][i]]
+        day["adjusted"] = [
+            {"start": a, "end": b, "keep": keep.value}
+            for a, b, keep in now.adjusted[link.room_id][i]
+        ]
+    item["adjust"] = [{**adjustment_item(a), "text": f"{a.describe()}."} for a in link.adjust]
+    plain = routine.live[link.room_id] if routine is not None else None
+    if link.adjust and plain is not None and plain != now.live[link.room_id]:
+        item["routine"] = [{"days": label, "text": t} for label, t in plain.describe()]
 
 
 def _room(room_id: str, name: str, source: str, schedule: str | None, week: WeekSchedule) -> dict:
@@ -119,6 +152,8 @@ def _room(room_id: str, name: str, source: str, schedule: str | None, week: Week
                 "day": DAYS[i],
                 "transitions": [{"minute": m, "setpoint": sp} for m, sp in day.transitions],
                 "text": day.describe(),
+                "periods": [],
+                "adjusted": [],
             }
             for i, day in enumerate(week.days)
         ],
@@ -126,6 +161,10 @@ def _room(room_id: str, name: str, source: str, schedule: str | None, week: Week
         "notes": [],
         "people": [],
         "away": None,
+        # Household rooms only: the room's adjustments, and its week without them in
+        # words when they change it.
+        "adjust": [],
+        "routine": None,
     }
 
 
