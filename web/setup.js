@@ -229,7 +229,7 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
     const helpId = `${idFor("household.people")}-ha-help`;
     const linkHelp = () =>
       persons
-        ? `${H.linkHelp(draft.away.presence_delay_min)} A link set in the integration's options comes first.`
+        ? `${H.linkHelp(draft.away.presence_delay_min)} A link set in the integration's options takes priority.`
         : `Optional. Type the entity ID, such as person.sam. ${H.linkHelp(draft.away.presence_delay_min)}`;
     const help = h("p", { class: "field-help", id: helpId, text: linkHelp() });
     draft.people.forEach((p, i) => {
