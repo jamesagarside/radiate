@@ -28,17 +28,30 @@ from radiate.core.types import (
 
 from .household import (
     DAMP_BELOW_C,
-    PRESENCE_DELAY_MIN,
+    LIMITS,
+    WEEKEND_DAYS,
+    AwaySettings,
+    EveryoneAway,
     Household,
+    LivePreheat,
     Person,
     RoomKind,
     RoomLink,
     Routine,
     Temperatures,
+    Timing,
     UseLevel,
     compile_household,
 )
-from .schedule import MAX_C, MIN_C, ScheduleError, WeekSchedule, hhmm, parse_week
+from .schedule import (
+    DAY_ALIASES,
+    MAX_C,
+    MIN_C,
+    ScheduleError,
+    WeekSchedule,
+    hhmm,
+    parse_week,
+)
 
 DEFAULT_TRV_BIAS_K = -1.5
 _ID = re.compile(r"^[a-z0-9_]{1,40}$")
@@ -108,12 +121,27 @@ class SiteConfig:
     sensor_max_silence_s: float = 3600.0
     notes: tuple[str, ...] = ()  # non-fatal remarks for the operator
     household: Household | None = None
+    # The household's rooms: the valve's week (fixed preheat, fitted to the TRVZB) and
+    # the week live control follows (see radiate.config.household).
     household_schedules: dict[str, WeekSchedule] = field(default_factory=dict)
+    household_live: dict[str, WeekSchedule] = field(default_factory=dict)
 
     def schedule_for(self, room_id: str) -> WeekSchedule:
+        """The room's week as the valve holds it: the schedule mirror and the fallback."""
         if room_id in self.household_schedules:
             return self.household_schedules[room_id]
         return self.schedules[self.devices[room_id].schedule]
+
+    def live_schedule_for(self, room_id: str) -> WeekSchedule:
+        """The room's week as Radiate follows it while running.
+
+        For a household room with optimum start, warm periods start when the room is
+        needed and the core decides how early to heat. Hand-written schedules are the
+        same in both.
+        """
+        if room_id in self.household_live:
+            return self.household_live[room_id]
+        return self.schedule_for(room_id)
 
     def mirror_payload(self, room_id: str) -> dict[str, str]:
         """The room's week as written to its TRVZB, in the frame the TRV compares with."""
@@ -566,15 +594,78 @@ def _people(ctx: _Ctx, raw: dict, p: str) -> list[Person]:
         if not isinstance(item, dict):
             ctx.err(at, "expected a mapping with weekdays and optionally weekend")
             continue
-        ctx.unknown(item, {"name", "weekdays", "weekend"}, f"{at}.")
+        ctx.unknown(
+            item,
+            {"name", "weekdays", "weekend", "getting_up_min", "bedtime_min", "weekend_days"},
+            f"{at}.",
+        )
         name = ctx.get(item, "name", str, "", f"{at}.")
         weekdays = _routine(ctx, item.get("weekdays"), f"{at}.weekdays")
         weekend = weekdays
         if item.get("weekend") is not None:
             weekend = _routine(ctx, item["weekend"], f"{at}.weekend")
+        getting_up = _minutes(ctx, item, "getting_up_min", "timing.getting_up_min", f"{at}.")
+        bedtime = _minutes(ctx, item, "bedtime_min", "timing.bedtime_min", f"{at}.")
+        weekend_days = _weekend_days(ctx, item.get("weekend_days"), f"{at}.weekend_days")
         if weekdays is not None and weekend is not None:
-            people.append(Person(id=str(pid), weekdays=weekdays, weekend=weekend, name=name))
+            people.append(
+                Person(
+                    id=str(pid),
+                    weekdays=weekdays,
+                    weekend=weekend,
+                    name=name,
+                    getting_up_min=getting_up,
+                    bedtime_min=bedtime,
+                    weekend_days=weekend_days,
+                )
+            )
     return people
+
+
+def _minutes(ctx: _Ctx, raw: dict, key: str, limit: str, path: str) -> int | None:
+    """An optional whole number of minutes in the range `LIMITS[limit]`, or None."""
+    if raw.get(key) is None:
+        return None
+    lim = LIMITS[limit]
+    val = ctx.get(raw, key, float, None, path)
+    if val is None:
+        return None
+    if lim.off is not None and val == lim.off:
+        return int(val)
+    if not lim.lo <= val <= lim.hi or val != int(val):
+        off = f", or {lim.off:g} to turn it off" if lim.off is not None else ""
+        ctx.err(f"{path}{key}", f"must be whole minutes, {lim.lo:g} to {lim.hi:g}{off}")
+        return None
+    return int(val)
+
+
+def _weekend_days(ctx: _Ctx, raw: Any, path: str) -> frozenset[int] | None:
+    """Days of the week as names (`sat`, `saturday`), or None if not given."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        ctx.err(path, "expected a list of days, for example [sat, sun]")
+        return None
+    days: list[int] = []
+    for i, name in enumerate(raw):
+        found = DAY_ALIASES.get(str(name).lower())
+        if found is None or len(found) != 1:
+            ctx.err(f"{path}[{i}]", f"{name!r} is not a day: use mon to sun")
+            return None
+        days.append(found[0])
+    if len(set(days)) != len(days):
+        ctx.err(path, "a day is listed twice")
+        return None
+    return frozenset(days)
+
+
+def _choice(ctx: _Ctx, raw: dict, key: str, kind: type, default: Any, path: str) -> Any:
+    value = ctx.get(raw, key, str, default.value, path)
+    try:
+        return kind(value)
+    except ValueError:
+        ctx.err(f"{path}{key}", "must be " + " or ".join(v.value for v in kind))
+        return default
 
 
 def _room_link(
@@ -590,12 +681,24 @@ def _room_link(
     if not isinstance(item, dict):
         ctx.err(at, "expected a mapping with use and optionally kind, people and temperature")
         return None
-    ctx.unknown(item, {"use", "kind", "people", "temperature"}, f"{at}.")
+    ctx.unknown(
+        item,
+        {
+            "use",
+            "kind",
+            "people",
+            "temperature",
+            "night_temperature",
+            "unused_temperature",
+            "preheat_min",
+        },
+        f"{at}.",
+    )
     use = _use(ctx, item.get("use"), f"{at}.use")
     try:
         kind = RoomKind(ctx.get(item, "kind", str, "shared", f"{at}."))
     except ValueError:
-        ctx.err(f"{at}.kind", "must be shared, bedroom, office or all_day")
+        ctx.err(f"{at}.kind", "must be " + ", ".join(k.value for k in RoomKind))
         return None
     linked: tuple[str, ...] | None = None
     names = item.get("people")
@@ -611,9 +714,13 @@ def _room_link(
         linked = tuple(str(n) for n in names)
     elif kind in (RoomKind.BEDROOM, RoomKind.OFFICE):
         ctx.err(f"{at}.people", f"required for a {kind.value}: who sleeps or works here")
-    temperature = None
-    if item.get("temperature") is not None:
-        temperature = ctx.number(item, "temperature", 0.0, MIN_C, MAX_C, f"{at}.")
+    temps = {
+        key: ctx.number(item, key, 0.0, MIN_C, MAX_C, f"{at}.")
+        if item.get(key) is not None
+        else None
+        for key in ("temperature", "night_temperature", "unused_temperature")
+    }
+    preheat = _minutes(ctx, item, "preheat_min", "timing.preheat_min", f"{at}.")
     if use is None:
         return None
     return RoomLink(
@@ -622,15 +729,26 @@ def _room_link(
         use_weekend=use[1],
         kind=kind,
         people=linked,
-        temperature_c=temperature,
+        temperature_c=temps["temperature"],
         name=room.name,
+        night_c=temps["night_temperature"],
+        unused_c=temps["unused_temperature"],
+        preheat_min=preheat,
     )
 
 
 def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) -> Household | None:
     p = "household."
-    ctx.unknown(raw, {"temperatures", "people", "rooms", "presence_delay_min"}, p)
-    delay_min = int(ctx.number(raw, "presence_delay_min", PRESENCE_DELAY_MIN, 0, 720, p))
+    if "presence_delay_min" in raw:
+        ctx.err(f"{p}presence_delay_min", "moved: set it as household.away.presence_delay_min")
+    ctx.unknown(
+        raw,
+        {"temperatures", "people", "rooms", "timing", "away", "weekend_days", "presence_delay_min"},
+        p,
+    )
+    timing = _timing(ctx, ctx.section(raw, "timing", p))
+    away = _away_settings(ctx, ctx.section(raw, "away", p))
+    weekend_days = _weekend_days(ctx, raw.get("weekend_days"), f"{p}weekend_days")
 
     tp = f"{p}temperatures."
     t_raw = ctx.section(raw, "temperatures", p)
@@ -643,11 +761,7 @@ def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) 
         night_c=ctx.number(t_raw, "night", d.night_c, MIN_C, MAX_C, tp),
     )
     for key, value in (("unused", temps.unused_c), ("night", temps.night_c)):
-        if value < DAMP_BELOW_C:
-            notes.append(
-                f"{tp}{key} is {value:g}°: below {DAMP_BELOW_C:g}° walls and window frames "
-                "can get damp, especially in older houses."
-            )
+        _damp_note(notes, f"{tp}{key}", value)
 
     p_raw = ctx.section(raw, "people", p)
     people = _people(ctx, p_raw, p)
@@ -662,6 +776,9 @@ def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) 
         link = _room_link(ctx, str(rid), item, by_id.get(str(rid)), person_ids, p)
         if link is not None:
             links.append(link)
+            for key, value in (("unused", link.unused_c), ("night", link.night_c)):
+                if value is not None:
+                    _damp_note(notes, f"{p}rooms.{rid}.{key}_temperature", value)
 
     offices = {pid for link in links if link.kind is RoomKind.OFFICE for pid in link.people or ()}
     for person in people:
@@ -674,8 +791,42 @@ def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) 
         people=tuple(people),
         rooms=tuple(links),
         temperatures=temps,
-        presence_delay_min=delay_min,
+        timing=timing,
+        away=away,
+        weekend_days=WEEKEND_DAYS if weekend_days is None else weekend_days,
     )
+
+
+def _timing(ctx: _Ctx, raw: dict) -> Timing:
+    p = "household.timing."
+    d = Timing()
+    keys = ("preheat_min", "getting_up_min", "bedtime_min", "merge_gap_min")
+    ctx.unknown(raw, {*keys, "live_preheat"}, p)
+    values = {k: _or(_minutes(ctx, raw, k, f"timing.{k}", p), getattr(d, k)) for k in keys}
+    live = _choice(ctx, raw, "live_preheat", LivePreheat, d.live_preheat, p)
+    return Timing(live_preheat=live, **values)
+
+
+def _away_settings(ctx: _Ctx, raw: dict) -> AwaySettings:
+    p = "household.away."
+    d = AwaySettings()
+    keys = ("presence_delay_min", "presence_stale_after_min", "return_warmup_min")
+    ctx.unknown(raw, {*keys, "everyone_away"}, p)
+    values = {k: _or(_minutes(ctx, raw, k, f"away.{k}", p), getattr(d, k)) for k in keys}
+    everyone = _choice(ctx, raw, "everyone_away", EveryoneAway, d.everyone_away, p)
+    return AwaySettings(everyone_away=everyone, **values)
+
+
+def _damp_note(notes: list[str], path: str, value: float) -> None:
+    if value < DAMP_BELOW_C:
+        notes.append(
+            f"{path} is {value:g}°: below {DAMP_BELOW_C:g}° walls and window frames "
+            "can get damp, especially in older houses."
+        )
+
+
+def _or(value: Any, default: Any) -> Any:
+    return default if value is None else value
 
 
 def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
@@ -758,9 +909,11 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     if ctx.problems:
         raise ConfigError(ctx.problems)
     household_schedules: dict[str, WeekSchedule] = {}
+    household_live: dict[str, WeekSchedule] = {}
     if household is not None:
         compiled = compile_household(household)
         household_schedules = compiled.schedules
+        household_live = compiled.live
         notes.extend(compiled.notes)
     return SiteConfig(
         house=cfg,
@@ -777,6 +930,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         notes=tuple(notes),
         household=household,
         household_schedules=household_schedules,
+        household_live=household_live,
     )
 
 

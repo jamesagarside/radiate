@@ -35,8 +35,22 @@ store:
 trv:
   schedule_mirror: true
 
+# The people, their times and how each room is used are an example: replace them with
+# your own household. Every setting under timing, away and temperatures is optional;
+# the values shown commented out are the defaults. docs/configuration.md explains each.
 household:
-  presence_delay_min: 60      # out this long in Home Assistant before counting as away
+  # weekend_days: [sat, sun]  # which days use the weekend routine and weekend use
+  # timing:                   # minutes
+  #   preheat_min: 30         # the valve's own schedule starts each warm period this early
+  #   live_preheat: optimum_start   # or fixed: Radiate starts early by preheat_min too
+  #   getting_up_min: 30      # bedroom and shared rooms in use this long after getting up
+  #   bedtime_min: 30         # bedroom in use this long before bed
+  #   merge_gap_min: 30       # warm periods this close together become one
+  # away:
+  #   presence_delay_min: 60  # out this long in Home Assistant before counting as away
+  #   presence_stale_after_min: 60  # presence not reported this long counts as unknown
+  #   return_warmup_min: 180  # how early Radiate may start warming for someone due back
+  #   everyone_away: frost    # or unused: rooms stay at the unused temperature
   temperatures:               # house-wide, °C (these are the defaults)
     in_use: 19
     occasional: 16
@@ -55,6 +69,9 @@ household:
         bed: "22:30"
     home_worker:
       name: Home worker
+      # getting_up_min: 60      # per person: replaces timing.getting_up_min
+      # bedtime_min: 30         # per person: replaces timing.bedtime_min
+      # weekend_days: [sat, sun]  # per person: for someone who works weekends
       weekdays:
         up: "08:00"
         work: "08:00-18:00"   # in their office, Bedroom 3
@@ -68,12 +85,16 @@ household:
       use: in_use
       kind: bedroom
       people: [early_riser, home_worker]
+      # night_temperature: 14   # per room: replaces temperatures.night
+      # unused_temperature: 14  # per room: replaces temperatures.unused
+      # preheat_min: 30         # per room: replaces timing.preheat_min
     bedroom_3:
       use: in_use
       kind: office
       people: [home_worker]
     dining:
       use: in_use             # shared by everyone unless kind or people say otherwise
+      # kind: while_home        # warm whenever anyone is home, working or not
     kitchen:
       use: in_use
     bathroom:

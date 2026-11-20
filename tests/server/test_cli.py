@@ -81,7 +81,10 @@ def test_schedules_and_check_config_report_dropped_periods(tmp_path, capsys):
     }
     path = tmp_path / "house.yaml"
     path.write_text(yaml.safe_dump(data))
-    note = "Hall, weekdays: dropped 19° 11:30 to 13:30 to fit the TRV's limit of 6 changes a day"
+    note = (
+        "Hall, weekdays: the valve's own schedule leaves out 19° 11:30 to 13:30 to fit its "
+        "limit of 6 changes a day; Radiate still heats it while running"
+    )
     main(["schedules", str(path)])
     assert f"Notes:\n  {note}\n" in capsys.readouterr().out
     main(["check-config", str(path)])

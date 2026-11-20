@@ -147,10 +147,14 @@ def test_six_transition_limit_drops_shortest_and_says_so():
     compiled = compile_household(household)
     # 05:30 to 08:00, 11:30 to 13:30 and 16:30 to 22:00 need seven transitions.
     assert days(compiled.schedules["hall"])[0] == "00:00/14 05:30/19 08:00/14 16:30/19 22:00/14"
-    assert compiled.notes == (
-        "Hall, weekdays: dropped 19° 11:30 to 13:30 to fit the TRV's limit of 6 changes a day",
-        "Hall, weekend: dropped 19° 11:30 to 13:30 to fit the TRV's limit of 6 changes a day",
+    note = (
+        "the valve's own schedule leaves out 19° 11:30 to 13:30 to fit its limit of "
+        "6 changes a day; Radiate still heats it while running"
     )
+    assert compiled.notes == (f"Hall, weekdays: {note}", f"Hall, weekend: {note}")
+    # Only the valve has the limit: live control keeps the period.
+    live = compiled.live["hall"].days[0].trvzb()
+    assert live == "00:00/14 06:00/19 08:00/14 12:00/19 13:30/14 17:00/19 22:00/14"
 
 
 @pytest.mark.parametrize(
@@ -325,7 +329,7 @@ def test_household_validation_problems():
         "household.people.Bad Id: person ids are lower case letters",
         "household.rooms.bedroom.people: required for a bedroom",
         "household.rooms.office.use: must be in_use, occasional or unused",
-        "household.rooms.office.kind: must be shared, bedroom, office or all_day",
+        "household.rooms.office.kind: must be shared, bedroom, office, while_home, all_day",
         "household.rooms.hall: a passive room has no valve, so it has no schedule",
         "household.rooms.attic: unknown room 'attic'",
         "rooms[0].schedule: the household section builds this room's schedule",
@@ -376,7 +380,10 @@ def test_dropped_periods_reach_the_site_notes():
         }
     )
     site = parse_site(data)
-    assert any(n.startswith("Bedroom, weekdays: dropped 19° 11:30 to 13:30") for n in site.notes)
+    assert any(
+        n.startswith("Bedroom, weekdays: the valve's own schedule leaves out 19° 11:30")
+        for n in site.notes
+    )
 
 
 def test_mirror_payload_shifts_internal_sensor_rooms():
