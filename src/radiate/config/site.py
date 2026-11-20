@@ -7,13 +7,18 @@ together, with a path such as `rooms[2].trv`.
 
 Strings of the form `${NAME}` are replaced from the environment, so secrets can stay
 out of the file.
+
+The household can also come from the web UI's setup, saved in the data directory
+(`radiate.config.saved`). `load_site` applies it: a saved household replaces the house
+file's `household` section. `parse_household` and `apply_household` are the same steps
+for the server, so the web UI validates against the same rules and limits.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +32,6 @@ from radiate.core.types import (
 )
 
 from .household import (
-    DAMP_BELOW_C,
     LIMITS,
     WEEKEND_DAYS,
     AwaySettings,
@@ -42,6 +46,7 @@ from .household import (
     Timing,
     UseLevel,
     compile_household,
+    household_advice,
 )
 from .schedule import (
     DAY_ALIASES,
@@ -125,6 +130,16 @@ class SiteConfig:
     # the week live control follows (see radiate.config.household).
     household_schedules: dict[str, WeekSchedule] = field(default_factory=dict)
     household_live: dict[str, WeekSchedule] = field(default_factory=dict)
+    # The schedule each controllable room follows when no household covers it: its own
+    # `schedule`, or `default` when that exists. None: the house file gives it none.
+    room_schedules: dict[str, str | None] = field(default_factory=dict)
+    # Where the household comes from: "house_file", "saved" (the web UI's setup, from
+    # the data directory) or None (no household).
+    household_source: str | None = None
+    file_household: Household | None = None  # the house file's own household section
+    household_notes: tuple[str, ...] = ()  # the part of `notes` about the household
+    # Why a household saved from the web UI was not used, if it was not.
+    saved_problems: tuple[str, ...] = ()
 
     def schedule_for(self, room_id: str) -> WeekSchedule:
         """The room's week as the valve holds it: the schedule mirror and the fallback."""
@@ -370,12 +385,13 @@ def _rooms(
     schedules: dict[str, WeekSchedule],
     notes: list[str],
     household_rooms: set[str],
-) -> tuple[list[RoomConfig], dict[str, RoomDevices]]:
+) -> tuple[list[RoomConfig], dict[str, RoomDevices], dict[str, str | None]]:
     if not isinstance(raw, list) or not raw:
         ctx.err("rooms", "expected a non-empty list")
-        return [], {}
+        return [], {}, {}
     rooms: list[RoomConfig] = []
     devices: dict[str, RoomDevices] = {}
+    own: dict[str, str | None] = {}
     explicit_actuation: dict[str, bool] = {}
     seen_devices: dict[str, str] = {}
     for i, item in enumerate(raw):
@@ -407,6 +423,8 @@ def _rooms(
         sensor = ctx.get(item, "sensor", str, None, p) or None
         window = ctx.get(item, "window", str, None, p) or None
         sched: str | None = ctx.get(item, "schedule", str, "default", p)
+        if role is not RoomRole.PASSIVE:
+            own[rid] = sched if sched in schedules else None
         if rid in household_rooms:
             if item.get("schedule") is not None:
                 ctx.err(
@@ -481,7 +499,7 @@ def _rooms(
         )
         for r in rooms
     ]
-    return rooms, devices
+    return rooms, devices, own
 
 
 # --- household -------------------------------------------------------------------------
@@ -737,7 +755,7 @@ def _room_link(
     )
 
 
-def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) -> Household | None:
+def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig]) -> Household:
     p = "household."
     if "presence_delay_min" in raw:
         ctx.err(f"{p}presence_delay_min", "moved: set it as household.away.presence_delay_min")
@@ -760,8 +778,6 @@ def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) 
         unused_c=ctx.number(t_raw, "unused", d.unused_c, MIN_C, MAX_C, tp),
         night_c=ctx.number(t_raw, "night", d.night_c, MIN_C, MAX_C, tp),
     )
-    for key, value in (("unused", temps.unused_c), ("night", temps.night_c)):
-        _damp_note(notes, f"{tp}{key}", value)
 
     p_raw = ctx.section(raw, "people", p)
     people = _people(ctx, p_raw, p)
@@ -776,17 +792,6 @@ def _household(ctx: _Ctx, raw: dict, rooms: list[RoomConfig], notes: list[str]) 
         link = _room_link(ctx, str(rid), item, by_id.get(str(rid)), person_ids, p)
         if link is not None:
             links.append(link)
-            for key, value in (("unused", link.unused_c), ("night", link.night_c)):
-                if value is not None:
-                    _damp_note(notes, f"{p}rooms.{rid}.{key}_temperature", value)
-
-    offices = {pid for link in links if link.kind is RoomKind.OFFICE for pid in link.people or ()}
-    for person in people:
-        if (person.weekdays.work or person.weekend.work) and person.id not in offices:
-            notes.append(
-                f"{p}people.{person.id} has work hours but no office room: "
-                "shared rooms are not heated while they work."
-            )
     return Household(
         people=tuple(people),
         rooms=tuple(links),
@@ -815,14 +820,6 @@ def _away_settings(ctx: _Ctx, raw: dict) -> AwaySettings:
     values = {k: _or(_minutes(ctx, raw, k, f"away.{k}", p), getattr(d, k)) for k in keys}
     everyone = _choice(ctx, raw, "everyone_away", EveryoneAway, d.everyone_away, p)
     return AwaySettings(everyone_away=everyone, **values)
-
-
-def _damp_note(notes: list[str], path: str, value: float) -> None:
-    if value < DAMP_BELOW_C:
-        notes.append(
-            f"{path} is {value:g}°: below {DAMP_BELOW_C:g}° walls and window frames "
-            "can get damp, especially in older houses."
-        )
 
 
 def _or(value: Any, default: Any) -> Any:
@@ -882,8 +879,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         except ScheduleError as err:
             ctx.err(f"schedules.{name}", str(err))
 
-    rooms, devices = _rooms(ctx, data.get("rooms"), schedules, notes, household_rooms)
-    household = _household(ctx, raw_household, rooms, notes) if raw_household else None
+    rooms, devices, own = _rooms(ctx, data.get("rooms"), schedules, notes, household_rooms)
+    household = _household(ctx, raw_household, rooms) if raw_household else None
     balancing = ctx.get(data, "balancing", bool, True, "")
     cfg = HouseConfig(
         rooms=tuple(rooms),
@@ -908,14 +905,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
 
     if ctx.problems:
         raise ConfigError(ctx.problems)
-    household_schedules: dict[str, WeekSchedule] = {}
-    household_live: dict[str, WeekSchedule] = {}
-    if household is not None:
-        compiled = compile_household(household)
-        household_schedules = compiled.schedules
-        household_live = compiled.live
-        notes.extend(compiled.notes)
-    return SiteConfig(
+    site = SiteConfig(
         house=cfg,
         devices=devices,
         schedules=schedules,
@@ -928,14 +918,99 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         data_dir=data_dir,
         sensor_max_silence_s=silence_min * 60,
         notes=tuple(notes),
+        room_schedules=own,
+        file_household=household,
+    )
+    return apply_household(site, household, "house_file")
+
+
+def parse_household(raw: Any, site: SiteConfig) -> Household:
+    """Validate a `household` section against the site's rooms, as the house file is.
+
+    The section replaces the house file's own, so every controllable room must be
+    listed or have a schedule of its own in the house file. Raises ConfigError listing
+    every problem, each with its path (`household.people.sam.weekdays.up: ...`).
+    """
+    ctx = _Ctx()
+    if not isinstance(raw, dict):
+        raise ConfigError(["household: expected a mapping"])
+    household = _household(ctx, raw, list(site.house.rooms))
+    raw_rooms = raw.get("rooms")
+    listed = {str(k) for k in raw_rooms} if isinstance(raw_rooms, dict) else set()
+    for rc in site.house.rooms:
+        if rc.controllable and rc.id not in listed and site.room_schedules.get(rc.id) is None:
+            ctx.err(
+                f"household.rooms.{rc.id}",
+                "required: the house file gives this room no schedule of its own",
+            )
+    if ctx.problems:
+        raise ConfigError(ctx.problems)
+    return household
+
+
+def apply_household(site: SiteConfig, household: Household | None, source: str) -> SiteConfig:
+    """The site with `household` in place of its current one. Pure.
+
+    Household rooms get compiled weeks; every other room goes back to the schedule the
+    house file gives it. `household` must be valid for the site (see `parse_household`).
+    """
+    linked = {r.room_id for r in household.rooms} if household else set()
+    devices = {
+        rid: replace(dev, schedule=None if rid in linked else site.room_schedules[rid])
+        if rid in site.room_schedules
+        else dev
+        for rid, dev in site.devices.items()
+    }
+    base = tuple(n for n in site.notes if n not in site.household_notes)
+    notes: list[str] = []
+    schedules: dict[str, WeekSchedule] = {}
+    live: dict[str, WeekSchedule] = {}
+    if household is not None:
+        notes.extend(f"{path} {text}" for path, text in household_advice(household))
+        compiled = compile_household(household)
+        schedules, live = compiled.schedules, compiled.live
+        notes.extend(compiled.notes)
+    return replace(
+        site,
+        devices=devices,
         household=household,
-        household_schedules=household_schedules,
-        household_live=household_live,
+        household_schedules=schedules,
+        household_live=live,
+        household_source=source if household is not None else None,
+        household_notes=tuple(notes),
+        notes=base + tuple(notes),
+        saved_problems=(),
     )
 
 
-def load_site(path: str | Path, env: dict[str, str] | None = None) -> SiteConfig:
-    """Read and validate a YAML config file."""
+def apply_saved(site: SiteConfig) -> SiteConfig:
+    """The site with the household saved from the web UI, if `site.data_dir` holds one.
+
+    A saved household that is not valid for the house file (a room was removed since,
+    say) is not used: the house file's setup applies, and `saved_problems` and a note
+    say why, so Radiate still starts and the web UI can offer to fix it.
+    """
+    from .saved import read_saved, saved_path
+
+    try:
+        raw = read_saved(site.data_dir)
+        if raw is None:
+            return site
+        household = parse_household(raw, site)
+    except ConfigError as err:
+        note = (
+            f"{saved_path(site.data_dir)}: the household saved from the web UI was not used, "
+            f"so the house file's setup applies: {'; '.join(err.problems)}"
+        )
+        return replace(site, saved_problems=tuple(err.problems), notes=(*site.notes, note))
+    return apply_household(site, household, "saved")
+
+
+def load_site(
+    path: str | Path, env: dict[str, str] | None = None, data_dir: str | Path | None = None
+) -> SiteConfig:
+    """Read and validate a YAML config file, then apply the household saved in the data
+    directory, if any. `data_dir` replaces `house.data_dir`, as `--data-dir` does."""
     import yaml
 
     text = Path(path).read_text(encoding="utf-8")
@@ -943,4 +1018,7 @@ def load_site(path: str | Path, env: dict[str, str] | None = None) -> SiteConfig
         data = yaml.safe_load(text)
     except yaml.YAMLError as err:
         raise ConfigError([f"{path}: not valid YAML: {err}"]) from None
-    return parse_site(data, env)
+    site = parse_site(data, env)
+    if data_dir is not None:
+        site = replace(site, data_dir=str(data_dir))
+    return apply_saved(site)

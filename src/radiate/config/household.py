@@ -46,7 +46,7 @@ Pure: no I/O and no clock. Times are minutes of the day.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import StrEnum
 
 from .schedule import DAYS, MAX_C, MAX_TRANSITIONS, MIN_C, DaySchedule, WeekSchedule, hhmm
@@ -388,6 +388,23 @@ def household_view(household: Household) -> dict:
                 "inherited": [k for k, v in own.items() if v is None],
             }
         )
+    return {
+        **_settings(t, a, temps, household.weekend_days),
+        "people": people,
+        "rooms": rooms,
+        "limits": limits_view(),
+        "options": options_view(),
+        "damp_below_c": DAMP_BELOW_C,
+    }
+
+
+def defaults_view() -> dict:
+    """Every house-wide setting at its default, in the shape of `household_view`."""
+    return _settings(Timing(), AwaySettings(), Temperatures(), WEEKEND_DAYS)
+
+
+def limits_view() -> dict[str, dict]:
+    """The allowed range of each numeric setting, for the API."""
     limits: dict[str, dict] = {}
     for key, lim in LIMITS.items():
         item: dict = {"min": lim.lo, "max": lim.hi, "unit": lim.unit}
@@ -396,13 +413,21 @@ def household_view(household: Household) -> dict:
         if key == "temperatures":
             item["step"] = 0.5
         limits[key] = item
-    options = {
+    return limits
+
+
+def options_view() -> dict[str, list[str]]:
+    """The allowed values of each choice, for the API."""
+    return {
         "timing.live_preheat": [v.value for v in LivePreheat],
         "away.everyone_away": [v.value for v in EveryoneAway],
         "weekend_days": list(DAYS),
         "rooms.use": [v.value for v in UseLevel],
         "rooms.kind": [v.value for v in RoomKind],
     }
+
+
+def _settings(t: Timing, a: AwaySettings, temps: Temperatures, weekend: frozenset[int]) -> dict:
     return {
         "timing": {
             "preheat_min": t.preheat_min,
@@ -423,13 +448,136 @@ def household_view(household: Household) -> dict:
             "unused": temps.unused_c,
             "night": temps.night_c,
         },
-        "weekend_days": _day_names(household.weekend_days),
-        "people": people,
-        "rooms": rooms,
-        "limits": limits,
-        "options": options,
-        "damp_below_c": DAMP_BELOW_C,
+        "weekend_days": _day_names(weekend),
     }
+
+
+def household_section(household: Household) -> dict:
+    """The household as the house file's `household` section, ready for YAML or JSON.
+
+    Parsing the result gives the same household. House-wide timing and away settings
+    at their defaults are left out, so a later change of default reaches them; the
+    temperatures are always written. Per-person and per-room settings appear only
+    where they are set. Times are `HH:MM` strings and day names are short (`sat`).
+    """
+    out: dict = {}
+    if household.weekend_days != WEEKEND_DAYS:
+        out["weekend_days"] = _short_days(household.weekend_days)
+    for name, value, default in (
+        ("timing", household.timing, Timing()),
+        ("away", household.away, AwaySettings()),
+    ):
+        changed = {
+            f.name: _plain(getattr(value, f.name))
+            for f in fields(value)
+            if getattr(value, f.name) != getattr(default, f.name)
+        }
+        if changed:
+            out[name] = changed
+    t = household.temperatures
+    out["temperatures"] = {
+        "in_use": _num(t.in_use_c),
+        "occasional": _num(t.occasional_c),
+        "unused": _num(t.unused_c),
+        "night": _num(t.night_c),
+    }
+
+    def routine(r: Routine) -> dict:
+        item: dict = {"up": hhmm(r.up_min)}
+        for key, spans in (("out", r.out), ("work", r.work)):
+            if spans:
+                item[key] = [f"{hhmm(a)}-{hhmm(b)}" for a, b in spans]
+        item["bed"] = hhmm(r.bed_min)
+        return item
+
+    people: dict = {}
+    for p in household.people:
+        item: dict = {}
+        if p.name:
+            item["name"] = p.name
+        item["weekdays"] = routine(p.weekdays)
+        if p.weekend != p.weekdays:
+            item["weekend"] = routine(p.weekend)
+        for key in ("getting_up_min", "bedtime_min"):
+            if getattr(p, key) is not None:
+                item[key] = getattr(p, key)
+        if p.weekend_days is not None:
+            item["weekend_days"] = _short_days(p.weekend_days)
+        people[p.id] = item
+    out["people"] = people
+
+    rooms: dict = {}
+    for r in household.rooms:
+        item = {}
+        if r.use_weekdays is r.use_weekend:
+            item["use"] = r.use_weekdays.value
+        else:
+            item["use"] = {"weekdays": r.use_weekdays.value, "weekend": r.use_weekend.value}
+        if r.kind is not RoomKind.SHARED:
+            item["kind"] = r.kind.value
+        if r.people is not None:
+            item["people"] = list(r.people)
+        for key, value in (
+            ("temperature", r.temperature_c),
+            ("night_temperature", r.night_c),
+            ("unused_temperature", r.unused_c),
+            ("preheat_min", r.preheat_min),
+        ):
+            if value is not None:
+                item[key] = _num(value)
+        rooms[r.room_id] = item
+    out["rooms"] = rooms
+    return out
+
+
+def household_advice(household: Household) -> list[tuple[str, str]]:
+    """Things worth knowing about the household that are not errors, as (path, text).
+
+    The path is where the setting lives in the house file, such as
+    `household.temperatures.unused`. The text follows the path in a sentence:
+    "household.temperatures.unused is 10°: below 12° walls ...".
+    """
+    out: list[tuple[str, str]] = []
+    t = household.temperatures
+    for key, value in (("unused", t.unused_c), ("night", t.night_c)):
+        out.extend(_damp(f"household.temperatures.{key}", value))
+    for room in household.rooms:
+        for key, value in (("unused", room.unused_c), ("night", room.night_c)):
+            if value is not None:
+                out.extend(_damp(f"household.rooms.{room.room_id}.{key}_temperature", value))
+    offices = {pid for r in household.rooms if r.kind is RoomKind.OFFICE for pid in r.people or ()}
+    for person in household.people:
+        if (person.weekdays.work or person.weekend.work) and person.id not in offices:
+            out.append(
+                (
+                    f"household.people.{person.id}",
+                    "has work hours but no office room: shared rooms are not heated while "
+                    "they work.",
+                )
+            )
+    return out
+
+
+def _damp(path: str, value: float) -> list[tuple[str, str]]:
+    if value >= DAMP_BELOW_C:
+        return []
+    text = (
+        f"is {value:g}°: below {DAMP_BELOW_C:g}° walls and window frames can get damp, "
+        "especially in older houses."
+    )
+    return [(path, text)]
+
+
+def _short_days(days: frozenset[int]) -> list[str]:
+    return [DAYS[d][:3] for d in sorted(days)]
+
+
+def _plain(value):
+    return value.value if isinstance(value, StrEnum) else value
+
+
+def _num(value: float) -> int | float:
+    return int(value) if value == int(value) else value
 
 
 # --- one room, one day -----------------------------------------------------------------
