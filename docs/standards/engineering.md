@@ -16,7 +16,6 @@ Radiate is one engine packaged three ways (ADR-0002). The control loop always ru
 | `src/radiate/server` | Runtime, HTTP and WebSocket API, demo driver, SQLite state database | The one runtime for every edition |
 | `src/radiate/export` | Elastic export | Never blocks the control loop |
 | `src/radiate/sim` | Thermal simulator of the reference house | Drives the same `decide` as live |
-| `custom_components/radiate` | Home Assistant integration | Thin client of the server API. No control logic |
 | `app/radiate` | Home Assistant App packaging | `run.py` uses the standard library only |
 | `web` | Web UI | See [design standards](design.md) |
 | `shelly` | Relay watchdog script | Runs on the Shelly itself |
@@ -52,9 +51,11 @@ When you add device support:
 
 ## Home Assistant integration
 
-`custom_components/radiate` follows Home Assistant integration conventions: config flow, `DataUpdateCoordinator`, `entry.runtime_data`, entity descriptions with translation keys, and services declared in `services.yaml` and `strings.json`. CI runs hassfest and HACS validation.
+The integration lives in [radiate-ha](https://github.com/jamesagarside/radiate-ha), under Apache-2.0 (see [ADR-0003](../adr/0003-separate-home-assistant-integration.md)). It follows Home Assistant conventions and its own repository's notes.
 
-All server calls go through `RadiateClient` in `api.py`. If a feature needs logic, put it in the server or the core and expose it through the API, then call it from the integration. Keep `api.py`, the server routes in `radiate.server.app` and spec section 8.1 in step.
+If a feature needs logic, put it in the server or the core and expose it through the API, then call it from the integration. Keep the server routes in `radiate.server.app`, spec section 8.1 and radiate-ha's `api.py` in step.
+
+`tests/server/test_ha_contract.py` checks that `/api/v1/house` and `/api/v1/state` still return every field in `tests/server/fixtures/ha`, the responses radiate-ha is tested with. Adding a field is fine. To drop or rename one, change radiate-ha first, then regenerate the fixtures in both repositories with `scripts/ha_fixtures.py`.
 
 ## Time
 
@@ -86,7 +87,7 @@ Radiate controls an on/off oil burner. A short burn soots and condenses; a burne
 ## Testing
 
 - Write the test first. For core behaviour, start with a failing test in `tests/core`, then make it pass.
-- Mirror the source layout: `tests/core`, `tests/config`, `tests/drivers`, `tests/server`, `tests/sim` and `tests/ha`.
+- Mirror the source layout: `tests/core`, `tests/config`, `tests/drivers`, `tests/server` and `tests/sim`.
 - Use fakes for devices. Feed raw Zigbee2MQTT payloads to the mapping, and use `tests/drivers/fake_shelly.py` for the relay. Tests never open a real network connection.
 - Use the simulator as a regression check. `tests/sim` asserts the guards, comfort, burn length and fire learning on the reference house. When you change the core, run it and compare `radiate sim --days 5` before and after. If the headline numbers move, update [docs/simulation.md](../simulation.md).
 - Run the Home Assistant tests in their own environment. They need `pytest-homeassistant-custom-component`, which pins its own Home Assistant version. See [CONTRIBUTING.md](../../CONTRIBUTING.md).

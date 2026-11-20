@@ -14,7 +14,7 @@ Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the 
 | Partial | 26 | 21 |
 | Missing | 37 | 22 |
 
-Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), the learner bootstraps from that history, and `radiate discover` drafts the configuration from Zigbee2MQTT. On 20 November 2026 the owner's three behaviour choices went in (spec 0.3): a configurable learning memory, two years by default, with change detection; `eco` and `comfort` demand modes, `eco` by default and changeable at runtime through `/api/v1/settings`; and no learning from the TRV reading while a room's own sensor is stale. The same day the demand mode got an Eco and Comfort control in the web UI and a select in Home Assistant, and each room in `state` gained `reason_code`.
+Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), the learner bootstraps from that history, and `radiate discover` drafts the configuration from Zigbee2MQTT. On 20 November 2026 the owner's three behaviour choices went in (spec 0.3): a configurable learning memory, two years by default, with change detection; `eco` and `comfort` demand modes, `eco` by default and changeable at runtime through `/api/v1/settings`; and no learning from the TRV reading while a room's own sensor is stale. The same day the demand mode got an Eco and Comfort control in the web UI and a select in Home Assistant, and each room in `state` gained `reason_code`. The Home Assistant integration then moved to its own Apache-2.0 repository, radiate-ha, so it can pass HACS validation.
 
 Top remaining gaps, most important first:
 
@@ -150,6 +150,8 @@ Top remaining gaps, most important first:
 
 ## 8. Interfaces
 
+Rows starting "HA:" are in the [radiate-ha](https://github.com/jamesagarside/radiate-ha) repository since 20 November 2026 ([ADR-0003](adr/0003-separate-home-assistant-integration.md)). `tests/server/test_ha_contract.py` checks that the server still returns every field radiate-ha is tested with.
+
 | Item | Status | Where | Note |
 |---|---|---|---|
 | `GET /api/v1/house`, `/state`, `/decisions?since=` | done | `server/app.py` | |
@@ -159,16 +161,16 @@ Top remaining gaps, most important first:
 | Reason code per room | done | `server/runtime.py` `describe` | `rooms[].reason_code` next to `rooms[].reason`, for example `demand.pooled` |
 | `WS /api/v1/stream` | done | `server/app.py` | |
 | Local token auth, ingress auth | done | `server/app.py` | |
-| HA: climate per room | done | `custom_components/radiate/climate.py` | Setting the target creates an override; override setpoint, `until` and minutes left as attributes |
-| HA: room sensors (opening, gain, loss, lag, confidence) | done | `custom_components/radiate/sensor.py` | |
-| HA: learning state sensor | done | `custom_components/radiate/sensor.py` | Plain text, not an enum, because the set of gates can grow |
-| HA: "fire lit" switch | done | `custom_components/radiate/switch.py` | Posts `rooms/{id}/fire`, shows `fire_switch`; the "Fire detected" binary sensor stays |
-| HA: boiler state, starts | done | `custom_components/radiate/sensor.py` | Starts today and in the last hour; relay starts, not physical burner starts |
-| HA: burner hours, litres today, balance score | done | `custom_components/radiate/sensor.py` | Burner hours, starts, litres and kWh today (`total_increasing`, reset at local midnight; litres and kWh only with a nozzle rating) and yesterday's balance score |
-| HA: stuck valve, short-cycling, alerts | done | `custom_components/radiate/binary_sensor.py`, `sensor.py` | Problem binary sensor per room from `valve.untrusted`; short-cycle extra off time; alert count with codes and messages from `alert_details`. No repairs issues |
-| HA: demand mode select, pooled demand | done | `custom_components/radiate/select.py`, `sensor.py` | `select.radiate_demand_mode` (eco or comfort) posts `settings`, sending null for the configured default; `sensor.radiate_pooled_demand` is diagnostic. Neither is created for a server without the keys |
-| HA services `boost_store`, `set_mode` | done | `custom_components/radiate/__init__.py` | |
-| HA services `set_override`, `clear_override` | done | `custom_components/radiate/climate.py` | Entity services on Radiate climate entities; `until` and `duration_min` as in `POST /rooms/{id}/setpoint` |
+| HA: climate per room | done | `radiate-ha: custom_components/radiate/climate.py` | Setting the target creates an override; override setpoint, `until` and minutes left as attributes |
+| HA: room sensors (opening, gain, loss, lag, confidence) | done | `radiate-ha: custom_components/radiate/sensor.py` | |
+| HA: learning state sensor | done | `radiate-ha: custom_components/radiate/sensor.py` | Plain text, not an enum, because the set of gates can grow |
+| HA: "fire lit" switch | done | `radiate-ha: custom_components/radiate/switch.py` | Posts `rooms/{id}/fire`, shows `fire_switch`; the "Fire detected" binary sensor stays |
+| HA: boiler state, starts | done | `radiate-ha: custom_components/radiate/sensor.py` | Starts today and in the last hour; relay starts, not physical burner starts |
+| HA: burner hours, litres today, balance score | done | `radiate-ha: custom_components/radiate/sensor.py` | Burner hours, starts, litres and kWh today (`total_increasing`, reset at local midnight; litres and kWh only with a nozzle rating) and yesterday's balance score |
+| HA: stuck valve, short-cycling, alerts | done | `radiate-ha: custom_components/radiate/binary_sensor.py`, `sensor.py` | Problem binary sensor per room from `valve.untrusted`; short-cycle extra off time; alert count with codes and messages from `alert_details`. No repairs issues |
+| HA: demand mode select, pooled demand | done | `radiate-ha: custom_components/radiate/select.py`, `sensor.py` | `select.radiate_demand_mode` (eco or comfort) posts `settings`, sending null for the configured default; `sensor.radiate_pooled_demand` is diagnostic. Neither is created for a server without the keys |
+| HA services `boost_store`, `set_mode` | done | `radiate-ha: custom_components/radiate/__init__.py` | |
+| HA services `set_override`, `clear_override` | done | `radiate-ha: custom_components/radiate/climate.py` | Entity services on Radiate climate entities; `until` and `duration_min` as in `POST /rooms/{id}/setpoint` |
 | HA service `recalibrate_valve` | missing | | Blocked: no TRVZB calibration command to send (see "Manual recalibration service") |
 
 ## 9. Elastic export
