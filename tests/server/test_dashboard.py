@@ -285,3 +285,10 @@ def test_outdoor_sensor_joins_the_house_charts():
     compare = data["views"][1]["sections"][0]["cards"][3]["entities"]
     assert house[0] == {"entity": "sensor.outdoor_temp_temperature", "name": "Outside"}
     assert compare[0]["name"] == "Outside"
+
+
+def test_yaml_has_no_anchors(tmp_path):
+    from radiate.export.dashboard import dashboard_yaml
+
+    text = dashboard_yaml(load_site(REFERENCE, env=ENV))
+    assert "&id" not in text and "*id" not in text
