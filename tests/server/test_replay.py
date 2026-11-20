@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from radiate.core.history import CHECKPOINT, START, TICK
+from radiate.core.history import CHECKPOINT, START, TICK, Replayer
 from radiate.server.demo import DemoDriver
 from radiate.server.history import History
 from radiate.server.replay import format_report, run_replay
@@ -114,8 +114,19 @@ def test_a_config_change_shows_differences(recorded, tmp_path):
     slower = dataclasses.replace(cfg, boiler=dataclasses.replace(cfg.boiler, min_burn_s=15 * 60))
     report = run_replay(slower, h, TZ, limit=5)
     assert report["differing_ticks"] > 0 and len(report["differences"]) == 5
-    assert report["replayed"]["shortest_burn_min"] >= 15
     assert report["replayed"] != report["recorded"]
+    # Every replayed burn honours the new minimum burn, unless the recorded relay was
+    # seen off underneath it: replay is open loop, so a burn the live run never made
+    # ends in an external stop.
+    on_at = None
+    for tick in Replayer(slower).run(h.entries()):
+        heating = tick.replayed["heating"]
+        if heating and on_at is None:
+            on_at = tick.wall
+        elif not heating and on_at is not None:
+            codes = {r[0] for r in tick.replayed.get("reasons", [])}
+            assert tick.wall - on_at >= 15 * 60 or "boiler.external_stop" in codes
+            on_at = None
     text = format_report(report)
     assert "ticks differ" in text and "heating relay" in text
 

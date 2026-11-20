@@ -8,7 +8,8 @@ still honours minimum off. After downtime long enough for the Shelly watchdog to
 take the relay, or without usable saved state, the boiler guard's timers restart from
 the relay as observed on the first tick (spec 5.7 hand-back).
 
-Kept: learned room models, arrival lags, lockshield histograms, disturbance hold-offs,
+Kept: learned room models with their change-detection statistics (counted in learning
+updates, so they need no clock), arrival lags, lockshield histograms, disturbance hold-offs,
 stuck and leaking valve verdicts, the boiler guard, the short-cycle adaptation and the day's oil
 and runtime totals with the last 7 days' summaries. The ledger's last tick is kept
 too, so the time Radiate was down counts as unseen and a long outage marks the day
@@ -34,6 +35,8 @@ from .types import BoilerState, HouseConfig
 
 VERSION = 1
 _DIST_TIMES = ("window_until", "shower_until", "fire_since", "fire_holdoff_until", "spike_until")
+_CHANGE_FLOATS = ("gain_eu", "gain_uu", "gain_ee", "level_e", "level_ee")
+_CHANGE_COUNTS = ("since_reset", "relearns")
 
 
 def _age(t: float | None, now: float) -> float | None:
@@ -60,6 +63,8 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
                 "samples": e.samples,
                 "rejected": e.rejected,
                 "residual_var": e.residual_var,
+                # Change detection (counts of learning updates, not times).
+                "change": {k: getattr(e, k) for k in _CHANGE_FLOATS + _CHANGE_COUNTS},
             },
             "lag_samples": list(rs.lag_samples),
             "lockshield_hist": list(rs.lockshield_hist),
@@ -195,6 +200,26 @@ def _valid_estimator(data: Any, est: RoomEstimator) -> bool:
     return all(p[i][i] >= 0 for i in range(3))
 
 
+def _load_change(est: RoomEstimator, raw: Any) -> None:
+    """Change-detection statistics. Missing (saves from before change detection) or
+    malformed data keeps the fresh statistics, which build up again in a few hours."""
+    if not isinstance(raw, dict):
+        return
+    floats = [raw.get(k) for k in _CHANGE_FLOATS]
+    counts = [raw.get(k) for k in _CHANGE_COUNTS]
+    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in floats):
+        return
+    if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in counts):
+        return
+    values = dict(zip(_CHANGE_FLOATS, floats, strict=True))
+    if min(values["gain_uu"], values["gain_ee"], values["level_ee"]) < 0:
+        return
+    for k, v in values.items():
+        setattr(est, k, float(v))
+    for k, v in zip(_CHANGE_COUNTS, counts, strict=True):
+        setattr(est, k, v)
+
+
 def first_start_state(cfg: HouseConfig) -> EngineState:
     """Engine state for a first start, with nothing saved: priors, and the boiler
     relay's history unknown, so the guard's first tick takes its timers from the relay
@@ -220,7 +245,7 @@ def load_state(
             continue
         raw = rooms[rc.id]
         rs: RoomState = st.rooms[rc.id]
-        est = new_estimator(rc)
+        est = new_estimator(rc, cfg)
         if not isinstance(raw, dict) or not _valid_estimator(raw.get("est"), est):
             problems.append(f"{rc.id}: saved model invalid, reset to priors")
             continue
@@ -230,6 +255,7 @@ def load_state(
         est.samples = int(e.get("samples", 0))
         est.rejected = int(e.get("rejected", 0))
         est.residual_var = float(e["residual_var"])
+        _load_change(est, e.get("change"))
         rs.est = est
         lags = raw.get("lag_samples", [])
         if isinstance(lags, list):

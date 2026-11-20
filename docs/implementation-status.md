@@ -10,11 +10,11 @@ Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the 
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 106 |
-| Partial | 26 | 24 |
+| Done | 82 | 111 |
+| Partial | 26 | 21 |
 | Missing | 37 | 22 |
 
-Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), the learner bootstraps from that history, and `radiate discover` drafts the configuration from Zigbee2MQTT.
+Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), the learner bootstraps from that history, and `radiate discover` drafts the configuration from Zigbee2MQTT. On 20 November 2026 the owner's three behaviour choices went in (spec 0.3): a configurable learning memory, two years by default, with change detection; `eco` and `comfort` demand modes, `eco` by default and changeable at runtime through `/api/v1/settings`; and no learning from the TRV reading while a room's own sensor is stale.
 
 Top remaining gaps, most important first:
 
@@ -22,7 +22,7 @@ Top remaining gaps, most important first:
 2. **Valve recalibration service** (section 7): blocked, the TRVZB has no calibration command in Zigbee2MQTT (see the row below).
 3. Learning extras: house-wide `κ`, flow sensitivity `η`, valve dead zone, store recovery time, bootstrap from the Home Assistant recorder (sections 4.1 to 4.3, 5.5).
 4. **TRV bias refinement** for internal-sensor rooms (section 4.6): tried and dropped, see the row below.
-5. **Three behaviour choices for the owner**, marked open questions in the spec (section 12): the learning memory, pooled demand, and learning on a stale room sensor.
+5. **Settings in the web UI and Home Assistant**: the demand mode can be changed through the API only; the UI and integration don't show it yet.
 
 ## 2. House model
 
@@ -59,7 +59,8 @@ Top remaining gaps, most important first:
 | 4.1 House-wide `κ` learned | missing | `core/types.py` `supply_kappa` | Fixed at 0.15 |
 | 4.1 Arrival lag learned per radiator, median of 15 | done | `core/decide.py` lag probe | A 0.6 K TRV rise within 40 min; heat availability is a step and the drive is smoothed over 15 min. The spec now describes this |
 | 4.2 Flow sensitivity `η` | missing | `core/allocator.py` `AllocRoom.eta` | Always the 0.7 default; no emitter-limited report |
-| 4.3 RLS with forgetting, priors, bounds | done | `core/estimator.py` | Open question: the forgetting factor gives a memory of about 33 hours of learning, not the 3 days planned (spec 4.3) |
+| 4.3 RLS with forgetting, priors, bounds | done | `core/estimator.py`, `config/site.py` `_learning` | Memory from `learning.memory_days`, default 730 days of learning (was a fixed 33 hours) |
+| 4.3 Change detection and re-learning | done | `core/estimator.py` `change_detected`, `relearn`; `core/persist.py` | Drive-weighted and level residual bias; adds 30 % of the prior covariance back. Statistics saved with the model; reason `learning.relearn`. Tested in `tests/core/test_estimator.py` and `tests/sim` (`radiator_output`) |
 | 4.3 Diagnostic when a parameter sits on a bound for 24 h | missing | | |
 | 4.3 Bootstrap from 14 days of history | partial | `core/bootstrap.py`, `server/runtime.py` `restore`, `cli.py` `bootstrap` | From the standalone database's tick history, on start without usable saved state or with `radiate bootstrap`; keeps models, lags and lockshield histograms only. Not from the Home Assistant recorder |
 | 4.3 Outlier rejection at 4 σ | done | `core/estimator.py` | |
@@ -77,7 +78,7 @@ Top remaining gaps, most important first:
 | 4.5 Reconciler, 3 attempts then a diagnostic | done | `drivers/z2m.py`, `drivers/live.py` `alerts` | |
 | 4.5 Summer valve exercise | missing | | |
 | 4.5 Per-valve `actuation_enabled`, global dry run | done | `config/site.py`, `drivers/live.py` | |
-| 4.6 Gate: sensor fresh | partial | `core/decide.py` | A stale room sensor falls back to the TRV reading and learning carries on. Open question: should it (spec 4.6) |
+| 4.6 Gate: sensor fresh | done | `core/decide.py` | `sensor_stale` while a normal room uses its TRV fallback and for the 15 min slope window after; `learning.learn_on_trv_fallback: true` keeps learning |
 | 4.6 Gate: window | done | `core/disturbance.py` | |
 | 4.6 Gate: store recovery | partial | `core/decide.py` | Time-based only; no "`T_trv` rising again" check |
 | 4.6 Gate: settled after setpoint change | done | `core/decide.py` | |
@@ -99,7 +100,7 @@ Top remaining gaps, most important first:
 | 5.1 Guard parameters and ranges | done | `core/types.py`, `config/site.py` | |
 | 5.2 State machine IDLE, LEAD, FIRING, REST | done | `core/boiler.py` | |
 | 5.2 Frost override, hard frost ignores minimum off | done | `core/boiler.py`, `core/decide.py` | |
-| 5.3 Pooled demand `D` (gain-weighted) | partial | `core/decide.py` | Fire rule uses the largest gap and predicted burn; `D` is not computed. Open question: should a small room alone fire the boiler less readily (spec 5.3) |
+| 5.3 Pooled demand `D` (gain-weighted) | done | `core/decide.py` `_pooled_demand_s` | `eco` demand mode, the default: `Σ gap / a` must reach 1.5 minimum burns, or one room the eco limit. Weighted by `1/a`, not `a` as planned (spec 5.3 explains why). `comfort` keeps the earlier rule. Mode from `boiler.demand_mode` or the runtime setting, recorded in each tick's snapshot |
 | 5.3 Fire rules (comfort limit, 1.5 × minimum burn, optimum start) | done | `core/decide.py` | |
 | 5.3 Stop rule | done | `core/decide.py` | Demand latch: stop when no room is calling or extended. The spec now describes this instead of "predicted to arrive within one tick" |
 | 5.3 Burn extension (top-up) | done | `core/decide.py` | |
@@ -126,14 +127,14 @@ Top remaining gaps, most important first:
 | Pure `decide` with reasons and alerts | done | `core/decide.py` | |
 | Every 60 s | done | `server/runtime.py` | |
 | Extra tick on significant input change (5 s debounce) | missing | | Fixed interval only |
-| Decision log | done | `server/runtime.py` | Boiler, disturbance and safe-mode reasons; in memory, last 500 |
+| Decision log | done | `server/runtime.py` | Boiler, disturbance, safe-mode and `learning.relearn` reasons; in memory, last 500 |
 | Record every tick's snapshot and actions; replay | done | `core/history.py`, `server/history.py`, `server/replay.py`, `cli.py` `replay` | `history` table in `radiate.db`, `house.history_days` (14) retention, about 1.2 MB a day. Replay with the same code and configuration gives no differences. Live driver only |
 
 ## 7. Failure modes
 
 | Failure | Status | Where | Note |
 |---|---|---|---|
-| Room sensor stale | partial | `core/decide.py` | Falls back to the TRV reading and stops sending external temperature; learning is not switched off (open question, spec 4.6) |
+| Room sensor stale | done | `core/decide.py` | Falls back to the TRV reading and stops sending external temperature; learning pauses (`sensor_stale`) unless `learning.learn_on_trv_fallback` is `true` |
 | TRV offline | partial | `core/decide.py`, `drivers/live.py` | Excluded from demand and learning, alert raised; not counted as possibly open in the supply factor |
 | Coordinator or MQTT down: safe mode | done | `core/decide.py` `force_stop`, `drivers/live.py` | Broker disconnected or Zigbee2MQTT offline marks every TRV unreachable; relay off after minimum burn (the off command is now sent; before, the relay stayed on until the watchdog took over), then no relay commands and no heartbeat, so the watchdog takes over. Radiate follows the watchdog's burns meanwhile and adopts the relay on hand-back |
 | Radiate process dies | done | `shelly/radiate-watchdog.js`, schedule mirror | Simulated in `tests/sim` |
@@ -155,6 +156,7 @@ Top remaining gaps, most important first:
 | `GET /api/v1/house`, `/state`, `/decisions?since=` | done | `server/app.py` | |
 | `POST /rooms/{id}/setpoint` | done | `server/app.py`, `server/runtime.py` `set_override` | Ends at the next schedule change by default, or after `duration_min`, or `until: cleared`; saved in SQLite; `override` in `describe()` |
 | `POST /rooms/{id}/fire`, `/store/boost`, `/mode` | done | `server/app.py` | Manual fire flag is not persisted; `fire_switch` in `describe()` |
+| `GET` and `POST /api/v1/settings` (demand mode) | done | `server/bridge.py` `set_settings`, `server/app.py`, `server/runtime.py` | Saved in the state database; `settings` and `boiler.pooled_demand_min` in `describe()`. Not in the web UI or Home Assistant yet |
 | `WS /api/v1/stream` | done | `server/app.py` | |
 | Local token auth, ingress auth | done | `server/app.py` | |
 | HA: climate per room | done | `custom_components/radiate/climate.py` | Setting the target creates an override; override setpoint, `until` and minutes left as attributes |

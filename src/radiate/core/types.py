@@ -34,6 +34,13 @@ class BoilerState(StrEnum):
     REST = "rest"  # minimum off time running
 
 
+class DemandMode(StrEnum):
+    """How calling rooms fire the boiler (spec 5.3)."""
+
+    ECO = "eco"  # pooled demand: a room on its own waits for others or a wider limit
+    COMFORT = "comfort"  # any calling room past the comfort limit fires the boiler
+
+
 @dataclass(frozen=True, slots=True)
 class RoomConfig:
     id: str
@@ -60,6 +67,18 @@ class BoilerConfig:
     hard_frost_c: float = 5.0
     output_kw: float = 13.0
     nozzle_lph: float | None = None
+    demand_mode: DemandMode = DemandMode.ECO  # the default; the runtime can change it
+    eco_limit_k: float = 1.5  # eco: the most a calling room waits below its target
+
+
+@dataclass(frozen=True, slots=True)
+class LearningConfig:
+    """Room model learning (spec 4.3, 4.6)."""
+
+    memory_days: float = 730.0  # RLS memory, in days of learning updates
+    # Learn from the TRV reading while a normal room's own sensor is stale. Off: the
+    # `sensor_stale` gate pauses learning until the sensor is back (spec 4.6).
+    learn_on_trv_fallback: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +93,7 @@ class HouseConfig:
     rooms: tuple[RoomConfig, ...]
     boiler: BoilerConfig = field(default_factory=BoilerConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
+    learning: LearningConfig = field(default_factory=LearningConfig)
     balancing: bool = True  # False: every heating valve fully open (for comparison)
     supply_kappa: float = 0.15  # supply factor sensitivity to total opening
     bypass_equivalent: float = 0.4  # always-open path, in fully-open-radiator equivalents
@@ -134,6 +154,9 @@ class Snapshot:
     # How long the driver went without reading the heating relay before this snapshot
     # (Shelly unreachable). After a few minutes the watchdog may have switched it.
     heating_relay_unseen_s: float = 0.0
+    # The demand mode chosen at runtime (spec 5.3). None: `BoilerConfig.demand_mode`.
+    # In the snapshot so the tick history records it and replay decides the same way.
+    demand_mode: DemandMode | None = None
 
 
 @dataclass(slots=True)

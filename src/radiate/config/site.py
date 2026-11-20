@@ -17,10 +17,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from radiate.core.estimator import MEMORY_DAYS_MAX, MEMORY_DAYS_MIN
 from radiate.core.types import (
     BoilerConfig,
+    DemandMode,
     HeatSource,
     HouseConfig,
+    LearningConfig,
     RoomConfig,
     RoomRole,
     StoreConfig,
@@ -214,11 +217,22 @@ def _boiler(ctx: _Ctx, raw: dict) -> BoilerConfig:
             "frost_c",
             "output_kw",
             "nozzle_lph",
+            "demand_mode",
+            "eco_limit_k",
         },
         p,
     )
     d = BoilerConfig()
     nozzle = raw.get("nozzle_lph")
+    try:
+        demand_mode = DemandMode(ctx.get(raw, "demand_mode", str, d.demand_mode.value, p))
+    except ValueError:
+        ctx.err(f"{p}demand_mode", "must be eco or comfort")
+        demand_mode = d.demand_mode
+    comfort_limit = ctx.number(raw, "comfort_limit_k", d.comfort_limit_k, 0.2, 1.5, p)
+    eco_limit = ctx.number(raw, "eco_limit_k", d.eco_limit_k, 0.5, 3.0, p)
+    if eco_limit < comfort_limit:
+        ctx.err(f"{p}eco_limit_k", "must be at least comfort_limit_k")
     return BoilerConfig(
         min_burn_s=ctx.number(raw, "min_burn_min", d.min_burn_s / 60, 4, 20, p) * 60,
         min_off_s=ctx.number(raw, "min_off_min", d.min_off_s / 60, 5, 30, p) * 60,
@@ -226,10 +240,12 @@ def _boiler(ctx: _Ctx, raw: dict) -> BoilerConfig:
             ctx.number(raw, "max_starts_per_hour", d.max_starts_per_hour, 1, 6, p)
         ),
         valve_lead_s=ctx.number(raw, "valve_lead_s", d.valve_lead_s, 30, 300, p),
-        comfort_limit_k=ctx.number(raw, "comfort_limit_k", d.comfort_limit_k, 0.2, 1.5, p),
+        comfort_limit_k=comfort_limit,
         frost_c=ctx.number(raw, "frost_c", d.frost_c, 5, 10, p),
         output_kw=ctx.number(raw, "output_kw", d.output_kw, 3, 70, p),
         nozzle_lph=ctx.number(raw, "nozzle_lph", 0.0, 0.1, 10, p) if nozzle is not None else None,
+        demand_mode=demand_mode,
+        eco_limit_k=eco_limit,
     )
 
 
@@ -282,6 +298,20 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
         heating_switch=heating,
         store_switch=store,
         auto_off_s=ctx.number(raw, "auto_off_min", 120, 15, 240, p) * 60,
+    )
+
+
+def _learning(ctx: _Ctx, raw: dict) -> LearningConfig:
+    p = "learning."
+    ctx.unknown(raw, {"memory_days", "learn_on_trv_fallback"}, p)
+    d = LearningConfig()
+    return LearningConfig(
+        memory_days=ctx.number(
+            raw, "memory_days", d.memory_days, MEMORY_DAYS_MIN, MEMORY_DAYS_MAX, p
+        ),
+        learn_on_trv_fallback=ctx.get(
+            raw, "learn_on_trv_fallback", bool, d.learn_on_trv_fallback, p
+        ),
     )
 
 
@@ -440,6 +470,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "schedules",
             "rooms",
             "balancing",
+            "learning",
         },
         "",
     )
@@ -483,6 +514,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         rooms=tuple(rooms),
         boiler=_boiler(ctx, ctx.section(data, "boiler")),
         store=_store(ctx, ctx.section(data, "store")),
+        learning=_learning(ctx, ctx.section(data, "learning")),
         balancing=balancing,
     )
     mqtt = _mqtt(ctx, ctx.section(data, "mqtt"))

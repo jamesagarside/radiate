@@ -141,6 +141,14 @@ async def set_mode(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_mode)
 
 
+async def settings(request: web.Request) -> web.Response:
+    return web.json_response(_rt(request).settings())
+
+
+async def set_settings(request: web.Request) -> web.Response:
+    return await _post(request, bridge.set_settings)
+
+
 async def stream(request: web.Request) -> web.WebSocketResponse:
     rt = _rt(request)
     ws = web.WebSocketResponse(heartbeat=30)
@@ -198,6 +206,8 @@ def create_app(
             web.post("/api/v1/rooms/{room_id}/fire", set_fire),
             web.post("/api/v1/store/boost", boost_store),
             web.post("/api/v1/mode", set_mode),
+            web.get("/api/v1/settings", settings),
+            web.post("/api/v1/settings", set_settings),
             web.get(STREAM_PATH, stream),
         ]
     )
