@@ -3,14 +3,16 @@
 The options flow maps each Radiate person to a `person` entity. This module reports
 those entities' states to the server as they change: `home` is home, any other state
 (`not_home` or a zone name) is not home, and `unknown` or `unavailable` are not
-reported, so they never count as away. The server decides who counts as away (with its
-presence delay) and what that does to the heating; nothing here makes that decision.
+reported, so they never count as away. Every 15 minutes it reports each known state
+again (a heartbeat), so the server can treat presence that stops arriving as unknown.
+The server decides who counts as away (with its presence delay and stale limit) and what
+that does to the heating; nothing here makes that decision.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -20,11 +22,14 @@ from homeassistant.core import Event, EventStateChangedData, HomeAssistant, Serv
 from homeassistant.core import callback as ha_callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.util import dt as dt_util
 
 from .api import RadiateError
-from .const import CONF_PEOPLE, DOMAIN
+from .const import CONF_PEOPLE, DOMAIN, PRESENCE_HEARTBEAT_MIN
 from .entity import RadiateEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,7 +64,9 @@ async def async_setup_presence(hass: HomeAssistant, entry) -> None:
     data = entry.runtime_data
     chosen = mapping(entry)
 
-    async def report(person_id: str, state: str | None, since: datetime | None) -> None:
+    async def report(
+        person_id: str, state: str | None, since: datetime | None, refresh: bool = True
+    ) -> None:
         try:
             await data.client.report_presence(
                 person_id, state, since.isoformat() if since else None
@@ -67,7 +74,8 @@ async def async_setup_presence(hass: HomeAssistant, entry) -> None:
         except RadiateError as err:
             _LOGGER.warning("Radiate: could not report presence for %s: %s", person_id, err)
             return
-        await data.coordinator.async_request_refresh()
+        if refresh:
+            await data.coordinator.async_request_refresh()
 
     # Forget presence for people who are no longer mapped, so it cannot go stale.
     for person in (data.coordinator.data.get("away") or {}).get("people", []):
@@ -95,6 +103,19 @@ async def async_setup_presence(hass: HomeAssistant, entry) -> None:
             entry.async_create_task(hass, report(pid, value, new.last_changed))
 
     entry.async_on_unload(async_track_state_change_event(hass, list(by_entity), changed))
+
+    async def heartbeat(_now: datetime) -> None:
+        # The same state and change time again: nothing changes on the server except
+        # that the presence is fresh. Unknown states are still not sent.
+        for pid, entity_id in chosen.items():
+            state = hass.states.get(entity_id)
+            value = presence_of(state)
+            if value is not None:
+                await report(pid, value, state.last_changed, refresh=False)
+
+    entry.async_on_unload(
+        async_track_time_interval(hass, heartbeat, timedelta(minutes=PRESENCE_HEARTBEAT_MIN))
+    )
 
 
 def _resolve(entry, person: str) -> str | None:
@@ -178,4 +199,6 @@ class PersonAway(RadiateEntity, BinarySensorEntity):
             "away_until": p.get("until"),
             "presence": presence.get("state"),
             "presence_since": presence.get("since"),
+            # Not reported for the server's stale limit: treated as unknown, not away.
+            "presence_stale": presence.get("stale"),
         }

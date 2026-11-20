@@ -1,6 +1,6 @@
 """Away: the options flow, presence reporting, away entities and services."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
@@ -8,7 +8,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.radiate.const import CONF_PEOPLE, CONF_TOKEN, CONF_URL, DOMAIN
 from custom_components.radiate.presence import presence_of
@@ -102,6 +105,21 @@ async def test_away_entity_per_person(
     assert worker.attributes["reason"] == "away_until"
     assert worker.attributes["person_id"] == "home_worker"
     assert worker.attributes["presence"] is None
+    assert worker.attributes["presence_stale"] is None
+
+
+async def test_away_entity_shows_stale_presence(
+    hass: HomeAssistant, aioclient_mock, household_house, household_state
+):
+    stale = {"state": "not_home", "since": "2026-11-18T05:00+00:00", "stale": True}
+    people = [person("early_riser", presence=stale), person("home_worker")]
+    state = {**household_state, "away": {**household_state["away"], "people": people}}
+    mock_people(aioclient_mock, household_house, state)
+    await setup_with(hass, household_house, {CONF_PEOPLE: {"early_riser": "person.alex"}})
+    early = hass.states.get("binary_sensor.radiate_early_riser_away")
+    assert early.state == STATE_OFF
+    assert early.attributes["presence"] == "not_home"
+    assert early.attributes["presence_stale"] is True
 
 
 async def test_no_away_entities_without_people(hass: HomeAssistant, radiate_api, house):
@@ -175,6 +193,36 @@ async def test_presence_reported_on_setup_and_on_change(
     hass.states.async_set("person.sam", "home")
     await hass.async_block_till_done()
     assert presence_posts(aioclient_mock)[-1][0] == "people/home_worker/presence"
+
+
+async def test_presence_heartbeat_every_15_minutes(
+    hass: HomeAssistant, aioclient_mock, household_house, household_state
+):
+    mock_people(aioclient_mock, household_house, household_state)
+    hass.states.async_set("person.alex", "not_home")
+    hass.states.async_set("person.sam", "unknown")
+    options = {CONF_PEOPLE: {"early_riser": "person.alex", "home_worker": "person.sam"}}
+    await setup_with(hass, household_house, options)
+    since = hass.states.get("person.alex").last_changed.isoformat()
+    assert len(presence_posts(aioclient_mock)) == 1
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=14))
+    await hass.async_block_till_done()
+    assert len(presence_posts(aioclient_mock)) == 1
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=15, seconds=1))
+    await hass.async_block_till_done()
+    sent = presence_posts(aioclient_mock)
+    # The same state with its original change time; unknown is still not sent.
+    assert sent[1:] == [("people/early_riser/presence", {"state": "not_home", "since": since})]
+
+    hass.states.async_set("person.sam", "home")
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=30, seconds=2))
+    await hass.async_block_till_done()
+    assert {p for p, _ in presence_posts(aioclient_mock)[-2:]} == {
+        "people/early_riser/presence",
+        "people/home_worker/presence",
+    }
 
 
 async def test_unmapped_people_have_their_presence_forgotten(
