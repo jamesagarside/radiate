@@ -1,3 +1,5 @@
+import dataclasses
+import json
 import re
 from pathlib import Path
 
@@ -5,11 +7,13 @@ import yaml
 
 from radiate.cli import main
 from radiate.config import load_site
-from radiate.export.dashboard import build_dashboard, slug
+from radiate.export.dashboard import RADIATE_NAMES, build_dashboard, radiate_entity, slug
 
-REFERENCE = Path(__file__).resolve().parents[2] / "examples" / "reference-house.yaml"
+ROOT = Path(__file__).resolve().parents[2]
+REFERENCE = ROOT / "examples" / "reference-house.yaml"
+STRINGS = ROOT / "custom_components" / "radiate" / "strings.json"
 ENV = {"RADIATE_MQTT_PASSWORD": "x", "RADIATE_SHELLY_PASSWORD": "x"}
-ENTITY = re.compile(r"^(sensor|climate|binary_sensor)\.[a-z0-9_]+$")
+ENTITY = re.compile(r"^(sensor|climate|binary_sensor|switch)\.[a-z0-9_]+$")
 
 
 def _sections(view=0, **kwargs):
@@ -40,18 +44,31 @@ def test_slug_matches_home_assistant_object_ids():
     assert slug("trv_kitchen") == "trv_kitchen"
     assert slug("Sensor Bedroom 1") == "sensor_bedroom_1"
     assert slug("  Lounge/TRV  ") == "lounge_trv"
+    assert slug("Chloë's room") == "chloe_s_room"
 
 
 def test_one_section_per_room_between_overview_and_batteries():
     site, sections = _sections()
     headings = [s["cards"][0]["heading"] for s in sections]
-    assert headings[0] == "House"
-    assert headings[1:-1] == [r.name for r in site.house.rooms]
+    assert headings[:2] == ["House", "Radiate"]
+    assert headings[2:-1] == [r.name for r in site.house.rooms]
     assert headings[-1] == "Batteries"
 
 
+def test_without_radiate_there_is_no_radiate_section_entity_or_action():
+    site, sections = _sections(radiate=False)
+    headings = [s["cards"][0]["heading"] for s in sections]
+    assert headings[0] == "House"
+    assert headings[1:-1] == [r.name for r in site.house.rooms]
+    text = json.dumps(build_dashboard(site, radiate=False))
+    assert "radiate." not in text
+    assert "climate.bedroom_1" not in text
+    assert "sensor.bedroom_1_opening_limit" not in text
+
+
 def test_normal_room_has_humidity_badges_trend_valve_and_activity():
-    _, sections = _sections()
+    # Zigbee2MQTT only: the valve's own climate entity sets the temperature.
+    _, sections = _sections(radiate=False)
     heading, temp, valve, activity = _room(sections, "Bedroom 1")["cards"]
     assert [b["entity"] for b in heading["badges"]] == [
         "sensor.temp_bedroom_1_humidity",
@@ -64,6 +81,96 @@ def test_normal_room_has_humidity_badges_trend_valve_and_activity():
     assert activity["type"] == "history-graph"
     assert activity["entities"] == [{"entity": "climate.trv_bedroom_1", "name": "Bedroom 1"}]
     assert activity["title"] == "Valve activity, last 24 hours"
+
+
+def test_radiate_room_sets_temperature_through_radiate_and_keeps_valve_activity():
+    _, sections = _sections()
+    heading, temp, heating, opening, activity = _room(sections, "Bedroom 1")["cards"]
+    assert len(heading["badges"]) == 2
+    assert temp["entity"] == "sensor.temp_bedroom_1_temperature"
+    assert heating["entity"] == "climate.bedroom_1"
+    assert heating["name"] == "Heating"
+    assert heating["features"] == [{"type": "target-temperature"}]
+    assert opening["entity"] == "sensor.bedroom_1_opening_limit"
+    assert activity["type"] == "history-graph"
+    assert activity["entities"] == [{"entity": "climate.trv_bedroom_1", "name": "Bedroom 1"}]
+    tiles = [c["entity"] for c in _room(sections, "Bedroom 1")["cards"] if c["type"] == "tile"]
+    assert "climate.trv_bedroom_1" not in tiles
+
+
+def test_radiate_fire_switch_only_in_rooms_with_an_open_fire():
+    _, sections = _sections()
+    lounge = [c.get("entity") for c in _room(sections, "Lounge")["cards"]]
+    assert "switch.lounge_fire_lit" in lounge
+    fire = next(
+        c for c in _room(sections, "Lounge")["cards"] if c.get("entity", "").startswith("switch.")
+    )
+    assert fire["tap_action"] == {"action": "toggle"}
+    for name in ("Kitchen", "Bedroom 1"):
+        assert not any(
+            c.get("entity", "").startswith("switch.") for c in _room(sections, name)["cards"]
+        )
+
+
+def test_radiate_house_section_shows_boiler_history_today_mode_and_boost():
+    _, sections = _sections()
+    cards = _room(sections, "Radiate")["cards"]
+    tiles = [c["entity"] for c in cards if c["type"] == "tile"]
+    assert tiles == [
+        "sensor.radiate_boiler_state",
+        "sensor.radiate_alerts",
+        "sensor.radiate_burner_hours_today",
+        "sensor.radiate_starts_today",
+    ]
+    (history,) = [c for c in cards if c["type"] == "history-graph"]
+    assert history["entities"] == [{"entity": "sensor.radiate_boiler_state", "name": "Boiler"}]
+    assert history["title"] == "Boiler, last 24 hours"
+    actions = [c["tap_action"] for c in cards if c["type"] == "button"]
+    assert [(a["perform_action"], a["data"]) for a in actions] == [
+        ("radiate.set_mode", {"mode": "auto"}),
+        ("radiate.set_mode", {"mode": "frost"}),
+        ("radiate.set_mode", {"mode": "off"}),
+        ("radiate.boost_store", {"minutes": 60}),
+    ]
+    assert all(a["action"] == "perform-action" for a in actions)
+    # Only turning the heating off asks first.
+    assert [("confirmation" in a) for a in actions] == [False, False, True, False]
+
+
+def test_oil_and_heat_today_need_a_nozzle_rating():
+    site = load_site(REFERENCE, env=ENV)
+    rated = dataclasses.replace(
+        site,
+        house=dataclasses.replace(
+            site.house, boiler=dataclasses.replace(site.house.boiler, nozzle_lph=0.35)
+        ),
+    )
+    for s, present in ((site, False), (rated, True)):
+        sections = build_dashboard(s)["views"][0]["sections"]
+        tiles = [c.get("entity") for c in _room(sections, "Radiate")["cards"]]
+        assert ("sensor.radiate_oil_used_today" in tiles) is present
+        assert ("sensor.radiate_heat_delivered_today" in tiles) is present
+
+
+def test_radiate_entity_ids_match_the_integration_naming():
+    # The IDs tests/ha sees from the real integration.
+    site = load_site(REFERENCE, env=ENV)
+    room = {r.id: r for r in site.house.rooms}
+    assert radiate_entity("sensor", "relay_starts_today") == "sensor.radiate_starts_today"
+    assert radiate_entity("sensor", "oil_today") == "sensor.radiate_oil_used_today"
+    assert radiate_entity("climate", room=room["bedroom_1"]) == "climate.bedroom_1"
+    assert radiate_entity("climate", room=room["dining"]) == "climate.dining_room"
+    assert radiate_entity("switch", "fire_switch", room["lounge"]) == "switch.lounge_fire_lit"
+    assert (
+        radiate_entity("sensor", "opening_limit", room["dining"])
+        == "sensor.dining_room_opening_limit"
+    )
+
+
+def test_radiate_names_match_the_integration_strings():
+    entity = json.loads(STRINGS.read_text())["entity"]
+    for (platform, key), name in RADIATE_NAMES.items():
+        assert entity[platform][key]["name"] == name, (platform, key)
 
 
 def test_heat_sources_are_named_in_words():
@@ -85,7 +192,11 @@ def test_internal_sensor_room_uses_the_valve_reading_and_has_no_badges():
     tiles = [c for c in toilet["cards"] if c["type"] == "tile"]
     assert tiles[0]["entity"] == "sensor.trv_toilet_local_temperature"
     assert tiles[0]["name"] == "Temperature at the valve"
-    assert tiles[1]["entity"] == "climate.trv_toilet"
+    assert tiles[1]["entity"] == "climate.toilet"
+    _, z2m = _sections(radiate=False)
+    assert [c for c in _room(z2m, "Toilet")["cards"] if c["type"] == "tile"][1][
+        "entity"
+    ] == "climate.trv_toilet"
     _, analysis = _sections(view=1)
     stats = [c for c in _room(analysis, "Toilet")["cards"] if c["type"] == "statistic"]
     assert {c["entity"] for c in stats} == {"sensor.trv_toilet_local_temperature"}
@@ -97,12 +208,14 @@ def test_passive_room_has_no_valve_control():
     assert stairs["cards"][0]["icon"] == "mdi:radiator-disabled"
     assert stairs["cards"][1]["heading"] == "Bypass, not controlled"
     assert not any(c.get("entity", "").startswith("climate.") for c in stairs["cards"])
+    assert not any("stairs_opening_limit" in c.get("entity", "") for c in stairs["cards"])
 
 
 def test_every_entity_id_is_well_formed():
-    _, sections = _sections()
-    ids = list(_entities(sections))
-    assert ids and all(ENTITY.match(e) for e in ids), [e for e in ids if not ENTITY.match(e)]
+    site = load_site(REFERENCE, env=ENV)
+    for radiate in (True, False):
+        ids = list(_entities(build_dashboard(site, radiate=radiate)))
+        assert ids and all(ENTITY.match(e) for e in ids), [e for e in ids if not ENTITY.match(e)]
 
 
 def test_cli_writes_yaml_without_the_secrets_set(tmp_path, monkeypatch):
@@ -114,6 +227,15 @@ def test_cli_writes_yaml_without_the_secrets_set(tmp_path, monkeypatch):
     assert data["title"] == "Radiators"
     assert [v["path"] for v in data["views"]] == ["radiators", "radiators-analysis"]
     assert all(v["type"] == "sections" for v in data["views"])
+    assert "Radiate" in [s["cards"][0]["heading"] for s in data["views"][0]["sections"]]
+
+
+def test_cli_no_radiate_leaves_out_radiate(tmp_path):
+    out = tmp_path / "dashboard.yaml"
+    main(["dashboard", str(REFERENCE), "--no-radiate", "-o", str(out)])
+    text = out.read_text()
+    assert "radiate." not in text
+    assert "climate.trv_bedroom_1" in text
 
 
 def test_hours_sets_every_live_window():
@@ -157,8 +279,6 @@ def test_analysis_view_follows_one_date_picker():
 
 
 def test_outdoor_sensor_joins_the_house_charts():
-    import dataclasses
-
     site = dataclasses.replace(load_site(REFERENCE, env=ENV), outdoor_sensor="outdoor_temp")
     data = build_dashboard(site)
     house = data["views"][0]["sections"][0]["cards"][1]["entities"]

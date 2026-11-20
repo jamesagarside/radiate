@@ -209,7 +209,7 @@ def _dashboard(args: argparse.Namespace) -> None:
     except OSError as err:
         sys.exit(f"cannot read {args.path}: {err.strerror}")
     try:
-        text = dashboard_yaml(site, args.title, args.hours)
+        text = dashboard_yaml(site, args.title, args.hours, radiate=args.radiate)
     except ValueError as err:
         sys.exit(str(err))
     if args.output:
@@ -299,6 +299,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="window for the live trends and history on the Rooms view (1 to 336)",
     )
     d.add_argument("-o", "--output", help="write the YAML to this file instead of stdout")
+    d.add_argument(
+        "--no-radiate",
+        dest="radiate",
+        action="store_false",
+        help="leave out Radiate's own entities, for a house running Zigbee2MQTT only",
+    )
     d.set_defaults(func=_dashboard)
     sh = sub.add_parser("shelly", help="check the boiler relay or install its watchdog")
     sh.add_argument("action", choices=["status", "install-watchdog"])
