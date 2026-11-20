@@ -5,7 +5,6 @@
 Not built yet:
 
 - Dragging an edge in the week view to make a room-level adjustment.
-- Mapping people to Home Assistant `person` entities in the wizard. The integration's options do it instead.
 - Rooms from Home Assistant areas or Zigbee2MQTT devices. The wizard lists the rooms in the house file.
 - Checking the wizard visually in a browser. Its logic and markup are tested; the layout hasn't been seen on screen.
 
@@ -104,14 +103,15 @@ How it was built:
 - The runtime keeps each person's away until and presence in SQLite. When the set of people away changes, it recompiles the household and hands both weeks to the live driver: it follows the live weeks, and the schedule mirror and the Shelly fallback use the valve weeks.
 - Everyone away doesn't switch the heating mode. The runtime runs the core in `frost` while everyone is away and the chosen mode is `auto`, so a mode of `off` or `frost` still wins and `auto` returns by itself. With presence only, there is no return time, so it lasts until someone is home.
 - Within the return warm-up before a known return, the runtime runs the core in `auto` with every room still held at frost and the return as each room's next setpoint, so optimum start warms the house in time.
-- The Home Assistant integration maps Radiate people to `person` entities in its options, reports their state as it changes and every 15 minutes, and adds an away binary sensor per person and the services `radiate.set_away` and `radiate.clear_away`. The server makes every decision.
+- The Home Assistant integration maps Radiate people to `person` entities, from its options or from `ha_person` in the household (the options win), reports their state as it changes and every 15 minutes, and adds an away binary sensor per person and the services `radiate.set_away` and `radiate.clear_away`. The server makes every decision.
 - The web UI has a People section with an "Away until" control per person.
+- The wizard's People step links each person to a Home Assistant `person` entity (`household.people.<id>.ha_person`). The integration reports the `person` entities it can see (`POST /api/v1/ha/persons`) and the wizard offers them, linking people by name while nobody is linked yet; without that list it takes the entity ID as text.
 
 ## Setup in the UI
 
 Setup is a short wizard in the web UI, also reachable from Home Assistant through ingress. Without a household, the web UI shows a "Set up your household" card above the rooms; with one, "Change household setup" sits beside the People heading.
 
-1. **People:** names, adding and removing people. Mapping them to Home Assistant `person` entities stays in the integration's options.
+1. **People:** names, adding and removing people, and each person's Home Assistant `person` entity.
 2. **Routines:** one screen per person: when you get up, whether you go out on weekdays and when you're back, when you go to bed, and whether weekends are different.
 3. **Rooms:** set each room's use level, pick who uses it, and mark offices. Rooms come from the house file or Home Assistant areas.
 4. **Temperatures:** the four house-wide values (in use, occasional, unused, night), with the damp guidance below.

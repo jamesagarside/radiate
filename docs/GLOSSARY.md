@@ -139,8 +139,13 @@ A person's own statement that they are away until a local date and time, set in 
 Code: `Presence.away_until`, `Runtime.set_away`, `Runtime.clear_away`, `Household.return_lead_min`, `RETURN_LEAD_S`, API `POST /api/v1/people/{id}/away`, HA services `radiate.set_away`, `radiate.clear_away`.
 
 **Presence**:
-Whether Home Assistant reports a person as home or not home, and since when. The integration maps a Radiate person to a `person` entity and reports it when it changes and every 15 minutes; `unknown` and `unavailable` are not reported.
+Whether Home Assistant reports a person as home or not home, and since when. The integration reports the state of each person's Home Assistant person when it changes and every 15 minutes; `unknown` and `unavailable` are not reported.
 Code: `Presence.state`, `Presence.since`, `Presence.reported_at`, `Runtime.report_presence`, API `POST /api/v1/people/{id}/presence`, radiate-ha `custom_components/radiate/presence.py`, `PRESENCE_HEARTBEAT_MIN`.
+
+**Home Assistant person**:
+The Home Assistant `person` entity linked to a person, whose presence counts for them. It's set in the household, from the house file or the People step of the household setup, or in the integration's options, which take priority. Linking changes no schedule. The integration tells the server which `person` entities exist, so the household setup can list them.
+Code: `Person.ha_person`, `HA_PERSON` in `radiate.config.site`, config key `household.people.<id>.ha_person`, `ha_person` in API `GET /api/v1/house`; `Runtime.ha_persons`, `Runtime.report_ha_persons`, API `POST /api/v1/ha/persons`, `ha_persons` in `GET /api/v1/household`; radiate-ha `mapping` and `ha_persons` in `presence.py`.
+_Avoid_: HA mapping, presence entity.
 
 **Presence delay**:
 How long presence must say not home before the person counts as away, so short trips do not cool their rooms. 60 minutes by default.
