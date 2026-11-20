@@ -70,7 +70,7 @@ Symbol `T_out`, °C. Code: `Snapshot.outdoor`, config key `house.outdoor_sensor`
 
 **Household**:
 The people who live in the house, their routines, and how each room is used. Radiate compiles it into one weekly schedule per room, so nothing downstream of the schedule changes.
-Code: `Household`, `compile_household` in `radiate.config.household`, config key `household`.
+Code: `Household`, `compile_household` in `radiate.config.household`, config key `household`. The week each room follows now: API `GET /api/v1/schedules`, `schedules_view` in `radiate.server.schedules`, the web UI's Schedules section.
 
 **Person**:
 Someone who lives in the house. Has an ID, a display name shown only in the UI, and a routine for weekdays and one for the weekend.
