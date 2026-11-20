@@ -4,7 +4,7 @@
 
 Plumbers balance a heating system by hand, turning the lockshield valve on each radiator to throttle the ones nearest the boiler so the far ones get their share of hot water. Radiate does that job in software, continuously, using smart radiator valves you already own.
 
-> **Status:** pre-alpha. The control core, simulator, web UI, Home Assistant integration and App are tested against a simulated house. Zigbee2MQTT and Shelly drivers, the configuration file and SQLite persistence are in place but untested on real devices. Run real installs in dry run first; see [configuration](docs/configuration.md).
+> **Status:** pre-alpha. The control core, simulator, web UI, Home Assistant integration and App are tested against a simulated house. The Zigbee2MQTT and Shelly drivers, `radiate discover`, dry run, the Shelly watchdog installer, and the tick history with replay and bootstrap are in place but untested on real devices. Run real installs in dry run first; see [configuration](docs/configuration.md). [Implementation status](docs/implementation-status.md) lists what is built.
 
 ## Try it
 
@@ -33,6 +33,8 @@ To run against real devices, describe your house in a YAML file, check it, and s
 .venv/bin/radiate serve --config radiate.yaml
 ```
 
+The server records every tick, so `radiate replay` shows what Radiate would have done during a dry run, and `radiate bootstrap` relearns the room models from that history. Before you turn dry run off, install the boiler watchdog with `radiate shelly install-watchdog`. See [replay and bootstrap](docs/deployment.md#replay-and-bootstrap) and [Shelly watchdog](docs/deployment.md#shelly-watchdog).
+
 To run Radiate in Docker, on a Raspberry Pi, as a Home Assistant App or with the HACS integration, see [deployment](docs/deployment.md).
 
 Tests: `.venv/bin/pytest` (core, config, drivers, simulator, server). The Home Assistant integration tests run in a separate environment; see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -45,12 +47,12 @@ Radiate aims to close that gap without a subscription and without the internet.
 
 ## Goals
 
-- **Whole-house balancing.** Learn how quickly each radiator heats up after the boiler fires and cap the maximum opening of over-supplied radiators so under-supplied ones get flow.
+- **Whole-house balancing.** Learn how quickly each radiator heats up after the boiler fires, and limit how far over-supplied radiators open so under-supplied ones get flow.
 - **Local first.** The control loop always runs in your home: on a Raspberry Pi, as a Home Assistant App, or on the cloud edition's local edge. No subscription needed to heat your house; the cloud adds remote access and history, never control features.
 - **Whole-house, not per room.** One model of every room, radiator, the boiler and the hot-water store, optimised together, so rooms warm up together and the burner runs fewer, longer burns.
 - **Other heat sources.** Pause learning for rooms heated by an open fire, range cooker, wood burner or sun, so they aren't mistaken for over-supplied radiators.
 - **Boiler-aware.** Aggregate room demand into a single boiler call with minimum burn and minimum off times to prevent short-cycling (important for oil and older non-modulating boilers), and schedule a hot-water store separately.
-- **Observable.** Expose learned parameters and decisions as Home Assistant entities, with optional export to external stores for analysis.
+- **Observable.** Expose learned parameters and decisions in the web UI and as Home Assistant entities, with optional export to Elastic for analysis.
 - **Safe failure.** If Home Assistant or Radiate stops, valves and boiler fall back to sensible local behaviour.
 
 ## Editions
@@ -59,7 +61,7 @@ Radiate aims to close that gap without a subscription and without the internet.
 |---|---|---|
 | Standalone (Docker, Raspberry Pi) | No Home Assistant | Built-in web UI |
 | Home Assistant App | Home Assistant OS | Same UI in the sidebar, plus entities via the HACS integration |
-| Cloud | Remote access, history, several homes | Hosted UI; a small local edge still runs the control loop |
+| Cloud (planned) | Remote access, history, several homes | Hosted UI; a small local edge still runs the control loop |
 
 See [ADR-0002](docs/adr/0002-deployment-topology.md).
 

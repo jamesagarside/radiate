@@ -1,6 +1,8 @@
 # Simulation findings
 
-November 2026. Simulator: `src/radiate/sim` (spec section 11). Reproduce with `radiate sim` or the tests in `tests/sim`.
+November 2026. Simulator: `src/radiate/sim` (spec section 11). Reproduce with `radiate sim --days 5 --seed N` for seeds 1 to 3, or the tests in `tests/sim`.
+
+Last run on 19 November 2026 at commit `925b7a1`. Every number in the two main tables, and the after columns of the valve table, came out the same as before; `tests/sim` passes.
 
 The simulator is a plausible model of the reference house, not a measurement of it. Treat these results as a check on the algorithm's direction, and expect the real house to differ. The first real-world check is the reference install.
 
@@ -32,7 +34,7 @@ Notes on reading this table:
 - **Comfort is the big win, mostly from optimum start.** Smart TRVs start heating at the scheduled time and the slow rooms never catch up. Radiate starts each room early, from its learned warm-up rate.
 - **Radiate burns more oil here (+8 %),** because it actually heats the house to setpoint. This is a comfort result, not a saving. Savings claims need the real house.
 - **Relay starts fall by 84 % and burns are seven times longer,** and the oil-burner guards are never violated.
-- **Physical burner starts fall by 15 %.** The oversized boiler's own thermostat still cycles the burner inside long heating calls. Cutting real burner cycling needs a burner-firing signal (spec open question 1) so Radiate can keep enough radiators open during a burn. This is the next optimisation target.
+- **Physical burner starts fall by 14 %.** The oversized boiler's own thermostat still cycles the burner inside long heating calls. Cutting real burner cycling needs a burner-firing signal (spec open question 1) so Radiate can keep enough radiators open during a burn. This is the next optimisation target.
 - The smart-TRV baseline's arrival spread is not meaningful: its rooms mostly never reach setpoint within the window, so every room scores the same.
 
 ## What flow balancing adds on its own
