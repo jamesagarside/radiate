@@ -9,6 +9,7 @@ kept in `intended` instead (spec 4.5 one-valve rollout).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import time
 from collections import deque
@@ -17,7 +18,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from radiate.config import SiteConfig
+from radiate.config import SiteConfig, WeekSchedule
 from radiate.core import Actions, Mode, Reason, RoomInput, Snapshot
 from radiate.core.types import RoomRole
 
@@ -97,6 +98,18 @@ class LiveDriver:
         t = self._local()
         _, in_s = self.site.schedule_for(room_id).next_change(t.weekday(), t.hour * 60 + t.minute)
         return in_s - t.second
+
+    def set_household_schedules(self, schedules: dict[str, WeekSchedule]) -> None:
+        """Use these weeks for the household's rooms from now on (away changed).
+
+        Snapshots, overrides ending at the next change, the schedule mirror and the
+        Shelly fallback all read the room's week through `site.schedule_for`, so they
+        follow at once. The mirror writes a changed week to the TRV on the next apply,
+        or only logs it in dry run, like every other write.
+        """
+        known = {rid: week for rid, week in schedules.items() if rid in self.site.devices}
+        merged = {**self.site.household_schedules, **known}
+        self.site = dataclasses.replace(self.site, household_schedules=merged)
 
     # --- inbound -----------------------------------------------------------------------
 

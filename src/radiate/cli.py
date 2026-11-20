@@ -141,7 +141,9 @@ async def _start_live(site, session):
         await asyncio.sleep(1)
     await asyncio.sleep(10 if transport.connected else 0)
 
-    runtime = Runtime(site.house, driver, store=store)
+    runtime = Runtime(
+        site.house, driver, store=store, household=site.household, timezone=site.timezone
+    )
     for problem in runtime.restore():
         log.warning("restore: %s", problem)
 

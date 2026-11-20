@@ -11,10 +11,22 @@ import contextlib
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from radiate import __version__
+from radiate.config.away import (
+    AWAY_MAX_DAYS,
+    PRESENCE_STATES,
+    Presence,
+    effective_away,
+    everyone_away,
+    local_iso,
+    status,
+    tidy,
+)
+from radiate.config.household import Household, compile_household
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
 from radiate.core.persist import dump_state, load_state
 from radiate.core.types import BoilerState, RoomRole
@@ -39,6 +51,8 @@ class Driver(Protocol):
 
     # Optional: `next_change_s(room_id) -> float | None`, seconds until the room's
     # schedule next changes its setpoint. Without it, overrides last until cleared.
+    # Optional: `set_household_schedules(schedules)`, the household's rooms compiled
+    # again for the people at home; the driver uses them from then on.
 
 
 OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
@@ -84,7 +98,15 @@ class Runtime:
     exporter: object | None = None  # radiate.export.elastic.ElasticExporter
     store: object | None = None  # radiate.server.store.Store; None keeps state in memory
     save_every_s: float = 300.0
+    # Household and away (radiate.config.away). Away times are wall-clock seconds.
+    household: Household | None = None
+    timezone: str = "Europe/London"
+    wall: Callable[[], float] | None = None  # None: time.time
+    presence: dict[str, Presence] = field(default_factory=dict)
+    away: frozenset[str] = frozenset()  # people who count as away, as last compiled
+    everyone_away: bool = False
     _saved_at: float | None = None
+    _away_log: list[Reason] = field(default_factory=list)  # for the exporter, next tick
     _alert_keys: set[tuple[str, str | None, str]] = field(default_factory=set)
     _task: asyncio.Task | None = None
 
@@ -107,6 +129,9 @@ class Runtime:
             with contextlib.suppress(ValueError):
                 self.mode = Mode(saved_rt[0].get("mode", "auto"))
             self._restore_overrides(saved_rt[0].get("overrides"), time.time() - saved_rt[1])
+        saved_away = self.store.get("away")
+        if saved_away is not None:
+            self._restore_away(saved_away[0])
         saved = self.store.get("engine")
         if saved is None:
             return []
@@ -220,11 +245,200 @@ class Runtime:
             "expires_in_min": None if expires is None else max(0, round((expires - now) / 60)),
         }
 
+    # --- away ----------------------------------------------------------------------------
+
+    def _wall(self) -> float:
+        return self.wall() if self.wall is not None else time.time()
+
+    @property
+    def people(self) -> tuple[str, ...]:
+        return tuple(p.id for p in self.household.people) if self.household else ()
+
+    def effective_mode(self) -> Mode:
+        """The mode the core runs in: frost while everyone is away, if the mode is auto.
+
+        The user's chosen mode is never changed, so `off` and `frost` still win, and
+        auto comes back by itself when someone is home or due back.
+        """
+        if self.mode is Mode.AUTO and self.everyone_away:
+            return Mode.FROST
+        return self.mode
+
+    def _person(self, person_id: str) -> Presence:
+        if person_id not in self.people:
+            raise KeyError(person_id)
+        return self.presence.get(person_id, Presence())
+
+    def _put_presence(self, person_id: str, p: Presence) -> None:
+        if p.empty:
+            self.presence.pop(person_id, None)
+        else:
+            self.presence[person_id] = p
+        self._save_away()
+        self._update_away()
+
+    def set_away(self, person_id: str, until: float) -> None:
+        """Count a person as away until `until` (wall-clock seconds). Saved at once."""
+        p = self._person(person_id)
+        now = self._wall()
+        if until <= now:
+            raise ValueError("until must be in the future")
+        if until > now + AWAY_MAX_DAYS * 86400:
+            raise ValueError(f"until must be within {AWAY_MAX_DAYS} days")
+        self._put_presence(person_id, replace(p, away_until=until, set_at=now))
+
+    def clear_away(self, person_id: str) -> None:
+        p = self._person(person_id)
+        self._put_presence(person_id, replace(p, away_until=None, set_at=None))
+
+    def report_presence(self, person_id: str, state: str | None, since: float | None) -> None:
+        """Home Assistant presence: `home`, `not_home`, or None to forget it.
+
+        `since` is when the state last changed, never later than now. Without it, a
+        repeat of the current state keeps its time and a new state starts now.
+        """
+        p = self._person(person_id)
+        if state is None:
+            self._put_presence(person_id, replace(p, state=None, since=None))
+            return
+        if state not in PRESENCE_STATES:
+            raise ValueError("state must be home or not_home")
+        now = self._wall()
+        if since is None:
+            since = p.since if state == p.state and p.since is not None else now
+        self._put_presence(person_id, replace(p, state=state, since=min(since, now)))
+
+    def _update_away(self) -> None:
+        """Tidy away state, then recompile the household if who is away changed."""
+        if self.household is None:
+            return
+        now = self._wall()
+        tidied = {pid: tidy(p, now) for pid, p in self.presence.items()}
+        if tidied != self.presence:
+            self.presence = {pid: p for pid, p in tidied.items() if not p.empty}
+            self._save_away()
+        away = effective_away(
+            self.people, self.presence, now, self.household.presence_delay_min * 60.0
+        )
+        reasons: list[Reason] = []
+        if away != self.away:
+            self.away = away
+            compiled = compile_household(self.household, away=away)
+            setter = getattr(self.driver, "set_household_schedules", None)
+            if callable(setter):
+                setter(compiled.schedules)
+            # Counts only: names are shown in the UI, never logged or exported.
+            reasons.append(
+                Reason(
+                    "away.schedules",
+                    f"Schedules rebuilt: {len(away)} of {len(self.people)} people away",
+                )
+            )
+        everyone = everyone_away(self.people, away)
+        if everyone != self.everyone_away:
+            self.everyone_away = everyone
+            if not everyone:
+                message = "Someone is home or due back: rooms follow their schedules"
+                reasons.append(Reason("away.ended", message))
+            elif self.mode is Mode.AUTO:
+                message = (
+                    "Everyone is away: rooms held at frost protection until someone is "
+                    "home or due back"
+                )
+                reasons.append(Reason("away.everyone", message))
+            else:
+                message = f"Everyone is away; the heating mode stays {self.mode.value}"
+                reasons.append(Reason("away.everyone", message))
+        clock = self.driver.clock()
+        for r in reasons:
+            self._log(clock, r)
+        self._away_log.extend(reasons)
+
+    def _save_away(self) -> None:
+        if self.store is None:
+            return
+        people = {
+            pid: {
+                "away_until": p.away_until,
+                "set_at": p.set_at,
+                "state": p.state,
+                "since": p.since,
+            }
+            for pid, p in self.presence.items()
+        }
+        self.store.put("away", {"people": people})
+
+    def _restore_away(self, data: object) -> None:
+        people = data.get("people") if isinstance(data, dict) else None
+        if not isinstance(people, dict):
+            return
+
+        def num(value: object) -> float | None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+            return float(value)
+
+        for pid, item in people.items():
+            if pid not in self.people or not isinstance(item, dict):
+                continue
+            until, set_at = num(item.get("away_until")), num(item.get("set_at"))
+            state, since = item.get("state"), num(item.get("since"))
+            manual = until is not None and set_at is not None
+            seen = state in PRESENCE_STATES and since is not None
+            p = Presence(
+                away_until=until if manual else None,
+                set_at=set_at if manual else None,
+                state=state if seen else None,
+                since=since if seen else None,
+            )
+            if not p.empty:
+                self.presence[pid] = p
+
+    def person_view(self, person_id: str, now: float | None = None) -> dict:
+        now = self._wall() if now is None else now
+        p = self.presence.get(person_id, Presence())
+        delay_s = self.household.presence_delay_min * 60.0 if self.household else 0.0
+        st = status(p, now, delay_s)
+        person = next((x for x in self.household.people if x.id == person_id), None)
+        name = person.name if person and person.name else person_id.replace("_", " ").capitalize()
+        return {
+            "id": person_id,
+            "name": name,
+            "away": st.away,  # counts as away now
+            "reason": st.reason,  # "away_until" or "presence" when away
+            "until": None if p.away_until is None else local_iso(p.away_until, self.timezone),
+            "presence": None
+            if p.state is None or p.since is None
+            else {"state": p.state, "since": local_iso(p.since, self.timezone)},
+        }
+
+    def away_view(self) -> dict:
+        """People and their away state. Names are for the UI: never logged or exported."""
+        if self.household is None:
+            # Nobody to show, so no time zone lookups (the browser demo has no household).
+            return {
+                "everyone": False,
+                "frost": False,
+                "presence_delay_min": None,
+                "today": None,
+                "people": [],
+            }
+        now = self._wall()
+        return {
+            "everyone": self.everyone_away,
+            # Everyone away is holding the house at frost protection right now.
+            "frost": self.effective_mode() is not self.mode,
+            "presence_delay_min": self.household.presence_delay_min,
+            "today": local_iso(now, self.timezone)[:10],
+            "people": [self.person_view(pid, now) for pid in self.people],
+        }
+
     async def step(self) -> Actions:
         now = self.driver.clock()
         self._expire_overrides(now)
+        self._update_away()
         snap = await self.driver.snapshot(
-            self.mode, self.overrides, now < self.store_boost_until, self.fire
+            self.effective_mode(), self.overrides, now < self.store_boost_until, self.fire
         )
         actions = decide(self.cfg, snap, self.state)
         await self.driver.apply(actions)
@@ -237,7 +451,8 @@ class Runtime:
             self.save()
         self.last_actions, self.last_snapshot = actions, snap
         self.relay_history.append((now, actions.heating_relay, actions.store_relay))
-        logged = []
+        logged = [(r.code, r.message, r.room_id) for r in self._away_log]
+        self._away_log.clear()
         for r in actions.reasons:
             if r.code.startswith(("boiler.", "disturbance.", "safe_mode.")):
                 self._log(now, r)
@@ -307,6 +522,9 @@ class Runtime:
                 "min_off_s": self.cfg.boiler.min_off_s,
                 "max_starts_per_hour": self.cfg.boiler.max_starts_per_hour,
             },
+            # The household's people, for clients that show them or map them to
+            # Home Assistant `person` entities. Empty without a household.
+            "people": [{"id": p["id"], "name": p["name"]} for p in self.away_view()["people"]],
         }
 
     def describe(self) -> dict:
@@ -374,7 +592,8 @@ class Runtime:
         return {
             "now": now,
             "minute_of_day": self.driver.wall_minutes(),
-            "mode": self.mode.value,
+            "mode": self.mode.value,  # the user's choice; `away.frost` says if it is held
+            "away": self.away_view(),
             "outdoor": snap.outdoor if snap else None,
             "boiler": {
                 "state": guard.state.value,

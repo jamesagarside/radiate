@@ -113,12 +113,12 @@ def _http_error(err: bridge.RequestError) -> web.HTTPException:
     return web.HTTPBadRequest(text=err.text)
 
 
-async def _post(request: web.Request, action, *args) -> web.Response:
+async def _post(request: web.Request, action, *args, lookup=bridge.room) -> web.Response:
     """Run a shared `bridge` action so the server and the browser demo agree."""
     rt = _rt(request)
     try:
         if args:
-            bridge.room(rt, args[0])  # unknown room is a 404 before the body is read
+            lookup(rt, args[0])  # an unknown room or person is a 404 before the body is read
         result = action(rt, *args, await _json(request))
     except bridge.RequestError as err:
         raise _http_error(err) from err
@@ -139,6 +139,22 @@ async def boost_store(request: web.Request) -> web.Response:
 
 async def set_mode(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_mode)
+
+
+async def people(request: web.Request) -> web.Response:
+    return web.json_response(_rt(request).away_view())
+
+
+async def set_away(request: web.Request) -> web.Response:
+    return await _post(
+        request, bridge.set_away, request.match_info["person_id"], lookup=bridge.person
+    )
+
+
+async def set_presence(request: web.Request) -> web.Response:
+    return await _post(
+        request, bridge.set_presence, request.match_info["person_id"], lookup=bridge.person
+    )
 
 
 async def stream(request: web.Request) -> web.WebSocketResponse:
@@ -198,6 +214,9 @@ def create_app(
             web.post("/api/v1/rooms/{room_id}/fire", set_fire),
             web.post("/api/v1/store/boost", boost_store),
             web.post("/api/v1/mode", set_mode),
+            web.get("/api/v1/people", people),
+            web.post("/api/v1/people/{person_id}/away", set_away),
+            web.post("/api/v1/people/{person_id}/presence", set_presence),
             web.get(STREAM_PATH, stream),
         ]
     )
