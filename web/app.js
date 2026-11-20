@@ -130,10 +130,15 @@ async function post(path, body) {
   }
 }
 
+// Eco demand mode (spec 5.3): a calling room on its own waits until other rooms join
+// it, so the boiler fires once for all of them.
+const pooled = (r) => r.reason_code === "demand.pooled";
+
 function badgeFor(r) {
   if (r.role === "passive") return ["Bypass, not controlled", ""];
   if (r.fire) return ["Fire lit", "fire"];
   if (r.preheating) return ["Preheating", "preheat"];
+  if (pooled(r)) return ["Waiting for a burn", "pooled"];
   if (r.calling) return ["Heating", "calling"];
   // Older servers send `topup` without `extend`, so cannot tell the two apart.
   if (r.topup && r.extend === true) return ["Topping up", "extend"];
@@ -328,6 +333,7 @@ function renderRoom(r) {
   n.querySelector(".fill").style.transform = `scaleX(${opening / 100})`;
   n.dataset.idle = String(!(r.calling || r.topup));
   let reason = r.reason || "";
+  if (pooled(r)) reason = "Waiting to share a burn with other rooms.";
   if (!r.calling && r.topup && r.extend === true) reason = "Topped up now so it does not need a second burn soon.";
   if (!r.calling && r.topup && r.extend === false) reason = "Opened so the burner's heat has somewhere to go.";
   if (!reason && r.role === "passive") reason = "Manual valve, always open: counted as the system's open path.";
@@ -382,6 +388,7 @@ function render(s) {
   $("status").textContent = statusLine(s, minBurn);
   $("outdoor").textContent = s.outdoor != null ? `Outside ${s.outdoor.toFixed(1)}°` : "";
   for (const btn of $("mode").querySelectorAll("button")) btn.setAttribute("aria-checked", String(btn.dataset.mode === s.mode));
+  renderDemand(s.settings);
 
   const chip = $("boiler-chip");
   chip.textContent = { idle: "Idle", lead: "Opening valves", firing: "Firing", rest: "Resting" }[b.state];
@@ -427,11 +434,16 @@ function statusLine(s, minBurn) {
   const calling = active.filter((r) => r.calling).map((r) => r.name);
   const extending = active.filter((r) => !r.calling && r.topup && r.extend === true).map((r) => r.name);
   const sinks = active.filter((r) => !r.calling && r.topup && r.extend !== true).map((r) => r.name);
+  const waiting = active.filter(pooled).map((r) => r.name);
   const water = s.store?.relay ? " Hot water on." : "";
   const on = `Burner on for ${mins(b.burn_elapsed_s)}`;
   const extend = (list) => `topping up ${names(list)} to save a second burn soon`;
   switch (b.state) {
     case "idle":
+      if (waiting.length) {
+        const verb = waiting.length === 1 ? "is" : "are";
+        return `Boiler idle. ${names(waiting)} ${verb} waiting to share a burn with other rooms.${water}`;
+      }
       return water ? `Heating idle.${water}` : "Boiler idle. Rooms are within comfort.";
     case "lead":
       return `Opening valves before calling the burner.${calling.length ? ` Heating ${names(calling)}.` : ""}${water}`;
@@ -493,6 +505,61 @@ function renderShortCycle(b) {
   const ends = sc.ends_in_h != null ? ` for the next ${span(Math.max(1, Math.round(sc.ends_in_h * 60)))}` : "";
   $("short-cycle-text").textContent = `${raised}${ends}, so the burner starts less often.`;
 }
+
+// Demand mode (spec 5.3): eco pools rooms into fewer, longer burns; comfort holds every
+// room at its target. Servers without `settings` cannot change it, so the control hides.
+// A press shows at once and is held until a state confirms it. Choosing the configured
+// default sends null, so the server follows its configuration file again.
+const DEMAND_NOTE = {
+  eco: "fewer, longer burns. Rooms might warm a bit later.",
+  comfort: "every room held at its target, with more burns.",
+};
+const demand = { pending: null, error: "" };
+
+function renderDemand(settings) {
+  const group = $("demand");
+  const note = $("demand-note");
+  const known = settings && DEMAND_NOTE[settings.demand_mode];
+  group.hidden = note.hidden = !known;
+  if (!known) return;
+  if (demand.pending === settings.demand_mode) demand.pending = null;
+  const shown = demand.pending ?? settings.demand_mode;
+  for (const btn of group.querySelectorAll("button")) btn.setAttribute("aria-checked", String(btn.dataset.demand === shown));
+  // The segmented control names the mode, so the note only says what it does, and
+  // starts "Default:" while it follows the configuration file.
+  const text = DEMAND_NOTE[shown];
+  note.dataset.error = String(Boolean(demand.error));
+  note.textContent = demand.error || (shown === settings.demand_mode_default
+    ? `Default: ${text}`
+    : text[0].toUpperCase() + text.slice(1));
+}
+
+$("demand").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-demand]");
+  const settings = last?.settings;
+  if (!btn || !settings || btn.getAttribute("aria-checked") === "true") return;
+  const value = btn.dataset.demand;
+  demand.pending = value;
+  demand.error = "";
+  renderDemand(settings);
+  try {
+    await post("settings", { demand_mode: value === settings.demand_mode_default ? null : value });
+  } catch {
+    if (demand.pending === value) {
+      demand.pending = null;
+      demand.error = "Not saved. Try again.";
+    }
+    renderDemand(last.settings);
+    return;
+  }
+  // Let go of the pressed value if no state confirms it.
+  setTimeout(() => {
+    if (demand.pending !== value) return;
+    demand.pending = null;
+    if (last) renderDemand(last.settings);
+  }, PENDING_MAX_MS);
+  refresh();
+});
 
 // Dry run: the live driver reads devices but holds back every write.
 let intendedKey = "";

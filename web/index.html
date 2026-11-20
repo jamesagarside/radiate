@@ -21,7 +21,12 @@
         <button role="radio" data-mode="frost">Frost</button>
         <button role="radio" data-mode="off">Off</button>
       </div>
+      <div class="seg" role="radiogroup" aria-label="Demand mode" aria-describedby="demand-note" id="demand" hidden>
+        <button role="radio" data-demand="eco">Eco</button>
+        <button role="radio" data-demand="comfort">Comfort</button>
+      </div>
     </div>
+    <p class="demand-note" id="demand-note" hidden></p>
   </header>
 
   <div class="banner" id="banner" hidden><p id="banner-text"></p></div>
