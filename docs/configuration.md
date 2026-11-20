@@ -279,6 +279,7 @@ Put times in quotes. YAML reads an unquoted `22:30` as a number, and Radiate rep
 | `getting_up_min` | Replaces `timing.getting_up_min` for this person |
 | `bedtime_min` | Replaces `timing.bedtime_min` for this person |
 | `weekend_days` | Replaces `household.weekend_days` for this person, for example `[mon, tue]` for someone who works weekends |
+| `ha_person` | The Home Assistant `person` entity whose presence counts for this person, for example `person.sam`. See [Away](#away) |
 
 Each routine has these keys:
 
@@ -321,6 +322,8 @@ radiate schedules radiate.yaml --data-dir /data
 ```
 
 `check-config` says which household applies. If the saved household no longer fits the house file, for example because a room was removed, Radiate uses the house file's setup instead, `check-config` notes why, and the wizard shows it.
+
+On the People step, each person has a **Home Assistant person**. With the Home Assistant integration installed, it lists the `person` entities Home Assistant has, plus **Not linked**. While nobody is linked, the wizard links each person to the Home Assistant person with the same name, ignoring case. Without the integration, or with a version that doesn't send the list, it's a text field for the entity ID, such as `person.sam`. See [Away](#away) for what linking does.
 
 #### Household settings
 
@@ -379,7 +382,16 @@ When a person is away, Radiate rebuilds the household's schedules without their 
 A person counts as away in two ways:
 
 - Away until: someone sets it in the web UI, through the API, or with the Home Assistant service `radiate.set_away`. It counts straight away and clears itself at the given time. You don't need Home Assistant for this.
-- Presence: the Home Assistant integration reports a mapped `person` entity as home or not home. Not home counts as away once it has lasted `presence_delay_min`. Home counts at once.
+- Presence: the Home Assistant integration reports a linked `person` entity as home or not home. Not home counts as away once it has lasted `presence_delay_min`. Home counts at once.
+
+You can link a person to a `person` entity in two places:
+
+- In the household: `ha_person` in this section, or **Home Assistant person** on the People step of the [setup wizard](#set-up-in-the-web-ui).
+- In the integration's options in Home Assistant.
+
+A link in the integration's options takes priority. A person with no link in either place counts as away only through away until.
+
+`ha_person` must be a `person` entity ID, and each entity can be linked to one person only. Linking changes no schedule; it only says whose presence to report. The integration picks up a change to the household within 15 minutes.
 
 Away until wins over a home that Home Assistant reported before it was set, so you can set it before you leave. If Home Assistant sees the person arrive home after it was set, the away ends early.
 
