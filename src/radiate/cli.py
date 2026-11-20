@@ -1,4 +1,4 @@
-"""Command line: `radiate serve`, `radiate sim` and `radiate check-config`."""
+"""Command line: `radiate serve`, `radiate sim`, `radiate check-config` and `radiate dashboard`."""
 
 from __future__ import annotations
 
@@ -184,6 +184,39 @@ def _check_config(args: argparse.Namespace) -> None:
         print(f"  note: {note}")
 
 
+class _AnyEnv(dict):
+    """Environment for `radiate dashboard`: every variable counts as set.
+
+    The dashboard needs no secrets or hosts, so an unset `${NAME}` is filled with "0"
+    (valid wherever the file expects a number) instead of failing the file.
+    """
+
+    def __contains__(self, key: object) -> bool:
+        return True
+
+    def __missing__(self, key: str) -> str:
+        return "0"
+
+
+def _dashboard(args: argparse.Namespace) -> None:
+    from radiate.config import ConfigError, load_site
+    from radiate.export.dashboard import dashboard_yaml
+
+    try:
+        site = load_site(args.path, env=_AnyEnv(os.environ))
+    except ConfigError as err:
+        sys.exit(str(err))
+    except OSError as err:
+        sys.exit(f"cannot read {args.path}: {err.strerror}")
+    text = dashboard_yaml(site, args.title)
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"wrote {args.output}: {len(site.house.rooms)} rooms", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+
+
 def _load(path: str):
     from radiate.config import ConfigError, load_site
 
@@ -253,6 +286,11 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("check-config", help="validate a house configuration file")
     c.add_argument("path")
     c.set_defaults(func=_check_config)
+    d = sub.add_parser("dashboard", help="print a Home Assistant dashboard for the house")
+    d.add_argument("path", help="house configuration file")
+    d.add_argument("--title", default="Heating", help="dashboard and view title")
+    d.add_argument("-o", "--output", help="write the YAML to this file instead of stdout")
+    d.set_defaults(func=_dashboard)
     sh = sub.add_parser("shelly", help="check the boiler relay or install its watchdog")
     sh.add_argument("action", choices=["status", "install-watchdog"])
     sh.add_argument("--config", required=True)

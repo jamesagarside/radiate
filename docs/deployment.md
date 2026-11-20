@@ -238,6 +238,30 @@ Services:
 - `radiate.set_override`: target one or more Radiate climate entities with a `temperature`. By default the override ends at the room's next scheduled change. Set `duration_min` (1 to 10080) to hold it for that long, or `until: cleared` to hold it until you clear it.
 - `radiate.clear_override`: returns the targeted rooms to their schedules.
 
+## Home Assistant dashboard
+
+`radiate dashboard` builds a Home Assistant dashboard from your house file. It shows every room's sensors and valve, and works with or without the integration, because it reads the Zigbee2MQTT devices directly.
+
+```bash
+radiate dashboard radiate.yaml -o heating-dashboard.yaml
+```
+
+The dashboard has:
+
+- A **House** section with the last 24 hours of room temperatures and humidity.
+- One section per room: humidity and dew point beside the room name, the temperature with a 24-hour trend, and the valve with its target temperature. A room with an open fire or range cooker says so under its name. An internal-sensor room shows the valve's own reading. A bypass radiator has no valve control.
+- A **Batteries** section listing every sensor and valve.
+
+It uses built-in cards only, so it needs nothing from HACS. Entity IDs follow Zigbee2MQTT's discovery naming (`sensor.<device>_temperature`, `climate.<device>`). A device that isn't paired yet shows as unavailable until it joins. Unset `${NAME}` variables in the house file are fine here, because the dashboard doesn't use secrets.
+
+To add it to Home Assistant:
+
+1. Go to **Settings** > **Dashboards** > **Add dashboard** > **New dashboard from scratch**, and name it, for example "Heating".
+2. Open it, select the pencil icon, then the three-dot menu > **Raw configuration editor**.
+3. Replace the contents with the generated YAML and save.
+
+Generate it again after you add rooms or rename devices, rather than editing it by hand.
+
 ## Elastic export
 
 Radiate can send metrics and decisions to Elasticsearch. It is off unless `RADIATE_ELASTIC_URL` is set (in the App, the **Elastic URL** option).
