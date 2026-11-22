@@ -242,6 +242,34 @@ def test_learning_memory():
     assert "learning.forget: unknown key" in err.value.problems
 
 
+def test_suggestion_settings():
+    d = parse_site(minimal()).house.suggestions
+    assert (d.min_confidence, d.min_learning_h, d.min_rooms) == (0.6, 48.0, 3)
+    assert (d.heat_loss_ratio, d.design_outdoor_c, d.mild_outdoor_c) == (1.6, -2.0, 5.0)
+    site = parse_site(
+        minimal(suggestions={"min_learning_h": 72, "min_rooms": 4, "design_outdoor_c": -5})
+    )
+    s = site.house.suggestions
+    assert (s.min_learning_h, s.min_rooms, s.design_outdoor_c) == (72, 4, -5)
+    assert isinstance(s.min_rooms, int)
+    with pytest.raises(ConfigError) as err:
+        parse_site(
+            minimal(
+                suggestions={
+                    "heat_loss_ratio": 9,
+                    "min_rooms": 2.5,
+                    "mild_outdoor_c": -3,
+                    "guess": True,
+                }
+            )
+        )
+    problems = err.value.problems
+    assert "suggestions.heat_loss_ratio: must be 1.1 to 5" in problems
+    assert "suggestions.min_rooms: must be a whole number" in problems
+    assert "suggestions.mild_outdoor_c: must be above design_outdoor_c" in problems
+    assert "suggestions.guess: unknown key" in problems
+
+
 # --- unheated rooms --------------------------------------------------------------------
 
 

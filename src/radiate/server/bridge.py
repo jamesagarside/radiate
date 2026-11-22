@@ -23,6 +23,7 @@ from radiate.drivers.devices import ScanRefused
 from .runtime import Runtime
 from .schedules import schedules_view
 from .setup import HouseholdSetup, SetupError
+from .suggestions import suggestions_view
 
 SETPOINT_MIN_C = 5.0
 SETPOINT_MAX_C = 28.0
@@ -309,6 +310,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return rt.settings()
         if parts == ["devices"]:
             return devices(rt)
+        if parts == ["suggestions"]:
+            return suggestions_view(rt)
     elif method == "POST":
         if parts == ["devices", "scan"]:
             return scan_network(rt, body)

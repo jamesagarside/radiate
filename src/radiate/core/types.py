@@ -86,6 +86,27 @@ class LearningConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SuggestionConfig:
+    """When the house suggestions speak up (`radiate.core.suggestions`).
+
+    Every limit is a setting: what counts as enough learning, how different a room
+    must be from the rest of the house, and the coldest weather the heating should
+    cope with.
+    """
+
+    min_confidence: float = 0.6  # a room's model must be at least this certain
+    min_learning_h: float = 48.0  # hours of learning updates before a room is judged
+    min_rooms: int = 3  # rooms with enough learning before rooms are compared
+    heat_loss_ratio: float = 1.6  # heat loss this many times the house's typical
+    compare_delta_k: float = 15.0  # inside minus outside used to put a loss in words
+    design_outdoor_c: float = -2.0  # the coldest weather the heating should keep up with
+    mild_outdoor_c: float = 5.0  # short of target even above this: act on it
+    slow_warm_ratio: float = 2.0  # arrival lag this many times the house's typical
+    slow_warm_extra_min: float = 10.0  # and at least this many minutes longer
+    min_lag_samples: int = 5  # measured arrivals before a room's lag is judged
+
+
+@dataclass(frozen=True, slots=True)
 class StoreConfig:
     windows: tuple[tuple[int, int], ...] = ((6 * 60, 7 * 60 + 30), (17 * 60, 21 * 60))
     recovery_s: float = 25 * 60
@@ -98,6 +119,7 @@ class HouseConfig:
     boiler: BoilerConfig = field(default_factory=BoilerConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
+    suggestions: SuggestionConfig = field(default_factory=SuggestionConfig)
     balancing: bool = True  # False: every heating valve fully open (for comparison)
     supply_kappa: float = 0.15  # supply factor sensitivity to total opening
     bypass_equivalent: float = 0.4  # always-open path, in fully-open-radiator equivalents

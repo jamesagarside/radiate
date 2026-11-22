@@ -32,6 +32,7 @@ from radiate.core.types import (
     RoomConfig,
     RoomRole,
     StoreConfig,
+    SuggestionConfig,
 )
 
 from .household import (
@@ -397,6 +398,32 @@ def _learning(ctx: _Ctx, raw: dict) -> LearningConfig:
             raw, "learn_on_trv_fallback", bool, d.learn_on_trv_fallback, p
         ),
     )
+
+
+def _suggestions(ctx: _Ctx, raw: dict) -> SuggestionConfig:
+    p = "suggestions."
+    d = SuggestionConfig()
+    ranges = {
+        "min_confidence": (0.3, 0.95),
+        "min_learning_h": (6, 2000),
+        "min_rooms": (2, 20),
+        "heat_loss_ratio": (1.1, 5),
+        "compare_delta_k": (5, 30),
+        "design_outdoor_c": (-25, 10),
+        "mild_outdoor_c": (-10, 15),
+        "slow_warm_ratio": (1.2, 5),
+        "slow_warm_extra_min": (0, 60),
+        "min_lag_samples": (3, 15),
+    }
+    ctx.unknown(raw, set(ranges), p)
+    values = {k: ctx.number(raw, k, getattr(d, k), lo, hi, p) for k, (lo, hi) in ranges.items()}
+    for k in ("min_rooms", "min_lag_samples"):
+        if values[k] != int(values[k]):
+            ctx.err(f"{p}{k}", "must be a whole number")
+        values[k] = int(values[k])
+    if values["mild_outdoor_c"] <= values["design_outdoor_c"]:
+        ctx.err(f"{p}mild_outdoor_c", "must be above design_outdoor_c")
+    return SuggestionConfig(**values)
 
 
 def _trv(ctx: _Ctx, raw: dict) -> TrvOptions:
@@ -1028,6 +1055,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "household",
             "learning",
             "monitoring",
+            "suggestions",
         },
         "",
     )
@@ -1077,6 +1105,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         boiler=_boiler(ctx, ctx.section(data, "boiler")),
         store=_store(ctx, ctx.section(data, "store")),
         learning=_learning(ctx, ctx.section(data, "learning")),
+        suggestions=_suggestions(ctx, ctx.section(data, "suggestions")),
         balancing=balancing,
     )
     mqtt = _mqtt(ctx, ctx.section(data, "mqtt"))

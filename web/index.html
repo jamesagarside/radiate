@@ -31,7 +31,8 @@
 
   <nav class="views" id="views" aria-label="Views" hidden>
     <a href="#" class="view-tab" data-view="house" aria-current="page">House</a>
-    <a href="#devices" class="view-tab" data-view="devices">Devices<span class="view-count" id="devices-count" hidden></span></a>
+    <a href="#devices" class="view-tab" data-view="devices" hidden>Devices<span class="view-count" id="devices-count" hidden></span></a>
+    <a href="#suggestions" class="view-tab" data-view="suggestions" hidden>Suggestions<span class="view-count" id="suggestions-count" hidden></span></a>
   </nav>
 
   <div class="banner" id="banner" hidden><p id="banner-text"></p></div>
@@ -164,6 +165,52 @@
       <div class="device-grid" id="devices-boiler"></div>
     </section>
   </section>
+
+  <section class="suggestions-view" id="suggestions" aria-labelledby="suggestions-h" hidden>
+    <div class="devices-head">
+      <h2 id="suggestions-h" tabindex="-1">Suggestions</h2>
+      <p class="devices-summary" id="suggestions-summary" aria-live="polite">Loading suggestions…</p>
+      <p class="muted devices-network">From what Radiate has measured and learned about the house. Each one says what it is based on and how sure Radiate is.</p>
+    </div>
+    <div class="suggestion-list" id="suggestions-list"></div>
+    <section class="card suggestions-empty" id="suggestions-empty" aria-labelledby="suggestions-empty-h" hidden>
+      <h3 id="suggestions-empty-h">Still learning</h3>
+      <p id="suggestions-empty-text"></p>
+    </section>
+    <section aria-labelledby="learning-h" id="learning-section" hidden>
+      <h3 id="learning-h" class="section-h">Learning</h3>
+      <div class="card learning">
+        <p class="muted learning-compare" id="learning-compare" hidden></p>
+        <ul class="learning-list" id="learning-list"></ul>
+      </div>
+    </section>
+  </section>
+
+  <template id="suggestion-tpl">
+    <article class="card suggestion">
+      <header>
+        <h3 class="name"></h3>
+        <span class="badge"></span>
+      </header>
+      <p class="sg-evidence"></p>
+      <div class="sg-do">
+        <h4>What to do</h4>
+        <p class="sg-action"></p>
+      </div>
+      <p class="sg-basis"></p>
+    </article>
+  </template>
+
+  <template id="learning-tpl">
+    <li class="learning-row">
+      <div class="lr-head">
+        <span class="lr-name"></span>
+        <span class="meter lr-meter" aria-hidden="true"><span class="meter-fill"></span></span>
+        <span class="badge"></span>
+      </div>
+      <p class="lr-note"></p>
+    </li>
+  </template>
 
   <template id="device-tpl">
     <article class="card device" tabindex="-1">

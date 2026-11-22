@@ -625,6 +625,29 @@ A raw network map asked of Zigbee2MQTT (`bridge/request/networkmap`), to find ea
 Code: `NetworkScan`, `LiveDriver.request_network_scan`, API `POST /api/v1/devices/scan` and `scan` in `GET /api/v1/devices`, UI "Scan network".
 _Avoid_: network map refresh, which suggests it runs by itself.
 
+## House suggestions
+
+**House suggestion**:
+A piece of advice about the house that Radiate derives from what it has measured or learned: a room that loses heat quickly, a radiator that may be too small or is slow to warm, a valve passing heat when shut, or a weak Zigbee link. Each has a severity, the evidence in words, what to do and a confidence with what it rests on. A room without enough learning gets none.
+Code: `Suggestion` and `suggest` in `radiate.core.suggestions`, `SuggestionConfig`, config section `suggestions`, API `GET /api/v1/suggestions`, UI "Suggestions".
+_Avoid_: recommendation, insight.
+
+**Severity**:
+How pressing a house suggestion is: `act` (UI "Act on this"), `consider` ("Worth considering") or `info` ("For information").
+Code: `Suggestion.severity`, API `suggestions[].severity`.
+
+**Suggestion confidence**:
+How much data backs a house suggestion, in words: `low`, `medium` or `high`, with a sentence saying what it rests on ("From 87 h of learning in Bedroom 2."). Not the same as a room model's numeric confidence, which feeds it.
+Code: `Suggestion.confidence` and `Suggestion.basis`, API `suggestions[].confidence` and `suggestions[].basis`.
+
+**Learning status**:
+Whether a room can be judged for house suggestions yet: `ready` (at least `suggestions.min_learning_h` of learning and both its heating gain and loss rate at least `suggestions.min_confidence` certain), `learning`, or `not_judged` (measured only by its TRV, or with a continuous heat source whose steady heat the model can't tell from its loss and radiator).
+Code: `RoomLearning`, API `learning[].status`, UI "Ready", "Learning", "Not judged".
+
+**Loss confidence**:
+How far the uncertainty of a room's loss rate has shrunk from its prior, from 0 to 1, as confidence does for the heating gain.
+Code: `loss_confidence` in `radiate.core.suggestions`.
+
 ## Engine and runtime
 
 **Core**:
