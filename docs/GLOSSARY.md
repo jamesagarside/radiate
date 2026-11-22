@@ -589,6 +589,42 @@ Code: KVS keys `radiate_heat` and `radiate_store`, `fallback_heating_windows`, `
 The time after which the heating relay switches itself off unless Radiate asserts it again, so it can never latch on. Default 120 minutes.
 Code: `ShellyConfig.auto_off_s`, Shelly `toggle_after`, config key `shelly.auto_off_min`.
 
+## Devices and the Zigbee network
+
+**Device health**:
+What Radiate knows about one device it depends on: whether it is reachable, its battery, its signal, when it was last heard, its latest readings and its route. Shown in the Devices view; it never reaches the core.
+Code: `DeviceHealth` in `radiate.drivers.devices`, `LiveDriver.health`, API `GET /api/v1/devices`, UI "Devices".
+
+**Device status**:
+One word per device: `ok`, `attention` (low battery, weak signal or a silent sensor) or `offline` (not reachable). UI badges "Online", "Needs attention", "Offline", and "No data yet" before anything is heard.
+Code: `DeviceHealth.view`, API `devices[].status`.
+
+**Low battery**:
+A battery at or below `monitoring.low_battery_pct`, 20 % by default.
+Code: `HealthLimits.low_battery_pct`, alert `device.low_battery`, API `devices[].battery_low`.
+
+**Link quality (LQI)**:
+Zigbee2MQTT's `linkquality`, 0 to 255, for the last message heard from a device. Shown as a signal strength: strong at 100 and above, weak below `monitoring.weak_signal_lqi` (40 by default), fair between. Stacks measure it differently, so the number is shown with the word.
+Code: `signal` and `HealthLimits` in `radiate.drivers.devices`, alert `device.weak_signal`, API `devices[].linkquality` and `devices[].signal`.
+_Avoid_: RSSI, which is a different measure.
+
+**Silent sensor**:
+A temperature sensor that has sent no temperature for `house.sensor_max_silence_min`, while not known to be offline. The same limit after which the core counts its reading as stale.
+Code: alert `device.stale`, API `devices[].reading_age_s`, UI "No temperature for 2 h."
+
+**Router**:
+A mains-powered Zigbee device, such as a smart plug, that relays messages for battery devices near it. Not in the house file: Radiate finds routers in Zigbee2MQTT's retained `bridge/devices`.
+Code: `DeviceStore.routers`, `BridgeDevice`, API `devices[].kind` `router`.
+
+**Route**:
+The node a device talks through, its parent in the mesh: a router or the coordinator. Known only after a network scan.
+Code: `Route`, `NetworkMap.routes`, API `devices[].route` (`via`, `via_kind`, `lqi`).
+
+**Network scan**:
+A raw network map asked of Zigbee2MQTT (`bridge/request/networkmap`), to find each device's route. It slows the mesh for up to 2 minutes, so it runs only when a person asks, one at a time and at most every 10 minutes. Allowed in dry run: it changes no device.
+Code: `NetworkScan`, `LiveDriver.request_network_scan`, API `POST /api/v1/devices/scan` and `scan` in `GET /api/v1/devices`, UI "Scan network".
+_Avoid_: network map refresh, which suggests it runs by itself.
+
 ## Engine and runtime
 
 **Core**:

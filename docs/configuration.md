@@ -204,6 +204,17 @@ You can change the demand mode without a restart with the **Eco** and **Comfort*
 | `schedule_mirror` | `true` | Write each room's schedule into its TRVZB and run the valve in `auto` mode, so it follows the schedule if Radiate stops. With `false`, valves run in `heat` mode |
 | `external_keepalive_min` | 25 | Resend the room temperature at least this often. The TRVZB reverts to its own sensor after about 2 hours without one |
 
+### monitoring
+
+When the web UI's Devices view, and the alerts, say a device needs attention.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `low_battery_pct` | 20 | A battery at or below this percentage is low (`device.low_battery`), 5 to 50. |
+| `weak_signal_lqi` | 40 | A link quality (LQI, 0 to 255) below this is a weak signal (`device.weak_signal`), 5 to 150. The Zigbee2MQTT FAQ calls a link that stays at 40 or above usually acceptable. Stacks measure LQI differently, so the view shows the number too. 100 and above reads as strong |
+
+A temperature sensor that has sent nothing for `house.sensor_max_silence_min` is reported as silent (`device.stale`).
+
 ### schedules
 
 Named weekly schedules in the TRVZB format: up to six transitions a day, each `HH:MM/temperature`, temperatures from 4 to 35 °C in 0.5 °C steps. If a day doesn't start at 00:00, the last setpoint of the day carries over midnight.
@@ -502,6 +513,7 @@ How these readings could feed the room models is an open question for the owner 
 
 - TRVZB firmware 1.2.1 or later is needed for `external_temperature_input`, and 1.1.4 or later for the opening and closing degree.
 - Radiate subscribes to `zigbee2mqtt/#`, reads device state and availability, and writes to `zigbee2mqtt/<name>/set`. Turn on availability in Zigbee2MQTT so offline valves are reported promptly.
+- The Devices view reads `battery` and `linkquality` from each device's state, and the retained `zigbee2mqtt/bridge/devices` for firmware and for the routers, which aren't in this file. Turn on `advanced.last_seen` in Zigbee2MQTT so "last seen" survives a Radiate restart; without it, Radiate counts from the last message it heard. **Scan network** publishes one `zigbee2mqtt/bridge/request/networkmap` request, also in dry run, as it changes no device. Zigbee2MQTT asks every router for its neighbours, which slows the network for up to 2 minutes, so Radiate scans only when you ask and at most every 10 minutes.
 - Battery sensors don't answer read requests. Until each sensor reports after a restart, Radiate uses the TRV's internal reading. To avoid that gap, set `retain: true` for the room sensors in Zigbee2MQTT.
 - The TRVZB runs its weekly schedule on the clock it receives from Zigbee2MQTT, which uses the Zigbee2MQTT host's local time. Make sure that host's time zone matches `house.timezone`.
 - Radiate keeps each TRVZB in governed mode: `smart_temperature_control` off, `valve_closing_degree` 100, the room temperature as the external input, and Radiate's setpoint and opening limit. If the valve reports a different value for a setting for more than 5 minutes (2 minutes for the setpoint), Radiate sends it again, up to three times, and then raises an alert. A setpoint changed on the valve itself is overwritten in the same way.
