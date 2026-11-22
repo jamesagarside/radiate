@@ -12,7 +12,7 @@ How to read this page:
 
 - Text without a marker describes the code.
 - **Not yet implemented** marks something planned and not built. Each one links to its section of [implementation status](implementation-status.md).
-- **Open question** marks a behaviour choice for the owner, where the spec and the code disagree and neither is clearly right. None is open in version 0.3.
+- **Open question** marks a behaviour choice for the owner, where the spec and the code disagree and neither is clearly right. One is open: how unheated rooms should feed the room model (section 12).
 - Section 13 lists what changed in this revision.
 
 ---
@@ -36,13 +36,13 @@ Non-goals for v1: flow-temperature modulation, multi-TRV rooms, certification.
 | Object | Fields |
 |---|---|
 | **House** | outdoor temperature source, boiler, hot-water store, rooms, timezone |
-| **Room** | name, area, setpoint schedule, room sensor (optional), radiators, role (`normal`, `passive`, `internal_sensor_only`), heat sources |
+| **Room** | name, area, setpoint schedule, room sensor (optional), radiators, role (`normal`, `passive`, `internal_sensor_only`, `unheated`), heat sources |
 | **Radiator** | TRV (optional), nominal output at ΔT50 (W, optional), `controllable` flag |
 | **Heat source** | `episodic` (open fire, wood burner) or `continuous` (range cooker), optional binary sensor or schedule |
 | **Boiler** | relay for heating demand, `on_off` type, fuel `oil`, rated output kW, nozzle rating (litres/h, optional), guard parameters (section 5) |
 | **Store** | relay for store enable, schedule, priority over heating (`true` for Heatslave) |
 
-As built, a room has one radiator, at most one TRV, at most one room sensor and at most one window sensor, and `controllable` follows from the role. **Not yet implemented** ([status](implementation-status.md#2-house-model)): room area, radiator nominal output, and binding a heat source to a binary sensor or schedule. The fire is flagged by detection or by the manual fire switch in the API.
+As built, a room has one radiator, at most one TRV, at most one room sensor and at most one window sensor, and `controllable` follows from the role: `normal` and `internal_sensor_only` rooms are controllable, `passive` and `unheated` rooms are not. An `unheated` room has a room sensor and no radiator (section 4.6). **Not yet implemented** ([status](implementation-status.md#2-house-model)): room area, radiator nominal output, and binding a heat source to a binary sensor or schedule. The fire is flagged by detection or by the manual fire switch in the API.
 
 ### 2.2 Reference house
 
@@ -228,7 +228,7 @@ A room learns only while every gate is open. The room's `learning_gate` names th
 | `store_recovery` | the store relay has been on for less than the store's recovery time | house |
 | `setpoint_change` | less than 15 min since the target changed | room |
 
-Passive rooms have no room model, so they never learn.
+Passive and unheated rooms have no room model, so they never learn.
 
 A room whose sensor is stale still has a temperature: it falls back to `T_trv` plus the TRV bias (section 7). It doesn't learn from that reading by default, because the TRV sits beside its radiator and reads the radiator as much as the room, which no single bias corrects. The `sensor_stale` gate holds until the slope window contains room sensor readings only. To learn from the TRV reading anyway, set `learning.learn_on_trv_fallback: true`. Internal-sensor rooms always use the TRV and are not affected.
 
@@ -247,6 +247,8 @@ While flagged: no learning for the lounge; the lounge is removed from boiler dem
 **Range cooker (kitchen).** Continuous source. The kitchen keeps learning, and `d_r` is free to be large (it absorbs the Aga's steady output). Cooking spikes close the `cooker_spike` gate. **Not yet implemented** ([status](implementation-status.md#4-balancing-algorithm)): if the kitchen has not called for heat for 14 days, the UI marks it "self-heated" and its lockshield cap drops to `o_floor`.
 
 **Stairs radiator (unvalved bypass).** Not controllable, never actuated, never learned as a room. It is modelled as the always-open path `κ_bypass` in the supply factor, and it counts towards the open-path guarantee (section 5.4). Its room sensor is shown in the UI and used as a weak heat-availability check: in the no-heat check (section 7), a 0.3 K rise on the stairs while the heating relay is on shows heat is reaching the radiators.
+
+**Unheated rooms (no radiator).** A room with a room sensor and no radiator, such as a landing, a boot room or the room the boiler is in. Its temperature, and its humidity unless turned off, are read, recorded in the tick history, exported and shown, labelled as having no radiator. It has no TRV, no schedule, no room model and no demand, so it never learns, never calls and never trips frost protection. It does not count towards the open path (it has no radiator), and unlike the stairs its warming is never taken as heat arriving in the no-heat check: a room warmed by the boiler's casing or a range cooker would otherwise hide an empty oil tank. The API refuses a setpoint for it. How its readings could feed the model is **Open question** 5 (section 12).
 
 **Toilet (internal sensor only).** Uses `T_trv` as the room temperature with a −1.5 K default bias (the TRV sits by the radiator). Its TRV setpoint is written in the TRV's own frame, target − bias (section 4.5), so the TRV opens when Radiate calls. The schedule mirrored into its TRV is shifted into the same frame, so the fallback schedule holds the room near its target if Radiate stops. It takes part in demand with a wider 1.0 K hysteresis, does not set the pace in allocation, and its learning confidence is capped at 0.5.
 
@@ -381,7 +383,7 @@ Order inside `decide`:
 | Radiate restarts | saved state in SQLite | Learned models, lockshield caps, valve verdicts, the short-cycle adaptation, the day's accounting, overrides and the boiler guard are restored, with timers moved on by the downtime, so minimum burn and minimum off still hold. After 5 min or more down, or with no saved state, the watchdog might have switched the relay, so the guard restarts its timers from the relay as found (section 5.7). TRV settings are re-sent |
 | Home Assistant restarts or is down | | No effect on control (MQTT drivers); the HA integration shows unavailable |
 | Internet down | | No effect on control; Elastic export buffered on disk (up to 7 days) |
-| Boiler lockout or out of oil | heating relay on for 30 min with at least one valve open (store recovery and time with every valve shut do not count), and no sign of heat: no TRV reading rising 0.6 K above its room, no ordinary calling room warming by 0.3 K/h, no 0.3 K stairs rise | Alert "No heat: check oil and boiler lockout" (`boiler.no_heat`); keep calling (the boiler may recover) but stop learning (`no_heat`). Clears when heat is seen again |
+| Boiler lockout or out of oil | heating relay on for 30 min with at least one valve open (store recovery and time with every valve shut do not count), and no sign of heat: no TRV reading rising 0.6 K above its room, no ordinary calling room warming by 0.3 K/h, no 0.3 K stairs rise (a passive room; an unheated room's warming never counts) | Alert "No heat: check oil and boiler lockout" (`boiler.no_heat`); keep calling (the boiler may recover) but stop learning (`no_heat`). Clears when heat is seen again |
 | Valve stuck | 40 min of flow per burn with the room calling, its opening limit at least the floor and the TRV reporting heat, while another radiator warmed, and its own TRV reading did not rise 0.6 K against the room; 3 burns in a row | Alert `valve.stuck`; room flagged untrusted (learning paused, `valve_untrusted`); not counted as an open valve. Clears when its radiator warms again |
 | Valve leaking (rise with valve closed) | during flow, with the room not calling, its TRV not heating and its valve shut since before the flow began (radiator off 20 min), the TRV reading rises at least 1 K against the room sensor, in 2 of the last 5 judged burns. Rooms without a room sensor, and rooms flagged for fire, window, shower or a cooker spike, are not judged | Alert `valve.leaking`; room flagged untrusted (learning paused, `valve_leaking`). Clears after 5 judged burns in a row that stay cool. No recalibration offer: the TRVZB has no calibration command in Zigbee2MQTT ([status](implementation-status.md#7-failure-modes)) |
 | Short-cycling | > 4 relay starts per hour, or external stops (section 5.6) | Raise minimum off by 5 min (up to 30) for 24 h, at most once an hour; alert `boiler.short_cycle`. Kept across restarts |
@@ -466,9 +468,10 @@ One web UI, served by the server and embedded through HA ingress. It is a dashbo
 
 - **House view**: one card per room with temperature against target, opening limit bar, learning state ("Learning paused: fire lit"). Boiler strip with a burn timeline for the last 24 h and minimum burn/off countdowns.
 - **Motion**: only where it explains state. Opening limit bars and the burn timeline transition `transform`/`opacity` in 200 ms with a strong ease-out; no animation on keyboard actions; hover effects gated by `(hover: hover) and (pointer: fine)`; `prefers-reduced-motion` keeps fades and drops movement.
+- **Observed rooms**: a passive room's card reads "Bypass, not controlled"; an unheated room's reads "No radiator" with "No radiator here. Temperature recorded, not controlled." Neither has a setpoint or an opening limit bar.
 - **Explainability**: every room shows its latest reason, such as "Lounge: fire lit, radiator closed and learning paused". A room waiting in `eco` (`demand.pooled`) reads "Waiting to share a burn with other rooms".
 - **Demand mode**: an Eco and Comfort control beside the heating mode, with one line saying what the mode in effect does. It starts "Default:" while the server follows `boiler.demand_mode`, and picking that mode sends `null`. Hidden when the server sends no `settings`.
-- **Setup**: the first step is `radiate discover` on the command line. It reads Zigbee2MQTT's retained `bridge/devices` and `bridge/groups` (read-only), matches TRVs, temperature sensors and contact sensors into rooms by description area, friendly name or group, and writes a commented YAML draft in dry run with one pilot valve. Rooms with a TRV and no sensor become `internal_sensor_only`; sensors with no TRV are commented `passive` candidates, because an unvalved radiator can't be detected. Rules are in [configuration](configuration.md#start-from-your-devices).
+- **Setup**: the first step is `radiate discover` on the command line. It reads Zigbee2MQTT's retained `bridge/devices` and `bridge/groups` (read-only), matches TRVs, temperature sensors and contact sensors into rooms by description area, friendly name or group, and writes a commented YAML draft in dry run with one pilot valve. Rooms with a TRV and no sensor become `internal_sensor_only`; sensors with no TRV are commented out as `passive`, with a note to change a room with no radiator to `unheated`, because an unvalved radiator can't be told from no radiator. Rules are in [configuration](configuration.md#start-from-your-devices).
 
 **Not yet implemented** ([status](implementation-status.md#10-user-interface)): an arrival estimate on each room card, allocation reasons such as "Opening 35 % so it arrives with Bedroom 3 at 07:10" (the allocator gives no per-room reason yet), and a setup wizard in the UI that discovers rooms from Zigbee2MQTT or HA areas and marks bypass radiators, heat sources and the boiler relay.
 
@@ -495,11 +498,17 @@ Hardware and legal:
 3. Heatslave 12/14 nozzle rating and the boiler thermostat setting, for oil accounting and the simulator.
 4. Freedom-to-operate check on EP1936290 and EP2420748 before marketing balancing in Germany or the EU.
 
+Behaviour:
+
+5. **Open question: unheated rooms in the model.** Unheated rooms are recorded and shown, but nothing in the model uses them. The room model (section 4.1) has no neighbours: each room loses heat to `T_out`, and a warm or cold neighbour shows up only as steady heat `d_r`. Should unheated-room temperatures feed the model, and how? For example: as the boundary temperature for heat lost to an adjacent unheated space (a landing or a utility room), instead of folding that loss into `b_r` against the outdoor temperature and into `d_r`; as a second regressor for the rooms next to them; or not at all, kept for reports and Elastic only. Any of these needs room adjacency in the configuration, which does not exist yet. **Not yet implemented** ([status](implementation-status.md#2-house-model)). For the owner to settle.
+
 The three behaviour questions raised in version 0.2 (learning memory, pooled demand, learning on a stale room sensor) are decided; see section 13.
 
 ---
 
 ## 13. Changes in this revision
+
+Added since version 0.3 was settled: the `unheated` room role for a room with a sensor and no radiator (2.1, 4.6, 7, 10), and open question 5 on how unheated rooms should feed the model (section 12).
 
 Version 0.3 settles the three behaviour questions from version 0.2 with the owner's decisions:
 

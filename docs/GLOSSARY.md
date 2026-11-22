@@ -17,21 +17,22 @@ A random UUID that identifies a house in exports and to the Home Assistant integ
 Code: `Runtime.house_id`, Elastic `radiate.house.id`.
 
 **Room**:
-A heated space with one radiator, at most one TRV and at most one room sensor.
+A space Radiate knows about. Most rooms have one radiator, at most one TRV and at most one room sensor. An unheated room has a room sensor and no radiator.
 Code: `RoomConfig` (configuration), `RoomState` (learned and live state), `RoomInput` (one reading).
 
 **Room role**:
-How Radiate treats a room. One of three values:
+How Radiate treats a room. One of four values:
 
 - `normal`: TRV plus room sensor. Fully controlled and learned.
 - `passive`: no controllable valve, for example an unvalved bypass radiator. Observed only.
 - `internal_sensor_only`: TRV with no room sensor. Uses the TRV's internal reading plus the TRV bias, a wider hysteresis, never sets the pace, and has its learning confidence capped at 0.5. Its TRV setpoint is written in the TRV's own frame.
+- `unheated`: room sensor and no radiator. Recorded and shown only (see unheated room).
 
 Code: `RoomRole`, config key `rooms[].role`.
 _Avoid_: "TRV only" for `internal_sensor_only`.
 
 **Controllable**:
-A room whose role is not `passive`.
+A room with a TRV that Radiate drives: role `normal` or `internal_sensor_only`. Only a controllable room has a schedule, a room model and demand. Passive and unheated rooms are not controllable.
 Code: `RoomConfig.controllable`.
 
 **Room sensor**:
@@ -51,8 +52,13 @@ The temperature a TRV compares its setpoint with, and so the frame Radiate write
 Code: `_trv_setpoint` and `_trv_step` in `radiate.core.decide`.
 
 **Bypass radiator**:
-A radiator with no controllable valve that is always open, such as the reference house's stairs radiator. It has the `passive` role and counts towards the open path.
+A radiator with no controllable valve that is always open, such as the reference house's stairs radiator. It has the `passive` role and counts towards the open path. A rise in its room's temperature counts as heat arriving in the no-heat check. A room with no radiator at all is an unheated room, not a bypass.
 _Avoid_: unvalved room, manual room.
+
+**Unheated room**:
+A room with a room sensor and no radiator, such as a landing, a boot room or the room the boiler is in. Radiate records and shows its temperature, and its humidity unless `humidity: false`, but never controls it: no TRV, no schedule, no room model, no learning and no demand. It is not part of the open path, and its warming never counts as heat arriving, because something other than the radiators, such as the boiler's casing, can warm it.
+Code: `RoomRole.UNHEATED`, config `role: unheated`.
+_Avoid_: passive room (a passive room has a radiator).
 
 **Heat source**:
 Heat in a room that does not come from its radiator. Two kinds:

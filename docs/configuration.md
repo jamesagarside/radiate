@@ -59,7 +59,7 @@ A name that is only a number after the device words are removed, such as `TRV 1`
 ### What the draft contains
 
 - One room for each TRV. A room with a TRV and a sensor is `normal`. A room with a TRV and no sensor is `internal_sensor_only`.
-- A room for each sensor with no TRV, commented out as a `passive` candidate. Uncomment it only if the room's radiator has no controllable valve, such as a bypass radiator left open. Discover can't tell an unvalved radiator from a room with no radiator.
+- A room for each sensor with no TRV, commented out with `role: passive`. Discover can't tell an unvalved radiator from a room with no radiator, so check each one before you uncomment it. Keep `passive` only if the room's radiator has no controllable valve, such as a bypass radiator left open. For a room with no radiator, change it to `role: unheated` (see [rooms](#rooms)).
 - `humidity: true` on bathrooms and shower rooms whose sensor reports humidity.
 - One `default` schedule for every room, `dry_run: true`, and `actuate: true` on one pilot valve: the first normal room with a TRVZB on current firmware, avoiding bathrooms, whose shower spikes make a poor first test.
 - The `mqtt` section from the options you gave, with the password as `${RADIATE_MQTT_PASSWORD}`. Without `--username` or a password, the credentials are commented out.
@@ -305,7 +305,7 @@ Each routine has these keys:
 | `preheat_min` | Replaces `timing.preheat_min` in this room, for example a slow room with a small radiator |
 | `adjust` | Room adjustments: times to keep this room warm or cold whatever the routines say. See [Room adjustments](#room-adjustments) |
 
-A room in `household.rooms` can't also set `schedule` in the `rooms` section. Rooms not listed keep their `schedule`. A passive room has no valve, so it can't be listed.
+A room in `household.rooms` can't also set `schedule` in the `rooms` section. Rooms not listed keep their `schedule`. A passive room has no valve and an unheated room has no radiator, so neither can be listed.
 
 #### Set up in the web UI
 
@@ -474,15 +474,29 @@ A top-level key, default `true`. Set `balancing: false` to open every heating va
 |---|---|
 | `id` | Lower case letters, digits, and `_` |
 | `name` | Display name |
-| `role` | `normal` (TRV and room sensor), `internal_sensor_only` (TRV with no room sensor), or `passive` (no controllable valve, for example an unvalved bypass radiator) |
+| `role` | `normal` (TRV and room sensor), `internal_sensor_only` (TRV with no room sensor), `passive` (no controllable valve, for example an unvalved bypass radiator), or `unheated` (room sensor and no radiator, see below) |
 | `trv` | Zigbee2MQTT name of the TRVZB |
 | `sensor` | Zigbee2MQTT name of the room temperature sensor |
 | `window` | Zigbee2MQTT name of a contact sensor. `contact: false` means open |
-| `schedule` | Name of a schedule. Defaults to `default`, so every room except a `passive` one needs a schedule of that name, its own `schedule` key, or an entry in `household.rooms` |
-| `heat_source` | `episodic` (open fire, wood burner) or `continuous` (range cooker) |
-| `humidity` | `true` to use the sensor's humidity for shower detection |
+| `schedule` | Name of a schedule. Defaults to `default`, so every room except a `passive` or `unheated` one needs a schedule of that name, its own `schedule` key, or an entry in `household.rooms`. An `unheated` room can't have one |
+| `heat_source` | `episodic` (open fire, wood burner) or `continuous` (range cooker). Not allowed in an `unheated` room, which has no room model |
+| `humidity` | `true` to use the sensor's humidity for shower detection. In an `unheated` room humidity is recorded by default; set `false` to leave it out |
 | `actuate` | `true` to let Radiate write to this room's TRV (`RoomConfig.actuation_enabled` in code). Without any `actuate` keys, only the pilot valve is actuated |
 | `trv_bias_k` | Offset from the TRV's internal reading to room temperature, default -1.5. Used in an `internal_sensor_only` room, and in a `normal` room while its sensor is stale |
+
+#### Unheated rooms
+
+A room with a temperature sensor and no radiator, such as a landing, a boot room or the room the boiler is in, has `role: unheated`. It needs a `sensor` and can't have a `trv`, a `schedule` or a `heat_source`:
+
+```yaml
+rooms:
+  - {id: landing, name: Landing, role: unheated, sensor: sensor_landing}
+  - {id: utility, name: Utility room, role: unheated, sensor: sensor_utility}
+```
+
+Radiate records its temperature and humidity in the tick history and the Elastic export, and shows them in the web UI, the API and the Home Assistant dashboard, labelled as having no radiator. It never controls the room, learns a model for it or counts it as calling. A warm unheated room never counts as heat arriving in the no-heat check, so a utility room warmed by the boiler's casing can't hide an empty oil tank. Use `passive` instead only for a room whose radiator is always open with no controllable valve.
+
+How these readings could feed the room models is an open question for the owner ([spec section 12](spec.md#12-open-questions)).
 
 ## Zigbee2MQTT notes
 
