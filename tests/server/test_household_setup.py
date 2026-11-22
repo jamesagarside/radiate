@@ -393,6 +393,22 @@ async def test_routes_without_a_setup_are_404(tmp_path):
         assert (await c.get("/api/v1/household")).status == 404
 
 
+def test_unheated_room_is_left_out_of_the_wizard(tmp_path):
+    data = house_data()
+    data["rooms"].append({"id": "landing", "role": "unheated", "sensor": "temp_landing"})
+    rt = make(tmp_path, data)
+    assert "landing" not in {r["id"] for r in rt.setup.view()["rooms"]}
+    # A draft without it is complete; a draft that lists it is refused, with its path.
+    assert rt.setup.preview(rt, {"household": draft()})["errors"] == []
+    bad = draft()
+    bad["rooms"]["landing"] = {"use": "in_use"}
+    errors = rt.setup.preview(rt, {"household": bad})["errors"]
+    assert {
+        "path": "household.rooms.landing",
+        "message": "an unheated room has no radiator, so it has no schedule",
+    } in errors
+
+
 def test_demo_bridge_saves_in_memory():
     demo = DemoSession()
     demo.step(2)

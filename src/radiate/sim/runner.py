@@ -391,8 +391,8 @@ def _measure(
     dt_h = STEP_S / 3600
     occupied = any(a <= minute < b for a, b in OCCUPIED)
     for s in ROOMS:
-        if s.role is RoomRole.PASSIVE:
-            continue
+        if s.role in (RoomRole.PASSIVE, RoomRole.UNHEATED):
+            continue  # no schedule of its own, so no comfort to measure
         t = house.rooms[s.id].t
         sp = setpoint(s, minute)
         fire_evening = s.id == "lounge" and day in d.fire_days and minute >= d.fire_window[0] - 60

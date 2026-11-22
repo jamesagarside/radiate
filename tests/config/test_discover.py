@@ -297,6 +297,8 @@ def test_reference_draft_passes_validation_once_the_secret_is_set():
     assert site.house.room("bathroom").has_humidity
     assert site.devices["bedroom_1"].window == "window_bedroom_1"
     assert "# - id: stairs" in text and "#   role: passive" in text
+    prose = " ".join(line.lstrip("# ") for line in text.splitlines())
+    assert "use role: unheated" in prose  # offered for a sensor in a room with no radiator
     assert "# shelly:" in text
 
 
