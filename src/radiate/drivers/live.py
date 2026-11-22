@@ -22,6 +22,8 @@ from radiate.config import SiteConfig, WeekSchedule
 from radiate.core import Actions, Mode, Reason, RoomInput, Snapshot
 from radiate.core.types import RoomRole
 
+from . import devices as health
+from .devices import DeviceHealth, HealthLimits, NetworkScan, ScanRefused
 from .shelly import ShellyBoiler, fallback_heating_windows
 from .z2m import DeviceStore, TrvWriter, Write, is_available, reading_age, trv_get_payload
 
@@ -77,6 +79,15 @@ class LiveDriver:
         self._last_store = False
         self._handover = False  # safe mode: boiler left to the Shelly watchdog
         self._relay_seen_at: float | None = None  # last successful read of the relay
+        self._shelly_seen_at: float | None = None  # last successful Shelly refresh
+        # Device health (spec 10): thresholds from the house file, and the network scan
+        # a person can ask for from the devices view.
+        self.limits = HealthLimits(
+            low_battery_pct=site.monitoring.low_battery_pct,
+            weak_signal_lqi=site.monitoring.weak_signal_lqi,
+            stale_after_s=site.sensor_max_silence_s,
+        )
+        self.scan = NetworkScan()
         self._pending: set[asyncio.Task] = set()
         # Days of ticks the runtime records for replay and bootstrap (spec 4.3, 6).
         self.history_days = site.history_days
@@ -166,6 +177,9 @@ class LiveDriver:
     # --- inbound -----------------------------------------------------------------------
 
     def handle_message(self, topic: str, payload: bytes) -> None:
+        if topic == self.devices.response_topic("networkmap"):
+            self.scan.response(payload, self.clock())
+            return
         name = self.devices.handle(topic, payload, self.clock())
         if name is None or not topic.endswith("/availability"):
             return
@@ -189,6 +203,8 @@ class LiveDriver:
     ) -> Snapshot:
         if self.boiler is not None:
             await self.boiler.refresh()
+            if self.boiler.reachable:
+                self._shelly_seen_at = self.clock()
         now = self.clock()
         local = self._local()
         weekday, minute = local.weekday(), local.hour * 60 + local.minute
@@ -379,6 +395,11 @@ class LiveDriver:
                 )
         if self.boiler is not None and not self.boiler.reachable:
             out.append(Reason("driver.shelly", "Boiler relay (Shelly) not reachable"))
+        # Battery, signal and silent sensors. The relay has its own alert above, and
+        # while the broker or Zigbee2MQTT is down every device would be listed.
+        if self._zigbee_up():
+            zigbee = [d for d in self.health() if d.kind != "relay"]
+            out.extend(health.alerts(zigbee, self.limits))
         return out
 
     def telemetry(self) -> dict:
@@ -397,3 +418,126 @@ class LiveDriver:
             t.update(self.boiler.telemetry())
             t["shelly_intended"] = len(self.boiler.intended)
         return t
+
+    # --- device health (spec 10) -------------------------------------------------------
+
+    def _zigbee_health(
+        self,
+        name: str,
+        kind: str,
+        now: float,
+        room_id: str | None = None,
+        room: str | None = None,
+    ) -> DeviceHealth:
+        dev = self.devices.get(name)
+        info = self.devices.bridge_devices.get(name)
+        d = DeviceHealth(id=name, kind=kind, room_id=room_id, room_name=room)
+        if info is not None:
+            d.model, d.vendor, d.firmware = info.model, info.vendor, info.firmware
+            d.power = info.power
+        if kind == "router" and d.power is None:
+            d.power = "mains"
+        if self.scan.map is not None:
+            d.route = self.scan.map.routes.get(name)
+        if dev is None:
+            return d
+        if dev.available is not None or dev.last_message is not None:
+            d.available = is_available(dev, now, self.site.sensor_max_silence_s)
+        # Zigbee2MQTT's own last_seen, when it sends one, survives a Radiate restart.
+        seen = health.last_seen_wall(dev.values.get("last_seen"))
+        if seen is not None:
+            d.last_seen_s = max(0.0, self._wall() - seen)
+        elif dev.last_message is not None:
+            d.last_seen_s = now - dev.last_message
+        d.battery_pct = dev.number("battery")
+        d.linkquality = dev.number("linkquality")
+        if kind in ("sensor", "outdoor"):
+            d.temperature_c = dev.number("temperature")
+            d.humidity_pct = dev.number("humidity")
+            d.reading_age_s = dev.age("temperature", now)
+        elif kind == "trv":
+            d.temperature_c = dev.number("local_temperature")
+            d.valve = {
+                "opening_pct": dev.number("valve_opening_degree"),
+                "closing_pct": dev.number("valve_closing_degree"),
+                "mode": dev.values.get("system_mode"),
+                "running_state": dev.values.get("running_state"),
+                "setpoint_c": dev.number("occupied_heating_setpoint"),
+                "sensor": dev.values.get("temperature_sensor_select"),
+            }
+        elif kind == "window":
+            contact = dev.values.get("contact")
+            d.contact = contact if isinstance(contact, bool) else None
+        return d
+
+    def health(self) -> list[DeviceHealth]:
+        """Every device Radiate depends on: each room's TRV, room sensor and window
+        sensor, the outdoor sensor, Zigbee2MQTT's routers and the boiler relay."""
+        now = self.clock()
+        out: list[DeviceHealth] = []
+        seen: set[str] = set()
+        for rc in self.cfg.rooms:
+            dev = self.site.devices[rc.id]
+            for name, kind in ((dev.trv, "trv"), (dev.sensor, "sensor"), (dev.window, "window")):
+                if name and name not in seen:
+                    seen.add(name)
+                    out.append(self._zigbee_health(name, kind, now, rc.id, rc.name))
+        outdoor = self.site.outdoor_sensor
+        if outdoor and outdoor not in seen:
+            seen.add(outdoor)
+            out.append(self._zigbee_health(outdoor, "outdoor", now))
+        for name in self.devices.routers():
+            if name not in seen:
+                seen.add(name)
+                out.append(self._zigbee_health(name, "router", now))
+        if self.boiler is not None:
+            relay = DeviceHealth(id="boiler_relay", kind="relay", link="wifi", power="mains")
+            relay.model = "Shelly"
+            if self._shelly_seen_at is not None:
+                relay.available = self.boiler.reachable
+                relay.last_seen_s = now - self._shelly_seen_at
+            elif self.boiler.errors:
+                relay.available = False
+            heating, store = self.boiler.heating, self.boiler.store
+            relay.relay = {
+                "heating": heating.output if heating else None,
+                "store": store.output if store else None,
+                "power_w": heating.apower if heating else None,
+            }
+            out.append(relay)
+        return out
+
+    def devices_view(self) -> dict:
+        """The `GET /api/v1/devices` body."""
+        now = self.clock()
+        network = {"mqtt": self._connected(), "zigbee2mqtt": self.devices.bridge_online}
+        scan = self.scan.view(now, available=self.site.mqtt is not None)
+        return health.view(self.health(), self.limits, scan, network)
+
+    def request_network_scan(self) -> dict:
+        """Ask Zigbee2MQTT for a raw network map. Only on a person's request.
+
+        A read: it changes no device, so it is allowed in dry run. It does slow the
+        mesh while Zigbee2MQTT asks each router, so `NetworkScan` allows one at a time
+        and one start every 10 minutes. The answer arrives on
+        `bridge/response/networkmap` (see `handle_message`).
+        """
+        if self.site.mqtt is None:
+            raise ScanRefused(404, "no Zigbee2MQTT to scan")
+        if not self._zigbee_up():
+            raise ScanRefused(503, "Zigbee2MQTT is not reachable")
+        now = self.clock()
+        tx = self.scan.start(now)
+        payload = {"type": "raw", "routes": False, "transaction": tx}
+        task = asyncio.get_running_loop().create_task(
+            self.publish(self.devices.request_topic("networkmap"), payload)
+        )
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+        task.add_done_callback(self._scan_sent)
+        return self.scan.view(now)
+
+    def _scan_sent(self, task: asyncio.Task) -> None:
+        failed = task.cancelled() or task.exception() is not None or not task.result()
+        if failed and self.scan.state == "scanning":
+            self.scan.fail("could not send the request to Zigbee2MQTT")

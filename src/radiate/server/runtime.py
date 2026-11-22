@@ -72,6 +72,9 @@ class Driver(Protocol):
     # Optional: `replace_household(site)`, a new household from the web UI's setup
     # (radiate.server.setup): which rooms it covers, and the house file's schedule for
     # every other room. `set_household_schedules` follows straight after.
+    # Optional: `devices_view()`, the `GET /api/v1/devices` body (radiate.drivers.devices),
+    # and `request_network_scan()`, which starts a network scan and returns its state or
+    # raises `ScanRefused`.
     # Optional: `history_days`, days of ticks to record in the state database. Only the
     # live driver sets it, so the demo never records.
 
@@ -277,6 +280,22 @@ class Runtime:
             "learning_memory_days": learning.memory_days,
             "learn_on_trv_fallback": learning.learn_on_trv_fallback,
         }
+
+    # --- devices ---------------------------------------------------------------------
+
+    def devices_view(self) -> dict | None:
+        """The health of every device the driver depends on, or None if it cannot say."""
+        view = getattr(self.driver, "devices_view", None)
+        return view() if callable(view) else None
+
+    def scan_network(self) -> dict | None:
+        """Start a network scan; None if the driver has no mesh to scan.
+
+        Raises `radiate.drivers.devices.ScanRefused` while one runs or too soon after
+        the last one.
+        """
+        scan = getattr(self.driver, "request_network_scan", None)
+        return scan() if callable(scan) else None
 
     def _restore_overrides(self, data: object, elapsed_s: float) -> None:
         if not isinstance(data, dict):

@@ -29,6 +29,11 @@
     <p class="demand-note" id="demand-note" hidden></p>
   </header>
 
+  <nav class="views" id="views" aria-label="Views" hidden>
+    <a href="#" class="view-tab" data-view="house" aria-current="page">House</a>
+    <a href="#devices" class="view-tab" data-view="devices">Devices<span class="view-count" id="devices-count" hidden></span></a>
+  </nav>
+
   <div class="banner" id="banner" hidden><p id="banner-text"></p></div>
 
   <section class="notice" id="dryrun" aria-labelledby="dryrun-h" hidden>
@@ -107,7 +112,10 @@
     <section class="alerts" id="alerts" aria-labelledby="alerts-h" hidden>
       <h2 id="alerts-h">Needs attention</h2>
       <ul id="alerts-list"></ul>
-      <button class="btn alerts-more" id="alerts-more" type="button" aria-expanded="false" aria-controls="alerts-list" hidden></button>
+      <div class="alerts-actions">
+        <button class="btn alerts-more" id="alerts-more" type="button" aria-expanded="false" aria-controls="alerts-list" hidden></button>
+        <a class="alerts-devices" id="alerts-devices" href="#devices" hidden>See devices</a>
+      </div>
     </section>
 
     <section id="week" aria-labelledby="week-h" hidden>
@@ -121,6 +129,58 @@
       <div class="weeks" id="week-list"></div>
     </section>
   </main>
+
+  <section class="devices-view" id="devices" aria-labelledby="devices-h" hidden>
+    <div class="devices-head">
+      <h2 id="devices-h" tabindex="-1">Devices</h2>
+      <p class="devices-summary" id="devices-summary" aria-live="polite">Loading devices…</p>
+      <p class="muted devices-network" id="devices-network"></p>
+    </div>
+    <section class="alerts devices-attention" id="devices-attention" aria-labelledby="devices-attention-h" hidden>
+      <h3 id="devices-attention-h">Needs attention</h3>
+      <ul id="devices-attention-list"></ul>
+    </section>
+    <section aria-labelledby="devices-rooms-h">
+      <h3 id="devices-rooms-h" class="section-h">Valves and sensors</h3>
+      <div class="device-grid" id="devices-rooms"></div>
+    </section>
+    <section aria-labelledby="devices-mesh-h" id="devices-mesh-section">
+      <h3 id="devices-mesh-h" class="section-h">Zigbee network</h3>
+      <div class="card mesh">
+        <div class="mesh-head">
+          <div class="mesh-copy">
+            <p>See which router each device talks through.</p>
+            <p class="muted mesh-note">A scan slows the Zigbee network for up to 2 minutes, so it runs only when you ask, and at most every 10 minutes.</p>
+          </div>
+          <button type="button" class="btn" id="mesh-scan" aria-describedby="mesh-status">Scan network</button>
+        </div>
+        <p class="mesh-status" id="mesh-status" role="status"></p>
+        <ul class="tree" id="mesh-tree" aria-label="Routes" hidden></ul>
+      </div>
+      <div class="device-grid" id="devices-routers"></div>
+    </section>
+    <section aria-labelledby="devices-boiler-h" id="devices-boiler-section" hidden>
+      <h3 id="devices-boiler-h" class="section-h">Boiler</h3>
+      <div class="device-grid" id="devices-boiler"></div>
+    </section>
+  </section>
+
+  <template id="device-tpl">
+    <article class="card device" tabindex="-1">
+      <header>
+        <h4 class="name"></h4>
+        <span class="badge"></span>
+      </header>
+      <ul class="device-flags"></ul>
+      <dl class="device-stats">
+        <div class="ds-battery"><dt>Battery</dt><dd><span class="ds-val"></span><span class="meter" aria-hidden="true"><span class="meter-fill"></span></span></dd></div>
+        <div class="ds-signal"><dt>Signal</dt><dd><span class="sig" aria-hidden="true"><i></i><i></i><i></i></span><span class="ds-val"></span><span class="ds-sub"></span></dd></div>
+        <div class="ds-seen"><dt>Last seen</dt><dd class="ds-val"></dd></div>
+      </dl>
+      <p class="device-reading"></p>
+      <footer class="meta"></footer>
+    </article>
+  </template>
 
   <section class="setup" id="setup" aria-labelledby="setup-h" hidden>
     <div class="setup-head">

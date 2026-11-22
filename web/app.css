@@ -494,10 +494,108 @@ main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .alerts ul { margin: 0; padding-left: 1.2em; display: grid; gap: 2px; }
 .alerts ul:not([data-expanded="true"]) li[data-extra="true"] { display: none; }
 .alerts-more { background: transparent; border-color: var(--warn); color: var(--warn); font-size: 0.85rem; padding: 4px 10px; }
+.alerts-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.alerts-actions:not(:has(> :not([hidden]))) { display: none; }
+.alerts-devices, .attention-link {
+  color: inherit; font-weight: 600; text-underline-offset: 2px;
+  display: inline-block; transition: transform 160ms var(--ease-out);
+}
+.alerts-devices:active, .attention-link:active { transform: scale(0.97); }
+
+/* Views: House and Devices. Plain links, so the browser's back button and a shared
+   #devices link work, also through Home Assistant ingress. */
+.views {
+  display: flex; gap: 4px; padding: 8px max(16px, calc((100vw - 1180px) / 2)) 0;
+  border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.view-tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 8px;
+  color: var(--muted); text-decoration: none; font-size: 0.9rem;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: transform 160ms var(--ease-out), color 150ms ease, border-color 150ms ease;
+}
+.view-tab[aria-current="page"] { color: var(--text); font-weight: 600; border-bottom-color: var(--cool); }
+.view-tab:active { transform: scale(0.97); }
+.view-count {
+  min-width: 1.5em; padding: 0 6px; border-radius: 999px; text-align: center;
+  font-size: 0.72rem; font-weight: 600; font-variant-numeric: tabular-nums;
+  background: var(--warn-soft); color: var(--warn);
+}
+body[data-setup="open"] .views, body[data-auth="needed"] .views,
+body[data-auth="needed"] .devices-view { display: none; }
+
+/* Devices view */
+.devices-view { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20px; }
+.devices-head { display: grid; gap: 4px; }
+.devices-head h2 { font-size: 1.05rem; justify-self: start; }
+.devices-summary { font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+.devices-network { font-size: 0.85rem; }
+.devices-network:empty { display: none; }
+.devices-attention h3 { font-size: 0.9rem; font-weight: 600; }
+.device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.device-grid:empty { display: none; }
+.device { padding: 14px 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.device header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.device h4 { margin: 0; font-size: 0.98rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.badge[data-kind="offline"], .badge[data-kind="attention"] { background: var(--warn-soft); color: var(--warn); }
+.device-flags { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.device-flags .flag { justify-self: stretch; }
+.device[data-status="offline"] .device-stats,
+.device[data-status="offline"] .device-reading { opacity: 0.55; }
+
+.device-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.device-stats dt { font-size: 0.72rem; color: var(--muted); }
+.device-stats dd {
+  margin: 2px 0 0; display: flex; align-items: center; gap: 2px 6px; flex-wrap: wrap;
+  font-size: 0.9rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.ds-battery[data-low="true"] .ds-val, .ds-signal[data-weak="true"] .ds-val { color: var(--warn); }
+.ds-sub { flex-basis: 100%; font-size: 0.72rem; font-weight: 400; color: var(--muted); }
+.ds-sub:empty { display: none; }
+.ds-signal[data-weak="true"] .ds-sub { color: var(--warn); }
+.meter { width: 26px; height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; flex: none; }
+.meter-fill {
+  display: block; height: 100%; background: var(--ok); transform-origin: left; transform: scaleX(0);
+  transition: transform 240ms var(--ease-out), background-color 150ms ease;
+}
+.meter[data-low="true"] .meter-fill { background: var(--warn); }
+.sig { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
+.sig i { width: 3px; border-radius: 1px; background: var(--line); transition: background-color 150ms ease; }
+.sig i:nth-child(1) { height: 5px; }
+.sig i:nth-child(2) { height: 8px; }
+.sig i:nth-child(3) { height: 12px; }
+.sig[data-level="strong"] { color: var(--ok); }
+.sig[data-level="fair"] { color: var(--muted); }
+.sig[data-level="weak"] { color: var(--warn); }
+.sig[data-bars="1"] i:nth-child(-n+1),
+.sig[data-bars="2"] i:nth-child(-n+2),
+.sig[data-bars="3"] i { background: currentColor; }
+.device-reading { font-size: 0.84rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.device .meta code { font-size: 0.75rem; overflow-wrap: anywhere; }
+
+.mesh { padding: 14px 16px; display: grid; gap: 10px; margin-bottom: 12px; }
+.mesh-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+.mesh-copy { display: grid; gap: 2px; flex: 1 1 280px; font-size: 0.9rem; }
+.mesh-note { font-size: 0.8rem; }
+.mesh-status { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mesh-status[data-error="true"] { color: var(--warn); }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree { font-size: 0.85rem; }
+.tree ul { margin-left: 7px; padding-left: 14px; border-left: 1px solid var(--line); }
+.tree li { padding: 3px 0; }
+.tree li > .tree-node { font-weight: 600; }
+.tree ul li > .tree-node { font-weight: 400; }
+.tree li:has(> ul) > .tree-node { font-weight: 600; }
+.tree-lqi { margin-left: 8px; color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.tree-lqi[data-weak="true"] { color: var(--warn); font-weight: 600; }
+
+@media (hover: hover) and (pointer: fine) {
+  .view-tab:hover { color: var(--text); }
+}
 
 /* Stale: the link is down and the last poll failed. Dim, never hide, the last state. */
-main, .banner, .notice { transition: opacity 200ms var(--ease-out); }
-body[data-link="stale"] :is(main, .banner, .notice) { opacity: 0.55; }
+main, .banner, .notice, .devices-view { transition: opacity 200ms var(--ease-out); }
+body[data-link="stale"] :is(main, .banner, .notice, .devices-view) { opacity: 0.55; }
 body[data-link="stale"] .status { color: var(--warn); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -507,11 +605,16 @@ body[data-link="stale"] .status { color: var(--warn); }
   @starting-style { .signin { transform: none; } }
   .setup-step { transition: opacity 150ms ease; }
   @starting-style { .setup-step { transform: none; } }
+  .meter-fill { transition: background-color 150ms ease; }
+  .view-tab, .alerts-devices, .attention-link { transition: color 150ms ease, border-color 150ms ease; }
+  .view-tab:active, .alerts-devices:active, .attention-link:active { transform: none; }
 }
 
 /* Touch: every control at least 44 px, without bulking up the desktop layout. */
 @media (pointer: coarse) {
   .btn, .seg button, .signin-row input, .away-fields input { min-height: 44px; }
+  .view-tab { min-height: 44px; }
+  .alerts-devices, .attention-link { padding-block: 12px; margin-block: -12px; }
   .setup input[type="text"], .setup input[type="number"], .setup select { min-height: 44px; }
   .setup input[type="checkbox"] { width: 24px; height: 24px; }
   .setup-adv summary { padding-block: 12px; }

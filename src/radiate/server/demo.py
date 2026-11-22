@@ -7,9 +7,21 @@ house. `demo_site` describes the simulated house as a `SiteConfig` for that setu
 
 from __future__ import annotations
 
+import math
+
 from radiate.config.schedule import DaySchedule, WeekSchedule
 from radiate.config.site import RoomDevices, SiteConfig
-from radiate.core import Actions, Mode, Snapshot
+from radiate.core import Actions, Mode, Reason, Snapshot
+from radiate.core.types import RoomRole
+from radiate.drivers.devices import (
+    DeviceHealth,
+    HealthLimits,
+    NetworkMap,
+    NetworkScan,
+    Route,
+)
+from radiate.drivers.devices import alerts as device_alerts
+from radiate.drivers.devices import view as health_view
 from radiate.sim.house import SimHouse
 from radiate.sim.reference import OCCUPIED, ROOMS, RoomSpec, build_house, next_change, setpoint
 from radiate.sim.runner import STEP_S, Disturbances, _apply, _apply_disturbances, _snapshot
@@ -25,6 +37,9 @@ class DemoDriver:
         self._dist_state: dict = {}
         self._reports = {rid: (r.reported_t, self.house.now) for rid, r in self.house.rooms.items()}
         self.household_live: dict[str, WeekSchedule] = {}  # household rooms: the live weeks
+        self.limits = HealthLimits()
+        self.scan = NetworkScan()
+        self._garage_lost_at = self.house.now - 3 * 3600  # the offline router's last word
 
     def clock(self) -> float:
         return self.house.now
@@ -109,6 +124,136 @@ class DemoDriver:
     async def apply(self, actions: Actions) -> None:
         _apply(self.house, actions)
 
+    # --- device health (spec 10) -------------------------------------------------------
+
+    def health(self) -> list[DeviceHealth]:
+        """The simulated house's devices, with made-up but plausible battery, signal
+        and last-seen values: one low battery, one weak signal, one router offline."""
+        h, now = self.house, self.house.now
+        days = now / 86400
+        out: list[DeviceHealth] = []
+        routes = self.scan.map.routes if self.scan.map is not None else {}
+        for i, spec in enumerate(ROOMS):
+            room = h.rooms[spec.id]
+            trv = room.radiator.trv
+            if trv is not None:
+                name = f"trv_{spec.id}"
+                battery, lqi = _DEMO_SIGNAL.get(name, (80.0, 120.0))
+                out.append(
+                    DeviceHealth(
+                        id=name,
+                        kind="trv",
+                        room_id=spec.id,
+                        room_name=spec.name,
+                        model="TRVZB",
+                        vendor="SONOFF",
+                        firmware="1.3.0",
+                        power="battery",
+                        battery_pct=max(1.0, round(battery - 0.05 * days)),
+                        linkquality=_wobble(lqi, now, i),
+                        available=trv.available,
+                        last_seen_s=(now + 97 * i) % 300,
+                        temperature_c=round(trv.internal, 1),
+                        valve={
+                            "opening_pct": round(trv.opening_degree),
+                            "closing_pct": round(trv.closing_degree),
+                            "mode": "auto",
+                            "running_state": "heat" if trv.heating else "idle",
+                            "setpoint_c": trv.setpoint,
+                            "sensor": "remote_temperature"
+                            if spec.role is RoomRole.NORMAL
+                            else "local_temperature",
+                        },
+                        route=routes.get(name),
+                    )
+                )
+            if spec.role is not RoomRole.INTERNAL_SENSOR_ONLY:
+                name = f"temp_{spec.id}"
+                battery, lqi = _DEMO_SIGNAL.get(name, (90.0, 110.0))
+                value, at = self._reports[spec.id]
+                out.append(
+                    DeviceHealth(
+                        id=name,
+                        kind="sensor",
+                        room_id=spec.id,
+                        room_name=spec.name,
+                        model="SNZB-02D",
+                        vendor="SONOFF",
+                        power="battery",
+                        battery_pct=max(1.0, round(battery - 0.02 * days)),
+                        linkquality=_wobble(lqi, now, i + 20),
+                        available=True,
+                        last_seen_s=now - at,
+                        reading_age_s=now - at,
+                        temperature_c=round(value, 1),
+                        humidity_pct=round(room.humidity) if spec.humidity else None,
+                        route=routes.get(name),
+                    )
+                )
+        out.append(
+            DeviceHealth(
+                id="plug_landing",
+                kind="router",
+                model="S60ZBTPG",
+                vendor="SONOFF",
+                firmware="1.0.6",
+                power="mains",
+                linkquality=_wobble(150.0, now, 40),
+                available=True,
+                last_seen_s=(now + 41) % 60,
+                route=routes.get("plug_landing"),
+            )
+        )
+        out.append(
+            DeviceHealth(
+                id="plug_garage",
+                kind="router",
+                model="S60ZBTPG",
+                vendor="SONOFF",
+                firmware="1.0.6",
+                power="mains",
+                linkquality=None,
+                available=False,
+                last_seen_s=now - self._garage_lost_at,
+            )
+        )
+        out.append(
+            DeviceHealth(
+                id="boiler_relay",
+                kind="relay",
+                link="wifi",
+                model="Shelly",
+                power="mains",
+                available=True,
+                last_seen_s=0.0,
+                relay={"heating": h.heating_relay, "store": h.store_relay, "power_w": None},
+            )
+        )
+        return out
+
+    def alerts(self) -> list[Reason]:
+        return device_alerts([d for d in self.health() if d.kind != "relay"], self.limits)
+
+    def devices_view(self) -> dict:
+        self._finish_scan()
+        scan = self.scan.view(self.house.now)
+        return health_view(self.health(), self.limits, scan, {"mqtt": True, "zigbee2mqtt": True})
+
+    def request_network_scan(self) -> dict:
+        """Pretend to map the mesh: the answer comes `DEMO_SCAN_S` simulated seconds
+        later, with the same rate limit as a real scan."""
+        self._finish_scan()
+        self.scan.start(self.house.now)
+        return self.scan.view(self.house.now)
+
+    def _finish_scan(self) -> None:
+        scan = self.scan
+        if scan.state != "scanning" or scan.started_at is None:
+            return
+        done_at = scan.started_at + DEMO_SCAN_S
+        if self.house.now >= done_at:
+            scan.finish(_demo_map(done_at), done_at)
+
     def telemetry(self) -> dict:
         b = self.house.boiler
         return {
@@ -120,6 +265,45 @@ class DemoDriver:
             "stairs_c": round(self.house.rooms["stairs"].t, 1),
             "simulated": True,
         }
+
+
+DEMO_SCAN_S = 45.0
+# Battery % and typical LQI for the demo's devices, where they differ from the usual.
+_DEMO_SIGNAL: dict[str, tuple[float, float]] = {
+    "trv_bedroom_1": (64.0, 96.0),
+    "trv_bedroom_2": (71.0, 88.0),
+    "trv_bedroom_3": (14.0, 72.0),  # low battery
+    "trv_bathroom": (58.0, 84.0),
+    "trv_dining": (77.0, 168.0),
+    "trv_lounge": (82.0, 182.0),
+    "trv_kitchen": (69.0, 204.0),
+    "trv_toilet": (55.0, 142.0),
+    "temp_bedroom_1": (88.0, 104.0),
+    "temp_bedroom_2": (92.0, 92.0),
+    "temp_bedroom_3": (85.0, 78.0),
+    "temp_bathroom": (79.0, 30.0),  # weak signal
+    "temp_dining": (95.0, 158.0),
+    "temp_lounge": (90.0, 176.0),
+    "temp_kitchen": (97.0, 196.0),
+    "temp_stairs": (83.0, 132.0),
+}
+
+
+def _wobble(lqi: float, now: float, seed: int) -> float:
+    """LQI moves a little from message to message."""
+    return float(round(lqi + 5 * math.sin(now / 1800 + seed)))
+
+
+def _demo_map(now: float) -> NetworkMap:
+    """Where the demo's devices route: upstairs through the landing plug."""
+    upstairs = {"bedroom_1", "bedroom_2", "bedroom_3", "bathroom"}
+    routes: dict[str, Route] = {"plug_landing": Route("Coordinator", "Coordinator", 148.0)}
+    for i, spec in enumerate(ROOMS):
+        for name in (f"trv_{spec.id}", f"temp_{spec.id}"):
+            _, lqi = _DEMO_SIGNAL.get(name, (0.0, 120.0))
+            via = ("plug_landing", "Router") if spec.id in upstairs else ("Coordinator",) * 2
+            routes[name] = Route(via[0], via[1], _wobble(lqi, now, i))
+    return NetworkMap(routes=routes)
 
 
 def demo_runtime(start_hour: float = 5.5, seed: int = 7):
