@@ -169,6 +169,20 @@ def test_history_days_default_range_and_off():
         parse_site(minimal(house={"history_days": 120}))
 
 
+def test_monitoring_defaults_and_ranges():
+    m = parse_site(minimal()).monitoring
+    assert (m.low_battery_pct, m.weak_signal_lqi) == (20, 40)
+    m = parse_site(minimal(monitoring={"low_battery_pct": 30, "weak_signal_lqi": 60})).monitoring
+    assert (m.low_battery_pct, m.weak_signal_lqi) == (30, 60)
+    with pytest.raises(ConfigError) as exc:
+        parse_site(minimal(monitoring={"low_battery_pct": 80, "weak_signal_lqi": 0, "x": 1}))
+    assert exc.value.problems == [
+        "monitoring.x: unknown key",
+        "monitoring.low_battery_pct: must be 5 to 50",
+        "monitoring.weak_signal_lqi: must be 5 to 150",
+    ]
+
+
 def test_unknown_schedule_and_timezone():
     data = minimal(house={"timezone": "Mars/Base"})
     data["rooms"][0]["schedule"] = "nope"

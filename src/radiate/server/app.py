@@ -203,6 +203,25 @@ async def set_settings(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_settings)
 
 
+async def devices(request: web.Request) -> web.Response:
+    try:
+        return web.json_response(bridge.devices(_rt(request)))
+    except bridge.RequestError as err:
+        raise _http_error(err) from err
+
+
+async def scan_network(request: web.Request) -> web.Response:
+    """Start a network scan. Refusals (409, 429, 503) answer JSON with `message`."""
+    rt = _rt(request)
+    body = await _json(request) if request.can_read_body else None
+    try:
+        return web.json_response(bridge.scan_network(rt, body))
+    except bridge.RequestError as err:
+        if err.body is not None:
+            return web.json_response(err.body, status=err.status)
+        raise _http_error(err) from err
+
+
 async def stream(request: web.Request) -> web.WebSocketResponse:
     rt = _rt(request)
     ws = web.WebSocketResponse(heartbeat=30)
@@ -271,6 +290,8 @@ def create_app(
             web.post("/api/v1/ha/persons", set_ha_persons),
             web.get("/api/v1/settings", settings),
             web.post("/api/v1/settings", set_settings),
+            web.get("/api/v1/devices", devices),
+            web.post("/api/v1/devices/scan", scan_network),
             web.get(STREAM_PATH, stream),
         ]
     )

@@ -3,6 +3,7 @@
 from .schedule import DaySchedule, ScheduleError, WeekSchedule, parse_day, parse_week
 from .site import (
     ConfigError,
+    MonitoringOptions,
     MqttConfig,
     RoomDevices,
     ShellyConfig,
@@ -20,6 +21,7 @@ __all__ = [
     "ScheduleError",
     "ShellyConfig",
     "SiteConfig",
+    "MonitoringOptions",
     "TrvOptions",
     "WeekSchedule",
     "load_site",

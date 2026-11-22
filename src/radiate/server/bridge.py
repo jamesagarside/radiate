@@ -18,6 +18,7 @@ from radiate.config.away import parse_local
 from radiate.config.site import HA_PERSON
 from radiate.core import DemandMode, Mode
 from radiate.core.types import RoomConfig, RoomRole
+from radiate.drivers.devices import ScanRefused
 
 from .runtime import Runtime
 from .schedules import schedules_view
@@ -262,6 +263,29 @@ def set_settings(rt: Runtime, body: Any) -> dict:
     return {"ok": True, "settings": rt.settings()}
 
 
+def devices(rt: Runtime) -> dict:
+    """Battery, signal, availability and readings of every device (spec 8.1)."""
+    view = rt.devices_view()
+    if view is None:
+        raise RequestError(404, "this driver reports no devices")
+    return view
+
+
+def scan_network(rt: Runtime, body: Any = None) -> dict:
+    """Start a network scan. 409 while one runs, 429 within 10 minutes of the last."""
+    if body is not None:
+        require_object(body)
+    try:
+        scan = rt.scan_network()
+    except ScanRefused as err:
+        raise RequestError(
+            err.status, err.message, {"message": err.message, "retry_in_s": err.retry_in_s}
+        ) from err
+    if scan is None:
+        raise RequestError(404, "this driver has no network to scan")
+    return {"ok": True, "scan": scan}
+
+
 def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
     """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`."""
     method = method.upper()
@@ -283,7 +307,11 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return schedules_view(rt)
         if parts == ["settings"]:
             return rt.settings()
+        if parts == ["devices"]:
+            return devices(rt)
     elif method == "POST":
+        if parts == ["devices", "scan"]:
+            return scan_network(rt, body)
         if parts == ["mode"]:
             return set_mode(rt, body)
         if parts == ["settings"]:

@@ -24,6 +24,8 @@ from typing import Any
 
 from radiate.core.types import ValveAction
 
+from .devices import BridgeDevice, parse_bridge_devices
+
 GOVERNED_STATIC = {
     "valve_closing_degree": 100,
     "smart_temperature_control": False,
@@ -102,6 +104,11 @@ class DeviceStore:
         # Zigbee2MQTT's own state (`bridge/state`, its MQTT last will). While it is
         # offline, retained device availability can no longer be trusted.
         self.bridge_online: bool | None = None
+        # Zigbee2MQTT's retained device list (`bridge/devices`), by friendly name. Its
+        # routers are tracked too, for the devices view, though the house file does not
+        # name them.
+        self.bridge_devices: dict[str, BridgeDevice] = {}
+        self._availability: dict[str, bool] = {}  # devices not tracked (yet)
 
     def subscriptions(self) -> list[str]:
         return [f"{self.base}/#"]
@@ -116,12 +123,24 @@ class DeviceStore:
             if state is not None:
                 self.bridge_online = state
             return None
+        if rest == "bridge/devices":
+            listed = parse_bridge_devices(payload)
+            if listed is not None:
+                self.bridge_devices = listed
+                for name, info in listed.items():
+                    if info.type == "Router" and name not in self.devices:
+                        self.devices[name] = Device(available=self._availability.get(name))
+            return None
         if rest.endswith("/availability"):
             name = rest[: -len("/availability")]
+            state = parse_availability(payload)
             dev = self.devices.get(name)
             if dev is None:
+                # Retained availability arrives before `bridge/devices` says which
+                # devices are routers: keep it until then.
+                if state is not None and not name.startswith("bridge/"):
+                    self._availability[name] = state
                 return None
-            state = parse_availability(payload)
             if state is not None:
                 dev.available = state
             return name
@@ -135,6 +154,16 @@ class DeviceStore:
 
     def get(self, name: str | None) -> Device | None:
         return self.devices.get(name) if name else None
+
+    def routers(self) -> list[str]:
+        """Zigbee2MQTT's routers, by friendly name, in its own order."""
+        return [n for n, info in self.bridge_devices.items() if info.type == "Router"]
+
+    def request_topic(self, what: str) -> str:
+        return f"{self.base}/bridge/request/{what}"
+
+    def response_topic(self, what: str) -> str:
+        return f"{self.base}/bridge/response/{what}"
 
     def set_topic(self, name: str) -> str:
         return f"{self.base}/{name}/set"

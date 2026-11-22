@@ -119,6 +119,14 @@ class TrvOptions:
 
 
 @dataclass(frozen=True, slots=True)
+class MonitoringOptions:
+    """When the devices view and the alerts say a device needs attention."""
+
+    low_battery_pct: float = 20.0  # battery at or below this is low
+    weak_signal_lqi: float = 40.0  # Zigbee2MQTT LQI below this is a weak signal
+
+
+@dataclass(frozen=True, slots=True)
 class SiteConfig:
     house: HouseConfig
     devices: dict[str, RoomDevices]
@@ -129,6 +137,7 @@ class SiteConfig:
     mqtt: MqttConfig | None = None
     shelly: ShellyConfig | None = None
     trv: TrvOptions = field(default_factory=TrvOptions)
+    monitoring: MonitoringOptions = field(default_factory=MonitoringOptions)
     data_dir: str = "./data"
     # Battery sensors report on change; between reports their last value stands for up
     # to this long (their maximum reporting interval) before it counts as stale.
@@ -400,6 +409,16 @@ def _trv(ctx: _Ctx, raw: dict) -> TrvOptions:
             raw, "external_keepalive_min", d.external_keepalive_s / 60, 5, 60, p
         )
         * 60,
+    )
+
+
+def _monitoring(ctx: _Ctx, raw: dict) -> MonitoringOptions:
+    p = "monitoring."
+    ctx.unknown(raw, {"low_battery_pct", "weak_signal_lqi"}, p)
+    d = MonitoringOptions()
+    return MonitoringOptions(
+        low_battery_pct=ctx.number(raw, "low_battery_pct", d.low_battery_pct, 5, 50, p),
+        weak_signal_lqi=ctx.number(raw, "weak_signal_lqi", d.weak_signal_lqi, 5, 150, p),
     )
 
 
@@ -1008,6 +1027,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "balancing",
             "household",
             "learning",
+            "monitoring",
         },
         "",
     )
@@ -1062,6 +1082,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     mqtt = _mqtt(ctx, ctx.section(data, "mqtt"))
     shelly = _shelly(ctx, ctx.section(data, "shelly"))
     trv = _trv(ctx, ctx.section(data, "trv"))
+    monitoring = _monitoring(ctx, ctx.section(data, "monitoring"))
     outdoor = ctx.get(house, "outdoor_sensor", str, None, "house.") or None
     if any(d.trv or d.sensor or d.window for d in devices.values()) or outdoor:
         if mqtt is None:
@@ -1087,6 +1108,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         mqtt=mqtt,
         shelly=shelly,
         trv=trv,
+        monitoring=monitoring,
         data_dir=data_dir,
         sensor_max_silence_s=silence_min * 60,
         history_days=history_days,
