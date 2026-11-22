@@ -20,9 +20,10 @@ CFG = HouseConfig(
         RoomConfig("dining", "Dining room"),
         RoomConfig("kitchen", "Kitchen", heat_source=HeatSource.CONTINUOUS),
         RoomConfig("stairs", "Stairs", role=RoomRole.PASSIVE),
+        RoomConfig("utility", "Utility room", role=RoomRole.UNHEATED),
     )
 )
-ROOMS = ("bed", "dining", "kitchen", "stairs")
+ROOMS = ("bed", "dining", "kitchen", "stairs", "utility")
 
 # Temperatures by minute: room and TRV readings for every room.
 Temps = Callable[[int], dict[str, tuple[float, float]]]
@@ -106,6 +107,20 @@ def test_stairs_rise_means_heat_is_arriving():
 
     _, hist = run(stairs, 60)
     assert not any(no_heat(a) for a in hist)
+
+
+def test_unheated_room_warming_is_not_heat_reaching_the_radiators():
+    # The boiler sits in the utility room: its casing warms the room even when no hot
+    # water reaches a radiator, so the room must not mask an out-of-oil fault.
+    def boiler_casing(m):
+        t = cold(m)
+        t["utility"] = (17.0 + m * 0.05, 17.5)
+        return t
+
+    st, hist = run(boiler_casing, 45)
+    assert no_heat(hist[-1])
+    assert "utility" not in st.rooms  # observed only: no model, no demand
+    assert "utility" not in st.no_heat.passive
 
 
 def test_aga_warming_the_kitchen_is_not_heat_from_the_boiler():

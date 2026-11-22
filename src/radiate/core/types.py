@@ -14,6 +14,9 @@ class RoomRole(StrEnum):
     NORMAL = "normal"
     PASSIVE = "passive"  # radiator not controllable (e.g. unvalved bypass), observed only
     INTERNAL_SENSOR_ONLY = "internal_sensor_only"  # no room sensor, use TRV internal reading
+    # No radiator at all, only a room sensor: recorded, never controlled or learned, and
+    # never evidence of heat reaching the radiators (a boiler casing can warm it).
+    UNHEATED = "unheated"
 
 
 class HeatSource(StrEnum):
@@ -53,7 +56,8 @@ class RoomConfig:
 
     @property
     def controllable(self) -> bool:
-        return self.role is not RoomRole.PASSIVE
+        """Has a TRV Radiate drives: a schedule, a room model and demand."""
+        return self.role in (RoomRole.NORMAL, RoomRole.INTERNAL_SENSOR_ONLY)
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,9 +6,10 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import pytest
+import yaml
 from aiohttp.test_utils import TestServer
 
-from radiate.config import load_site
+from radiate.config import load_site, parse_site
 from radiate.core import Mode
 from radiate.core.types import Actions, BoilerState, ValveAction
 from radiate.drivers.live import LiveDriver
@@ -99,6 +100,22 @@ async def test_snapshot_maps_devices_and_schedule():
     clock.t += 3700
     snap = await drv.snapshot(Mode.AUTO, {}, False, set())
     assert snap.rooms["bedroom_1"].temperature_age_s == pytest.approx(3700)
+
+
+async def test_unheated_room_records_its_sensor_and_nothing_else():
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["rooms"].append({"id": "utility", "name": "Utility room", "role": "unheated"})
+    data["rooms"][-1]["sensor"] = "temp_utility"
+    s = parse_site(data, env=ENV)
+    drv = LiveDriver(s, Bus().publish, clock=Clock(), wall=lambda: WALL)
+    feed(drv)
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    utility = snap.rooms["utility"]
+    assert utility.temperature == 17.0 and utility.humidity == 55
+    assert utility.trv_temperature is None and not utility.trv_available
+    assert utility.next_setpoint is None
+    assert "utility" not in drv.writers and "utility" not in drv.schedules()
+    assert drv.next_change_s("utility") is None
 
 
 def test_next_change_for_override_expiry():

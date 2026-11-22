@@ -97,3 +97,6 @@ rooms:
     name: Stairs
     role: passive             # unvalved bypass radiator, observed only
     sensor: temp_stairs
+  # A room with a sensor and no radiator, such as a landing or a utility room, is
+  # recorded and shown only. It is never controlled and never counts as heat arriving.
+  # - {id: landing, name: Landing, role: unheated, sensor: temp_landing}

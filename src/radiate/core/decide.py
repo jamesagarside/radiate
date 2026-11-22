@@ -216,9 +216,13 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     # --- 1-4: per-room sensing, disturbances, learning, demand -------------------------
     for rc in cfg.rooms:
         if not rc.controllable:
+            # A bypass radiator's room warming shows heat arriving. An unheated room is
+            # observed only: something other than the radiators, such as the boiler's
+            # own casing, can warm it, so it would hide an out-of-oil fault.
             inp = snap.rooms.get(rc.id)
             if (
-                inp is not None
+                rc.role is RoomRole.PASSIVE
+                and inp is not None
                 and inp.temperature is not None
                 and inp.temperature_age_s <= ROOM_SENSOR_STALE_S
             ):

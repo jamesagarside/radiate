@@ -450,7 +450,7 @@ def _rooms(
         try:
             role = RoomRole(ctx.get(item, "role", str, "normal", p))
         except ValueError:
-            ctx.err(f"{p}role", "must be normal, passive or internal_sensor_only")
+            ctx.err(f"{p}role", "must be normal, passive, internal_sensor_only or unheated")
             role = RoomRole.NORMAL
         heat_source = None
         if item.get("heat_source") is not None:
@@ -458,13 +458,22 @@ def _rooms(
                 heat_source = HeatSource(ctx.get(item, "heat_source", str, "", p))
             except ValueError:
                 ctx.err(f"{p}heat_source", "must be episodic or continuous")
+            if role is RoomRole.UNHEATED:
+                ctx.err(
+                    f"{p}heat_source",
+                    "an unheated room has no room model, so it has no heat source",
+                )
         trv = ctx.get(item, "trv", str, None, p) or None
         sensor = ctx.get(item, "sensor", str, None, p) or None
         window = ctx.get(item, "window", str, None, p) or None
         sched: str | None = ctx.get(item, "schedule", str, "default", p)
-        if role is not RoomRole.PASSIVE:
+        if role is RoomRole.UNHEATED:
+            if item.get("schedule") is not None:
+                ctx.err(f"{p}schedule", "an unheated room has no radiator, so it has no schedule")
+            sched = None
+        elif role is not RoomRole.PASSIVE:
             own[rid] = sched if sched in schedules else None
-        if rid in household_rooms:
+        if rid in household_rooms and role is not RoomRole.UNHEATED:
             if item.get("schedule") is not None:
                 ctx.err(
                     f"{p}schedule",
@@ -474,7 +483,11 @@ def _rooms(
 
         if role is RoomRole.NORMAL:
             if trv is None:
-                ctx.err(f"{p}trv", "required for a normal room (use role: passive if unvalved)")
+                ctx.err(
+                    f"{p}trv",
+                    "required for a normal room (use role: passive if unvalved, "
+                    "or role: unheated if it has no radiator)",
+                )
             if sensor is None:
                 ctx.err(f"{p}sensor", "required for a normal room (or role: internal_sensor_only)")
         elif role is RoomRole.INTERNAL_SENSOR_ONLY:
@@ -482,6 +495,11 @@ def _rooms(
                 ctx.err(f"{p}trv", "required for an internal_sensor_only room")
             if sensor is not None:
                 ctx.err(f"{p}sensor", "an internal_sensor_only room has no room sensor")
+        elif role is RoomRole.UNHEATED:
+            if trv is not None:
+                ctx.err(f"{p}trv", "an unheated room has no radiator, so it has no TRV")
+            if sensor is None:
+                ctx.err(f"{p}sensor", "required for an unheated room")
         elif trv is not None:
             ctx.err(f"{p}trv", "a passive room has no controllable valve")
         if role is not RoomRole.PASSIVE and sched is not None and sched not in schedules:
@@ -495,8 +513,9 @@ def _rooms(
 
         if "actuate" in item and item["actuate"] is not None:
             explicit_actuation[rid] = ctx.get(item, "actuate", bool, False, p)
-        # Humidity drives shower detection (spec 4.6); opt in per room.
-        humidity = ctx.get(item, "humidity", bool, False, p)
+        # Humidity drives shower detection (spec 4.6); opt in per room. An unheated room
+        # has no shower detection, so its humidity is recorded unless turned off.
+        humidity = ctx.get(item, "humidity", bool, role is RoomRole.UNHEATED, p)
         bias = ctx.number(item, "trv_bias_k", DEFAULT_TRV_BIAS_K, -5, 5, p)
 
         rooms.append(
@@ -764,6 +783,9 @@ def _room_link(
         return None
     if room.role is RoomRole.PASSIVE:
         ctx.err(at, "a passive room has no valve, so it has no schedule")
+        return None
+    if room.role is RoomRole.UNHEATED:
+        ctx.err(at, "an unheated room has no radiator, so it has no schedule")
         return None
     if not isinstance(item, dict):
         ctx.err(at, "expected a mapping with use and optionally kind, people and temperature")
