@@ -475,6 +475,25 @@ How Radiate learns each room's model (spec sections 4.3 and 4.6).
 | `memory_days` | 730 | How long a room's model remembers, in days of learning, 1 to 3650. A long memory keeps one odd week from moving the model. Radiate also watches each model and re-learns it when a real change shows, such as a radiator bled or replaced, so a long memory doesn't stop it following the house |
 | `learn_on_trv_fallback` | `false` | While a room's own sensor is stale, Radiate uses its TRV reading plus `trv_bias_k`. With `false` it doesn't learn from that reading, because the TRV sits beside the radiator. Set `true` to keep learning |
 
+### suggestions
+
+When the web UI's Suggestions view (`GET /api/v1/suggestions`) gives advice about a room or a device. Every limit is a setting; the defaults are a starting point, not facts about your house.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `min_confidence` | 0.6 | A room's model must be at least this certain, for its heating gain and its loss rate, before Radiate judges the room, 0.3 to 0.95 |
+| `min_learning_h` | 48 | Hours of learning a room needs before Radiate judges it, 6 to 2000. One hour is 60 learning updates, so time with learning paused doesn't count |
+| `min_rooms` | 3 | Rooms with enough learning (or enough measured arrivals) before rooms are compared with each other, 2 to 20 |
+| `heat_loss_ratio` | 1.6 | A room whose loss rate is at least this many times the house's typical (median) loss rate is said to lose heat quickly, 1.1 to 5 |
+| `compare_delta_k` | 15 | The difference between inside and outside, in °C, used to put a loss rate into words ("cools by about 1.7° an hour"), 5 to 30 |
+| `design_outdoor_c` | -2 | The coldest outdoor temperature the heating should keep up with. A radiator that the model says can't hold the room's warmest setpoint down to this temperature may be too small, -25 to 10 |
+| `mild_outdoor_c` | 5 | A radiator that falls short even above this outdoor temperature is marked to act on rather than to consider, -10 to 15, above `design_outdoor_c` |
+| `slow_warm_ratio` | 2 | A radiator whose arrival lag is at least this many times the house's typical lag is slow to warm, 1.2 to 5 |
+| `slow_warm_extra_min` | 10 | and at least this many minutes longer than the typical lag, 0 to 60 |
+| `min_lag_samples` | 5 | Measured arrivals a radiator needs before its lag is judged, 3 to 15 |
+
+Rooms measured only by their TRV (`internal_sensor_only`) and rooms with a `continuous` heat source are never judged from their model. Weak Zigbee links use `monitoring.weak_signal_lqi`.
+
 ### balancing
 
 A top-level key, default `true`. Set `balancing: false` to open every heating valve fully instead of sharing flow between them. The boiler guards, optimum start and learning still run. It exists to compare against balancing, for example in the simulator.
