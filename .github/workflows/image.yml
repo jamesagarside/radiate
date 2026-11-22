@@ -1,0 +1,85 @@
+name: Image
+
+# Builds the standalone server image (the Dockerfile at the root) for amd64 and
+# arm64 and publishes it to ghcr.io/jamesagarside/radiate.
+#
+# - main: tags `main` and `sha-<12 hex>`.
+# - v* tags: the version, for example `0.2.0` and `0.2`.
+# - Pull requests from this repository: `pr-<number>` and `sha-<12 hex>`, so a
+#   change can be tried on a real install before it merges. Pull requests from
+#   forks only build, without pushing.
+#
+# Pin a deployment to the digest, not a tag.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  image:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+      # sha-<12 hex> of the commit on the branch, not of the pull request's merge commit.
+      DOCKER_METADATA_SHORT_SHA_LENGTH: 12
+      DOCKER_METADATA_PR_HEAD_SHA: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=Radiate
+            org.opencontainers.image.licenses=Elastic-2.0
+      - if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=min
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - if: env.PUSH == 'true'
+        run: |
+          {
+            echo "### Published"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo "digest: ${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

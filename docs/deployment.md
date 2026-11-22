@@ -5,7 +5,7 @@ This page covers every way to run Radiate today. Radiate is pre-alpha: the devic
 | Way to run | For | Status |
 |---|---|---|
 | [From source](#from-source-with-uv) | Development, trying the demo | Used day to day by contributors |
-| [Standalone Docker](#standalone-docker) | Any Linux host without Home Assistant | Image builds locally; not published to a registry |
+| [Standalone Docker](#standalone-docker) | Any Linux host without Home Assistant | Image published to `ghcr.io/jamesagarside/radiate` for amd64 and arm64 |
 | [Raspberry Pi](#raspberry-pi) | A small dedicated box | Not tested on a Pi yet |
 | [Home Assistant App](#home-assistant-app) | Home Assistant OS and Supervised installs | Demo mode tested; real devices untested |
 | [HACS integration](#hacs-integration) | Entities and services in Home Assistant, for any of the above | Tested with the Home Assistant test harness |
@@ -66,7 +66,25 @@ To compare Radiate with plain smart TRVs in the simulator, run `.venv/bin/radiat
 
 ## Standalone Docker
 
-There is no published image yet, so build it from the repository root:
+The `Image` workflow (`.github/workflows/image.yml`) publishes the image to `ghcr.io/jamesagarside/radiate` for `linux/amd64` and `linux/arm64`:
+
+| Tag | Built from |
+|---|---|
+| `main` | The latest commit on `main` |
+| `sha-<12 hex>` | That commit, on `main` or on a pull request branch in this repository |
+| `0.2.0`, `0.2` | A release tag |
+| `pr-<number>` | The latest commit on that pull request |
+
+Pull it and tag it as `radiate` to use the commands below unchanged:
+
+```bash
+docker pull ghcr.io/jamesagarside/radiate:main
+docker tag ghcr.io/jamesagarside/radiate:main radiate
+```
+
+For a long-running install, pin the digest rather than a tag, for example `ghcr.io/jamesagarside/radiate:sha-0123456789ab@sha256:...`. `docker buildx imagetools inspect` prints it.
+
+To build it yourself instead, from the repository root:
 
 ```bash
 docker build -t radiate .
@@ -353,7 +371,7 @@ The command replaces each room's model, arrival lags and lockshield cap with the
 ### Upgrades
 
 - From source: `git pull`, then run the `uv pip install` command again.
-- Docker: `git pull`, `docker build -t radiate .`, then remove and recreate the container with the same volume.
+- Docker: pull the new image (or `git pull` and `docker build -t radiate .`), then remove and recreate the container with the same volume.
 - Home Assistant App: the App version does not change with each commit yet, so Home Assistant won't offer updates. Select **Rebuild** on the App page to build it again from `main`.
 - HACS integration: update it in HACS and restart Home Assistant.
 
