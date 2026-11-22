@@ -11,6 +11,7 @@ import { normaliseTime } from "./household.js";
 import { createSetup } from "./setup.js";
 import { weekView } from "./week.js";
 import { createDevices } from "./devices.js";
+import { createSuggestions } from "./suggestions.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -1040,39 +1041,81 @@ function renderDeviceCount(details) {
   const tab = document.querySelector('.view-tab[data-view="devices"]');
   if (n) tab.setAttribute("aria-label", `Devices, ${n} ${n === 1 ? "needs" : "need"} attention`);
   else tab.removeAttribute("aria-label");
-  $("alerts-devices").hidden = !n || $("views").hidden;
+  $("alerts-devices").hidden = !n || devicesOffered !== true;
 }
+
+// Suggestions view (suggestions.js): advice from what Radiate has learned, at
+// #suggestions. Its tab shows once the server answers `GET suggestions`, with a count
+// of the suggestions to act on.
+const suggestions = createSuggestions({
+  transport,
+  isAuthError: (err) => err instanceof AuthError,
+  onAuth: () => askForToken(),
+  onCount: renderSuggestionCount,
+});
+let suggestionsOffered = null;
+
+function renderSuggestionCount(n) {
+  const count = $("suggestions-count");
+  count.hidden = !n;
+  count.textContent = String(n);
+  const tab = document.querySelector('.view-tab[data-view="suggestions"]');
+  if (n) tab.setAttribute("aria-label", `Suggestions, ${n} to act on`);
+  else tab.removeAttribute("aria-label");
+}
+
+// Each view besides the house: its element, whether the server offers it, and its module.
+const VIEWS = {
+  devices: { offered: () => devicesOffered === true, module: devices },
+  suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
+};
 
 function route(fromUser) {
   if (document.body.dataset.setup === "open") return;
-  const onDevices = location.hash === "#devices" && devicesOffered === true;
+  const name = location.hash.slice(1);
+  const current = VIEWS[name]?.offered() ? name : "house";
   for (const tab of document.querySelectorAll(".view-tab")) {
-    if ((tab.dataset.view === "devices") === onDevices) tab.setAttribute("aria-current", "page");
+    if (tab.dataset.view === current) tab.setAttribute("aria-current", "page");
     else tab.removeAttribute("aria-current");
   }
-  document.querySelector("main").hidden = onDevices;
-  $("devices").hidden = !onDevices;
-  document.body.dataset.view = onDevices ? "devices" : "house";
-  if (onDevices) devices.show();
-  else devices.hide();
+  document.querySelector("main").hidden = current !== "house";
+  for (const [id, v] of Object.entries(VIEWS)) {
+    $(id).hidden = id !== current;
+    if (id === current) v.module.show();
+    else v.module.hide();
+  }
+  document.body.dataset.view = current;
   if (fromUser) {
     window.scrollTo(0, 0);
     // Keyboard and screen reader users land on the new view's heading.
-    if (onDevices) $("devices-h").focus();
+    if (current !== "house") $(`${current}-h`).focus();
   }
 }
 window.addEventListener("hashchange", () => route(true));
 
-async function offerDevices() {
-  if (devicesOffered === true) return;
-  devicesOffered = await devices.available();
-  $("views").hidden = devicesOffered !== true;
+// The tabs show once the server offers at least one view besides the house.
+function renderTabs() {
+  const offered = Object.entries(VIEWS).filter(([, v]) => v.offered());
+  for (const [id, v] of Object.entries(VIEWS)) {
+    document.querySelector(`.view-tab[data-view="${id}"]`).hidden = !v.offered();
+  }
+  $("views").hidden = !offered.length;
+}
+
+async function offerViews() {
+  const [d, s] = await Promise.all([
+    devicesOffered === true ? true : devices.available(),
+    suggestionsOffered === true ? true : suggestions.available(),
+  ]);
+  devicesOffered = d;
+  suggestionsOffered = s;
+  renderTabs();
   renderDeviceCount(last?.alert_details);
   route(false);
 }
 
 async function start() {
-  offerDevices();
+  offerViews();
   try {
     house = await transport.house();
     renderSetupEntry();

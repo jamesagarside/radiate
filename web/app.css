@@ -589,13 +589,46 @@ body[data-auth="needed"] .devices-view { display: none; }
 .tree-lqi { margin-left: 8px; color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
 .tree-lqi[data-weak="true"] { color: var(--warn); font-weight: 600; }
 
+/* Suggestions view: the same frame as the Devices view. Advice reads as text, so cards
+   are wider and the evidence, what to do and the confidence each get their own line. */
+.suggestions-view { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 20px; }
+body[data-auth="needed"] .suggestions-view { display: none; }
+.suggestion-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+.suggestion-list:empty { display: none; }
+.suggestion { padding: 14px 16px; display: grid; gap: 10px; align-content: start; min-width: 0; font-size: 0.9rem; }
+.suggestion[data-severity="act"] { border-left: 3px solid var(--warn); padding-left: 14px; }
+.suggestion header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.suggestion h3 { margin: 0; font-size: 0.98rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.suggestion .badge { margin-top: 1px; }
+.badge[data-kind="act"] { background: var(--warn-soft); color: var(--warn); }
+.sg-do { display: grid; gap: 2px; }
+.sg-do h4 { margin: 0; font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+.sg-evidence, .sg-action { margin: 0; font-variant-numeric: tabular-nums; }
+.sg-basis { margin: 0; font-size: 0.78rem; color: var(--muted); }
+.suggestions-empty { padding: 14px 16px; display: grid; gap: 4px; font-size: 0.9rem; }
+.suggestions-empty h3 { margin: 0; font-size: 0.98rem; font-weight: 600; color: var(--cool); }
+.suggestions-empty[data-state="clear"] h3 { color: var(--ok); }
+.suggestions-empty p { margin: 0; max-width: 70ch; }
+.learning { padding: 6px 16px; }
+.learning-compare { margin: 8px 0 2px; font-size: 0.84rem; }
+.learning-list { list-style: none; margin: 0; padding: 0; }
+.learning-row { padding: 10px 0; display: grid; gap: 2px; }
+.learning-row + .learning-row { border-top: 1px solid var(--line); }
+.lr-head { display: flex; align-items: center; gap: 10px; }
+.lr-name { font-size: 0.9rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.lr-meter { width: 48px; margin-left: auto; }
+.lr-meter .meter-fill { background: var(--cool); }
+.lr-head .badge { margin-left: auto; }
+.lr-meter:not([hidden]) + .badge { margin-left: 0; }
+.lr-note { margin: 0; font-size: 0.84rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
 @media (hover: hover) and (pointer: fine) {
   .view-tab:hover { color: var(--text); }
 }
 
 /* Stale: the link is down and the last poll failed. Dim, never hide, the last state. */
-main, .banner, .notice, .devices-view { transition: opacity 200ms var(--ease-out); }
-body[data-link="stale"] :is(main, .banner, .notice, .devices-view) { opacity: 0.55; }
+main, .banner, .notice, .devices-view, .suggestions-view { transition: opacity 200ms var(--ease-out); }
+body[data-link="stale"] :is(main, .banner, .notice, .devices-view, .suggestions-view) { opacity: 0.55; }
 body[data-link="stale"] .status { color: var(--warn); }
 
 @media (prefers-reduced-motion: reduce) {
