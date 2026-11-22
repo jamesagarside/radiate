@@ -6,7 +6,8 @@ from pathlib import Path
 import yaml
 
 from radiate.cli import main
-from radiate.config import load_site
+from radiate.config import RoomDevices, load_site
+from radiate.core.types import RoomConfig, RoomRole
 from radiate.export.dashboard import RADIATE_NAMES, build_dashboard, radiate_entity, slug
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -255,6 +256,27 @@ def test_passive_room_has_no_valve_control():
     assert stairs["cards"][1]["heading"] == "Bypass, not controlled"
     assert not any(c.get("entity", "").startswith("climate.") for c in stairs["cards"])
     assert not any("stairs_opening_limit" in c.get("entity", "") for c in stairs["cards"])
+
+
+def test_unheated_room_shows_its_sensor_and_says_it_has_no_radiator():
+    site = load_site(REFERENCE, env=ENV)
+    utility = RoomConfig("utility", "Utility room", role=RoomRole.UNHEATED, has_humidity=True)
+    site = dataclasses.replace(
+        site,
+        house=dataclasses.replace(site.house, rooms=(*site.house.rooms, utility)),
+        devices={**site.devices, "utility": RoomDevices(sensor="temp_utility", schedule=None)},
+    )
+    views = build_dashboard(site)["views"]
+    room = _room(views[0]["sections"], "Utility room")
+    assert room["cards"][0]["icon"] == "mdi:home-thermometer-outline"
+    assert room["cards"][1]["heading"] == "No radiator, temperature recorded only"
+    ids = list(_entities(room))
+    assert "sensor.temp_utility_temperature" in ids and "sensor.temp_utility_humidity" in ids
+    assert not any(e.startswith("climate.") or "opening_limit" in e for e in ids)
+    house = views[0]["sections"][0]
+    assert "sensor.temp_utility_temperature" in list(_entities(house))
+    analysis = list(_entities(_room(views[1]["sections"], "Utility room")))
+    assert "sensor.temp_utility_temperature" in analysis
 
 
 def test_every_entity_id_is_well_formed():

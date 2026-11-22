@@ -709,9 +709,12 @@ def render_yaml(found: Discovery, options: RenderOptions | None = None) -> str:
         out += [
             "",
             *_comment(
-                "Sensors with no TRV. Uncomment a room only if its radiator has no "
-                "controllable valve, such as a bypass radiator left open (role: passive). "
-                "Discover cannot tell an unvalved radiator from a room with no radiator.",
+                "Sensors with no TRV. Discover cannot tell an unvalved radiator from a "
+                "room with no radiator, so check each one before you uncomment it. Keep "
+                "role: passive only if the room's radiator has no controllable valve, "
+                "such as a bypass radiator left open. For a room with no radiator, such as "
+                "a landing or the room the boiler is in, use role: unheated: Radiate "
+                "records its temperature but never counts it as heat arriving.",
                 "  ",
             ),
         ]

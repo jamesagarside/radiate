@@ -143,12 +143,16 @@ def _outdoor_entity(site: SiteConfig) -> str | None:
 def _icon(room: RoomConfig) -> str:
     if room.role is RoomRole.PASSIVE:
         return "mdi:radiator-disabled"
+    if room.role is RoomRole.UNHEATED:
+        return "mdi:home-thermometer-outline"
     return _ICONS.get(room.heat_source, "mdi:radiator")
 
 
 def _note(room: RoomConfig) -> str | None:
     if room.role is RoomRole.PASSIVE:
         return "Bypass, not controlled"
+    if room.role is RoomRole.UNHEATED:
+        return "No radiator, temperature recorded only"
     if room.role is RoomRole.INTERNAL_SENSOR_ONLY:
         return "No room sensor, uses the valve's own reading"
     return _NOTES.get(room.heat_source)

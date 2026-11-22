@@ -17,7 +17,7 @@ from typing import Any
 from radiate.config.away import parse_local
 from radiate.config.site import HA_PERSON
 from radiate.core import DemandMode, Mode
-from radiate.core.types import RoomConfig
+from radiate.core.types import RoomConfig, RoomRole
 
 from .runtime import Runtime
 from .schedules import schedules_view
@@ -162,6 +162,8 @@ def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
         raise RequestError(400, "setpoint must be a number") from err
     if not SETPOINT_MIN_C <= value <= SETPOINT_MAX_C:
         raise RequestError(400, "setpoint out of range 5 to 28")
+    if rc.role is RoomRole.UNHEATED:
+        raise RequestError(400, "an unheated room has no radiator, so it has no setpoint")
     until = body.get("until")
     minutes = body.get("duration_min")
     if until is not None and not isinstance(until, str):

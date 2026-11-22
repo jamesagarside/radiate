@@ -10,9 +10,9 @@ Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the 
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 114 |
+| Done | 82 | 115 |
 | Partial | 26 | 21 |
-| Missing | 37 | 22 |
+| Missing | 37 | 23 |
 
 Gaps closed since the audit: safe mode now hands the boiler to the Shelly watchdog (it kept the heartbeat going, so a Zigbee or MQTT outage left the house without heat), and the boiler guard adopts the relay when Radiate takes it back; boiler lockout and out-of-oil detection; short-cycle detection and adaptation; oil and runtime accounting with the daily Elastic stream and balance score; setpoint overrides that expire and survive restarts; stuck and leaking valve detection; Home Assistant entities and services for accounting, overrides, the fire switch, stuck valves, short-cycling and alerts. Two rows moved from done to partial when simulation showed valves Radiate counted as open staying shut; both are fixed, and relay time with no TRV open is now measured in simulation (0 %, down from 4.2 %). Days Radiate did not see in full are marked partial and get no balance score. Every live tick is now recorded for replay (`radiate replay`), the learner bootstraps from that history, and `radiate discover` drafts the configuration from Zigbee2MQTT. On 20 November 2026 the owner's three behaviour choices went in (spec 0.3): a configurable learning memory, two years by default, with change detection; `eco` and `comfort` demand modes, `eco` by default and changeable at runtime through `/api/v1/settings`; and no learning from the TRV reading while a room's own sensor is stale. The same day the demand mode got an Eco and Comfort control in the web UI and a select in Home Assistant, and each room in `state` gained `reason_code`. The Home Assistant integration then moved to its own Apache-2.0 repository, radiate-ha, so it can pass HACS validation.
 
@@ -27,7 +27,9 @@ Top remaining gaps, most important first:
 
 | Item | Status | Where | Note |
 |---|---|---|---|
-| Rooms with roles `normal`, `passive`, `internal_sensor_only` | done | `core/types.py` `RoomConfig`, `config/site.py` | |
+| Rooms with roles `normal`, `passive`, `internal_sensor_only`, `unheated` | done | `core/types.py` `RoomConfig`, `config/site.py` | |
+| Unheated rooms: sensor and no radiator, recorded and shown only | done | `core/types.py` `RoomRole.UNHEATED`, `config/site.py`, `core/decide.py`, `server/runtime.py`, `server/bridge.py`, `export/dashboard.py`, `web/app.js` | Needs a `sensor`; no `trv`, `schedule` or `heat_source`; humidity recorded by default. Not controllable, so no engine state, demand, frost trip or learning, and never counted as heat arriving in the no-heat check. In `house` and `state` (`setpoint` is null, and the API refuses one), the tick history, the Elastic room stream, the web UI ("No radiator") and the Home Assistant dashboard. `radiate discover` still proposes sensor-only rooms as commented-out `passive`, with a note to use `unheated` for a room with no radiator. Not in the simulator's reference house. Web card not visually checked in a browser |
+| Unheated-room temperatures in the room model | missing | | Open question 5 in spec section 12: for the owner to settle. Needs room adjacency in the configuration |
 | Heat sources `episodic`, `continuous` | done | `core/types.py`, `core/disturbance.py` | |
 | Heat source bound to a binary sensor or schedule | partial | `server/app.py` `/fire` | Manual fire switch via API only; no sensor or schedule binding in the config file |
 | Radiator nominal output (W at ΔT50) | missing | | Not in config; not needed by the current model |
@@ -83,12 +85,12 @@ Top remaining gaps, most important first:
 | 4.6 Gate: settled after setpoint change | done | `core/decide.py` | |
 | 4.6 Gate: shower | done | `core/disturbance.py` | |
 | 4.6 Gate: valve rejected (reconciler failure), stuck or leaking | done | `core/decide.py`, `drivers/live.py` | Settings the TRV rejected reach the core as `RoomInput.trv_rejected` and pause learning while they last and for an hour after (`valve_rejected`), listed per room as `valve.rejected` in `describe()`. Not reported in dry run, where nothing is sent. A stuck (`valve_untrusted`) or leaking (`valve_leaking`) valve also pauses learning |
-| 4.6 Gate: not passive | done | `core/decide.py` | Passive rooms have no engine state |
+| 4.6 Gate: not passive | done | `core/decide.py` | Passive and unheated rooms have no engine state |
 | 4.6 Open fire detection, closing and 4 h hold-off | done | `core/disturbance.py` | Residual threshold 2.0 K/h with confidence ≥ 0.6, and the rise rule needs the radiator off 30 min (tuned in simulation, now in the spec) |
 | 4.6 Range cooker: free `d`, cooking spikes excluded | done | `core/estimator.py`, `core/disturbance.py` | |
 | 4.6 Range cooker "self-heated" after 14 days | missing | | |
 | 4.6 Stairs bypass in the supply factor | done | `core/types.py` `bypass_equivalent` | |
-| 4.6 Stairs rise as a heat-availability check | done | `core/health.py` `NoHeat` | A 0.3 K rise on a passive room counts as heat in the no-heat check |
+| 4.6 Stairs rise as a heat-availability check | done | `core/health.py` `NoHeat` | A 0.3 K rise on a passive room counts as heat in the no-heat check; an unheated room's never does |
 | 4.6 Toilet: TRV reading with bias, 1.0 K hysteresis, never sets the pace | done | `core/decide.py` | The TRV setpoint goes out as `target - bias` (plus the call bias, rounded up), so the TRV opens when the core calls |
 | 4.6 Toilet: bias refinement, confidence capped at 0.5 | partial | `core/decide.py` `new_estimator` | Confidence cap done. Bias refinement deliberately not done: with a cold radiator the observed offset is about 0 K, but the bias also has to cover the warm radiator, and every variant tried in simulation left the toilet short of heat and raised the house comfort deficit ([simulation](simulation.md#internal-sensor-rooms-and-the-trv-bias)) |
 

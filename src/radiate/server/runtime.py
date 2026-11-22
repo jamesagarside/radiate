@@ -823,6 +823,8 @@ class Runtime:
                     reasons_by_room[r.room_id] = r
         for rc in self.cfg.rooms:
             inp = snap.rooms.get(rc.id) if snap else None
+            # An unheated room has no radiator and no schedule: temperature only.
+            scheduled = inp if rc.role is not RoomRole.UNHEATED else None
             item = {
                 "id": rc.id,
                 "name": rc.name,
@@ -832,10 +834,10 @@ class Runtime:
                 if inp and rc.role is not RoomRole.INTERNAL_SENSOR_ONLY
                 else None,
                 "humidity": inp.humidity if inp else None,
-                "setpoint": inp.setpoint if inp else None,
-                "next_setpoint": inp.next_setpoint if inp else None,
-                "next_in_min": round(inp.next_setpoint_in_s / 60)
-                if inp and inp.next_setpoint_in_s is not None
+                "setpoint": scheduled.setpoint if scheduled else None,
+                "next_setpoint": scheduled.next_setpoint if scheduled else None,
+                "next_in_min": round(scheduled.next_setpoint_in_s / 60)
+                if scheduled and scheduled.next_setpoint_in_s is not None
                 else None,
                 "override": self.override_view(rc.id, now),
                 # The manual fire flag set through the API, as opposed to `fire` (detected).

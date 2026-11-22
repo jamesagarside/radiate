@@ -153,6 +153,7 @@ const pooled = (r) => r.reason_code === "demand.pooled";
 
 function badgeFor(r) {
   if (r.role === "passive") return ["Bypass, not controlled", ""];
+  if (r.role === "unheated") return ["No radiator", ""];
   if (r.fire) return ["Fire lit", "fire"];
   if (r.preheating) return ["Preheating", "preheat"];
   if (pooled(r)) return ["Waiting for a burn", "pooled"];
@@ -183,6 +184,7 @@ function ensureCard(r) {
   const node = $("room-tpl").content.firstElementChild.cloneNode(true);
   node.querySelector(".name").textContent = r.name;
   node.dataset.passive = String(r.role === "passive");
+  node.dataset.unheated = String(r.role === "unheated");
   const fire = node.querySelector(".fire");
   if (r.heat_source === "episodic") {
     fire.hidden = false;
@@ -297,9 +299,12 @@ function holdText(o) {
   return last ? `Held until ${clock((last.minute_of_day + o.expires_in_min) % 1440)}` : "Held until the next change";
 }
 
+// Roles Radiate observes but never controls: a bypass radiator, a room with no radiator.
+const OBSERVED_ONLY = new Set(["passive", "unheated"]);
+
 function controllable(r) {
   const known = house?.rooms?.find((h) => h.id === r.id);
-  return known ? known.controllable : r.role !== "passive";
+  return known ? known.controllable : !OBSERVED_ONLY.has(r.role);
 }
 
 function renderRoom(r) {
@@ -354,6 +359,7 @@ function renderRoom(r) {
   if (!r.calling && r.topup && r.extend === true) reason = "Topped up now so it does not need a second burn soon.";
   if (!r.calling && r.topup && r.extend === false) reason = "Opened so the burner's heat has somewhere to go.";
   if (!reason && r.role === "passive") reason = "Manual valve, always open: counted as the system's open path.";
+  if (!reason && r.role === "unheated") reason = "No radiator here. Temperature recorded, not controlled.";
   if (!reason && r.heat_source === "continuous") reason = "Range cooker heat is learned as a steady background.";
   if (!reason && r.next_setpoint != null && r.next_in_min != null && last) {
     const at = (last.minute_of_day + r.next_in_min) % 1440;
@@ -684,7 +690,7 @@ function render(s) {
 // say what the heat is for, so a long burn with every room comfortable makes sense.
 function statusLine(s, minBurn) {
   const b = s.boiler;
-  const active = s.rooms.filter((r) => r.role !== "passive");
+  const active = s.rooms.filter((r) => !OBSERVED_ONLY.has(r.role));
   const calling = active.filter((r) => r.calling).map((r) => r.name);
   const extending = active.filter((r) => !r.calling && r.topup && r.extend === true).map((r) => r.name);
   const sinks = active.filter((r) => !r.calling && r.topup && r.extend !== true).map((r) => r.name);

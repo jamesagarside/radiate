@@ -226,3 +226,62 @@ def test_learning_memory():
         parse_site(minimal(learning={"memory_days": 0.5, "forget": True}))
     assert "learning.memory_days: must be 1 to 3650" in err.value.problems
     assert "learning.forget: unknown key" in err.value.problems
+
+
+# --- unheated rooms --------------------------------------------------------------------
+
+
+def _problems(data: dict) -> list[str]:
+    with pytest.raises(ConfigError) as exc:
+        parse_site(data)
+    return exc.value.problems
+
+
+def test_unheated_room_needs_only_a_sensor():
+    data = minimal()
+    data["rooms"].append({"id": "landing", "name": "Landing", "role": "unheated", "sensor": "t_l"})
+    site = parse_site(data)
+    room = site.house.room("landing")
+    assert room.role is RoomRole.UNHEATED
+    assert not room.controllable and not room.actuation_enabled
+    assert room.has_humidity  # recorded by default: nothing else uses it
+    assert site.devices["landing"].sensor == "t_l"
+    assert site.devices["landing"].schedule is None
+    assert "landing" not in site.room_schedules  # never needs a schedule
+
+
+def test_unheated_room_does_not_need_the_default_schedule():
+    data = minimal(schedules={"other": "00:00/16"})
+    data["rooms"] = [
+        {"id": "a", "trv": "trv_a", "sensor": "t_a", "schedule": "other"},
+        {"id": "loft", "role": "unheated", "sensor": "t_l"},
+    ]
+    assert parse_site(data).house.room("loft").role is RoomRole.UNHEATED
+
+
+def test_unheated_room_humidity_can_be_turned_off():
+    data = minimal()
+    data["rooms"].append({"id": "loft", "role": "unheated", "sensor": "t_l", "humidity": False})
+    assert parse_site(data).house.room("loft").has_humidity is False
+
+
+def test_unheated_room_problems():
+    data = minimal()
+    data["rooms"] += [
+        {"id": "u1", "role": "unheated"},
+        {"id": "u2", "role": "unheated", "sensor": "t_u2", "trv": "trv_u2"},
+        {"id": "u3", "role": "unheated", "sensor": "t_u3", "schedule": "default"},
+        {"id": "u4", "role": "unheated", "sensor": "t_u4", "heat_source": "continuous"},
+        {"id": "u5", "role": "unheated", "sensor": "t_u5", "actuate": True},
+        {"id": "u6", "role": "heated", "trv": "trv_u6", "sensor": "t_u6"},
+    ]
+    problems = _problems(data)
+    for expected in (
+        "rooms[3].sensor: required for an unheated room",
+        "rooms[4].trv: an unheated room has no radiator, so it has no TRV",
+        "rooms[5].schedule: an unheated room has no radiator, so it has no schedule",
+        "rooms[6].heat_source: an unheated room has no room model, so it has no heat source",
+        "rooms: u5: actuate is true but the room has no trv",
+        "rooms[8].role: must be normal, passive, internal_sensor_only or unheated",
+    ):
+        assert expected in problems, expected

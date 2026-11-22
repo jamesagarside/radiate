@@ -63,6 +63,24 @@ def test_cold_house_fires_after_lead_and_never_writes_passive_room():
     assert "stairs" not in st.rooms
 
 
+def test_unheated_room_is_observed_only():
+    # A boot room with no radiator, near freezing: Radiate cannot heat it, so it neither
+    # calls nor trips frost protection, and it gets no valve, model or learning.
+    cfg = dataclasses.replace(
+        CFG, rooms=(*CFG.rooms, RoomConfig("boot", "Boot room", role=RoomRole.UNHEATED))
+    )
+    st = EngineState.new(cfg)
+    relay = False
+    temps = {"bed": 20.5, "lounge": 21.0, "loo": 19.0, "stairs": 20.0, "boot": 3.0}
+    for m in range(10):
+        acts = decide(cfg, snap(m * 60.0, temps, relay=relay), st)
+        relay = acts.heating_relay
+    assert not acts.heating_relay
+    assert "boot" not in acts.valves
+    assert "boot" not in st.rooms
+    assert not any(r.room_id == "boot" for r in acts.reasons + acts.alerts)
+
+
 def test_warm_house_does_not_fire():
     st = EngineState.new(CFG)
     acts = drive(st, 10, {"bed": 20.5, "lounge": 21.0, "loo": 19.0, "stairs": 20.0})

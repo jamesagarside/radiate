@@ -418,7 +418,7 @@ def _discover(args: argparse.Namespace) -> None:
     heated = len(found.heated_rooms)
     print(
         f"discover: {heated} heated room{'s' if heated != 1 else ''}, "
-        f"{len(found.passive_rooms)} passive candidate(s), {len(found.unplaced)} unplaced "
+        f"{len(found.passive_rooms)} sensor-only room(s), {len(found.unplaced)} unplaced "
         f"device(s), {len(found.warnings)} warning(s)"
         + (f"; wrote {args.out}" if args.out else ""),
         file=sys.stderr,

@@ -236,6 +236,7 @@ def house(household: dict, **room_over) -> dict:
         {"id": "bedroom", "trv": "trv_a", "sensor": "t_a"},
         {"id": "office", "trv": "trv_b", "sensor": "t_b"},
         {"id": "hall", "role": "passive", "sensor": "t_hall"},
+        {"id": "landing", "role": "unheated", "sensor": "t_landing"},
     ]
     rooms[0].update(room_over)
     return {"mqtt": {"host": "broker"}, "rooms": rooms, "household": household}
@@ -309,6 +310,7 @@ def test_household_validation_problems():
                 "bedroom": {"use": "in_use", "kind": "bedroom"},
                 "office": {"use": "sometimes", "kind": "study", "people": ["zed"]},
                 "hall": {"use": "in_use"},
+                "landing": {"use": "in_use"},
                 "attic": {"use": "unused"},
             },
             pets={},
@@ -331,6 +333,7 @@ def test_household_validation_problems():
         "household.rooms.office.use: must be in_use, occasional or unused",
         "household.rooms.office.kind: must be shared, bedroom, office, while_home, all_day",
         "household.rooms.hall: a passive room has no valve, so it has no schedule",
+        "household.rooms.landing: an unheated room has no radiator, so it has no schedule",
         "household.rooms.attic: unknown room 'attic'",
         "rooms[0].schedule: the household section builds this room's schedule",
     ]:
