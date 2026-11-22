@@ -34,6 +34,7 @@ STATIC_FILES = (
     "week.js",
     "household.js",
     "setup.js",
+    "devices.js",
     "demo.js",
     "demo.css",
     "demo-worker.js",

@@ -10,6 +10,7 @@
 import { normaliseTime } from "./household.js";
 import { createSetup } from "./setup.js";
 import { weekView } from "./week.js";
+import { createDevices } from "./devices.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -679,6 +680,7 @@ function render(s) {
   renderPeople(s.away);
   for (const r of s.rooms) renderRoom(r);
   renderAlerts(s.alerts);
+  renderDeviceCount(s.alert_details);
   syncWeek(s);
 
   lastAt = new Date();
@@ -965,14 +967,17 @@ const setup = createSetup({
   transport,
   onOpen() {
     document.querySelector("main").hidden = true;
+    document.body.dataset.setup = "open";
     window.scrollTo(0, 0);
   },
   onClose() {
+    delete document.body.dataset.setup;
     document.querySelector("main").hidden = false;
     if (setupOpener && !setupOpener.closest("[hidden]")) setupOpener.focus();
     setupOpener = null;
   },
   async onSaved(message) {
+    delete document.body.dataset.setup;
     document.querySelector("main").hidden = false;
     const note = $("setup-saved");
     note.textContent = message;
@@ -1016,7 +1021,58 @@ async function openSetup(e) {
 $("setup-start").addEventListener("click", openSetup);
 $("setup-change").addEventListener("click", openSetup);
 
+// Devices view (devices.js): the health of every device, at #devices. The House and
+// Devices tabs show once the server says it reports devices; a server without the
+// route answers 404 and the page stays as it was.
+const devices = createDevices({
+  transport,
+  isAuthError: (err) => err instanceof AuthError,
+  onAuth: () => askForToken(),
+});
+let devicesOffered = null;
+const DEVICE_ALERTS = /^(device\.|driver\.trv_offline$|driver\.shelly$)/;
+
+function renderDeviceCount(details) {
+  const n = (details ?? []).filter((a) => DEVICE_ALERTS.test(a.code)).length;
+  const count = $("devices-count");
+  count.hidden = !n;
+  count.textContent = String(n);
+  const tab = document.querySelector('.view-tab[data-view="devices"]');
+  if (n) tab.setAttribute("aria-label", `Devices, ${n} ${n === 1 ? "needs" : "need"} attention`);
+  else tab.removeAttribute("aria-label");
+  $("alerts-devices").hidden = !n || $("views").hidden;
+}
+
+function route(fromUser) {
+  if (document.body.dataset.setup === "open") return;
+  const onDevices = location.hash === "#devices" && devicesOffered === true;
+  for (const tab of document.querySelectorAll(".view-tab")) {
+    if ((tab.dataset.view === "devices") === onDevices) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  }
+  document.querySelector("main").hidden = onDevices;
+  $("devices").hidden = !onDevices;
+  document.body.dataset.view = onDevices ? "devices" : "house";
+  if (onDevices) devices.show();
+  else devices.hide();
+  if (fromUser) {
+    window.scrollTo(0, 0);
+    // Keyboard and screen reader users land on the new view's heading.
+    if (onDevices) $("devices-h").focus();
+  }
+}
+window.addEventListener("hashchange", () => route(true));
+
+async function offerDevices() {
+  if (devicesOffered === true) return;
+  devicesOffered = await devices.available();
+  $("views").hidden = devicesOffered !== true;
+  renderDeviceCount(last?.alert_details);
+  route(false);
+}
+
 async function start() {
+  offerDevices();
   try {
     house = await transport.house();
     renderSetupEntry();

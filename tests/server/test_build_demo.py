@@ -30,6 +30,7 @@ def test_expected_files(site):
         "static/week.js",
         "static/household.js",
         "static/setup.js",
+        "static/devices.js",
         "static/demo.css",
         "static/demo.js",
         "static/demo-worker.js",
@@ -46,7 +47,15 @@ def test_index_uses_the_demo_transport_and_relative_urls(site):
 
 
 def test_static_assets_have_no_root_relative_urls(site):
-    for name in ("app.js", "week.js", "household.js", "setup.js", "demo.js", "demo-worker.js"):
+    for name in (
+        "app.js",
+        "week.js",
+        "household.js",
+        "setup.js",
+        "devices.js",
+        "demo.js",
+        "demo-worker.js",
+    ):
         text = (site / "static" / name).read_text()
         assert not re.search(r"""["'`]/(?:static|api)/""", text), name
 
