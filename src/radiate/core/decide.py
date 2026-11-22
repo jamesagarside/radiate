@@ -50,6 +50,7 @@ SETPOINT_SETTLE_S = 15 * 60
 DEFAULT_LAG_S = 8 * 60
 LAG_RISE_K = 0.6
 LAG_TIMEOUT_S = 40 * 60
+LAG_SAMPLES = 15  # arrivals kept per room; the arrival lag is their median
 CALL_BIAS_K = 0.6  # TRV setpoint lead while Radiate wants a room heated
 TRV_MIN_C = 4.0  # TRVZB setpoint range, 0.5 K steps
 TRV_MAX_C = 35.0
@@ -375,7 +376,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             if not flowing or now - t0 > LAG_TIMEOUT_S:
                 rs.lag_probe = None
             elif inp.trv_temperature is not None and inp.trv_temperature >= base + LAG_RISE_K:
-                rs.lag_samples = (rs.lag_samples + [now - t0])[-15:]
+                rs.lag_samples = (rs.lag_samples + [now - t0])[-LAG_SAMPLES:]
                 rs.lag_probe = None
 
         # Learning gates (spec 4.6).
