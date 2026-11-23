@@ -108,6 +108,12 @@ SENSOR_FROZEN_TRV_K = 2.0
 # Hard frost from a room sensor needs a second source: its TRV this close (it sits by
 # the radiator, so reads warmer), or another room below the frost threshold.
 HARD_FROST_TRV_K = 2.0
+# Gates that rely on the model's own residual. A sample they hold back still feeds change
+# detection, so a model that is wrong cannot lock itself (spec 4.3).
+RESIDUAL_GATES = frozenset({"unexplained_heat", "cooker_spike"})
+# With burner metering, the circuit counts as hot while the burner has fired within this
+# long: the boiler's own thermostat cycles the burner inside a call (spec 4.1).
+BURNER_HOT_S = 15 * 60
 
 
 @dataclass(slots=True)
@@ -159,6 +165,9 @@ class RoomState:
     # it may start a burn alone and keep it running; cleared when it stops calling. A
     # room without room use has no latch: this is just "below its threshold now".
     solo: bool = False
+    # Where `temperature` came from last tick: "sensor" or "trv". When it changes, the
+    # reading window starts again, so the step between sources is not a rise or a drop.
+    source: str | None = None
 
     @property
     def arrival_lag_s(self) -> float:
@@ -199,6 +208,7 @@ class EngineState:
     pooled_demand_s: float = 0.0  # this tick's pooled demand (spec 5.3)
     # Degree-hours, lift and comfort for the day so far (spec 5.9). Read-only for control.
     savings: SavingsMeter = field(default_factory=SavingsMeter)
+    burner_at: float | None = None  # the heating burner was last seen firing (metered)
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -215,6 +225,50 @@ def new_estimator(rc: RoomConfig, cfg: HouseConfig) -> RoomEstimator:
         INTERNAL_SENSOR_MAX_CONFIDENCE if rc.role is RoomRole.INTERNAL_SENSOR_ONLY else 1.0,
         cfg.learning.memory_days,
     )
+
+
+def reset_learned(
+    cfg: HouseConfig, st: EngineState, room_ids: list[str] | None = None
+) -> list[str]:
+    """Put what each room has learned back to its priors: the room model, the arrival
+    lags and the lockshield histogram. For models learned under conditions that did not
+    hold, such as a dry run that took heat for granted. Every controllable room when
+    `room_ids` is None. Returns the rooms reset; raises KeyError for an unknown room."""
+    ids = list(st.rooms) if room_ids is None else list(room_ids)
+    for rid in ids:
+        if rid not in st.rooms:
+            raise KeyError(rid)
+    for rid in ids:
+        rs = st.rooms[rid]
+        rs.est = new_estimator(cfg.room(rid), cfg)
+        rs.lag_samples = []
+        rs.lag_probe = None
+        rs.lockshield_hist = [0.0] * 101
+    return ids
+
+
+def _source(cfg: RoomConfig, inp: RoomInput) -> str:
+    """Where `_effective_temperature` takes the room's temperature from."""
+    if cfg.role is RoomRole.INTERNAL_SENSOR_ONLY:
+        return "trv"
+    if inp.temperature is not None and inp.temperature_age_s <= ROOM_SENSOR_STALE_S:
+        return "sensor"
+    return "trv"
+
+
+def _radiator_warm_k(cfg: RoomConfig, inp: RoomInput) -> float | None:
+    """The TRV's reading above the room sensor's, when both are fresh: how warm the
+    radiator beside the TRV is. None in an internal-sensor room."""
+    if (
+        cfg.role is not RoomRole.NORMAL
+        or not inp.trv_available
+        or inp.temperature is None
+        or inp.temperature_age_s > ROOM_SENSOR_STALE_S
+        or inp.trv_temperature is None
+        or inp.trv_age_s > TRV_STALE_S
+    ):
+        return None
+    return inp.trv_temperature - inp.temperature
 
 
 def _effective_temperature(cfg: RoomConfig, inp: RoomInput) -> float | None:
@@ -274,12 +328,31 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             st.store_on_since = now
     else:
         st.store_on_since = None
-    recovering = (
-        cfg.store.priority_over_heating
-        and st.store_on_since is not None
-        and now - st.store_on_since < cfg.store.recovery_s
+    if snap.store_burner is not None:
+        # Metered: the store has priority exactly while its burner fires (spec 5.5).
+        recovering = cfg.store.priority_over_heating and snap.store_relay and snap.store_burner
+    else:
+        recovering = (
+            cfg.store.priority_over_heating
+            and st.store_on_since is not None
+            and now - st.store_on_since < cfg.store.recovery_s
+        )
+    # Metered: the circuit is hot once the burner has fired, and stays hot through the
+    # boiler thermostat's short off periods. A relay on with the burner never firing
+    # (the boiler's own timer or thermostat holding it off) brings no heat (spec 4.1).
+    if snap.heating_burner:
+        st.burner_at = now
+    hot = snap.heating_burner is None or (
+        st.burner_at is not None and now - st.burner_at <= BURNER_HOT_S
     )
-    flowing = snap.heating_relay and not recovering
+    relay_flow = snap.heating_relay and not recovering  # the boiler is called for heat
+    flowing = relay_flow and hot  # heat availability: the radiators get hot water
+    # Does the relay (or the burner) show when the radiators get heat? Not when the
+    # relay was not read, and not in a dry run without metering: something else, such
+    # as the boiler's own timer, runs the boiler then (spec 4.6 `heat_unknown`).
+    heat_known = snap.relay_observed and (
+        snap.relay_follows_commands or snap.heating_burner is not None
+    )
     flow_started = flowing and st.flow_since is None
     if flowing:
         if st.flow_since is None:
@@ -336,6 +409,13 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         restored = inp.temperature_restored and temp is not None
         if restored:
             rs.readings = []
+        source = _source(rc, inp)
+        if rs.source is not None and source != rs.source:
+            # The TRV fallback reads about 1.5 K off the room sensor: no slope or drop
+            # across the switch (a restart, a sensor going quiet or coming back).
+            rs.readings = []
+            rs.dist.forget_readings()
+        rs.source = source
         if (
             rc.role is RoomRole.NORMAL
             and temp is not None
@@ -422,7 +502,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         # Stuck valve (spec 7): calling, valve open, TRV heating, flow, but no warming.
         rs.valve.observe(
             min(dt, MAX_TICK_S),
-            flowing=flowing,
+            flowing=relay_flow,
             eligible=rs.calling
             and inp.trv_available
             and inp.trv_heating is True
@@ -435,7 +515,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         # room, and no heat source or disturbance that can warm the TRV on its own.
         rs.valve.observe_shut(
             min(dt, MAX_TICK_S),
-            flowing=flowing,
+            flowing=relay_flow,
             shut=rc.role is RoomRole.NORMAL
             and inp.temperature is not None
             and inp.temperature_age_s <= ROOM_SENSOR_STALE_S
@@ -465,10 +545,13 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             window_open=inp.window_open,
             fire_switch=inp.fire_switch,
             slope_kph=rs.slope,
-            residual_kph=rs.residual,
+            # A model in doubt after a re-learn is not trusted to call heat extra.
+            residual_kph=rs.residual if rs.est.doubt == 0 else None,
             drive=rs.drive,
             closed_for_s=now - rs.closed_since if rs.closed_since is not None else 0.0,
             confidence=rs.est.confidence,
+            heat_known=heat_known,
+            radiator_warm_k=_radiator_warm_k(rc, inp),
         )
         for flag in raised:
             reasons.append(
@@ -488,41 +571,50 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 rs.lag_samples = (rs.lag_samples + [now - t0])[-LAG_SAMPLES:]
                 rs.lag_probe = None
 
-        # Learning gates (spec 4.6).
-        gate = rs.dist.learning_blocked(now)
-        if gate is None:
-            if st.no_heat.active:
-                gate = "no_heat"  # the model would learn that radiators do nothing
-            elif rs.valve.untrusted:
-                gate = "valve_untrusted"
-            elif rs.valve.leaking:
-                gate = "valve_leaking"
-            elif now < rs.rejected_until:
-                gate = "valve_rejected"
-            elif temp is None or rs.slope is None or delta_out is None:
-                gate = "no_data"
-            elif now < rs.fallback_until and not cfg.learning.learn_on_trv_fallback:
-                # The TRV reads its radiator as much as the room (spec 4.6, 7).
-                gate = "sensor_stale"
-            elif not inp.trv_available:
-                gate = "trv_offline"
-            elif recovering:
-                gate = "store_recovery"
-            elif now - rs.setpoint_changed_at < SETPOINT_SETTLE_S:
-                gate = "setpoint_change"
+        # Learning gates (spec 4.6): disturbances first, then whether the data is usable.
+        held = rs.dist.learning_blocked(now)
+        data_gate = None
+        if st.no_heat.active:
+            data_gate = "no_heat"  # the model would learn that radiators do nothing
+        elif not heat_known:
+            data_gate = "heat_unknown"  # no evidence of when the radiators got heat
+        elif rs.valve.untrusted:
+            data_gate = "valve_untrusted"
+        elif rs.valve.leaking:
+            data_gate = "valve_leaking"
+        elif now < rs.rejected_until:
+            data_gate = "valve_rejected"
+        elif temp is None or rs.slope is None or delta_out is None:
+            data_gate = "no_data"
+        elif now < rs.fallback_until and not cfg.learning.learn_on_trv_fallback:
+            # The TRV reads its radiator as much as the room (spec 4.6, 7).
+            data_gate = "sensor_stale"
+        elif not inp.trv_available:
+            data_gate = "trv_offline"
+        elif recovering:
+            data_gate = "store_recovery"
+        elif now - rs.setpoint_changed_at < SETPOINT_SETTLE_S:
+            data_gate = "setpoint_change"
+        gate = held or data_gate
         rs.learning_gate = gate
+        relearns = rs.est.relearns
         if gate is None:
-            relearns = rs.est.relearns
             rs.est.update(rs.slope, rs.drive, delta_out)
-            if rs.est.relearns != relearns:
-                # Change detection (spec 4.3): the model no longer fits; re-learn it.
-                reasons.append(
-                    Reason(
-                        "learning.relearn",
-                        f"{rc.name}: heating no longer matches what was learned, re-learning",
-                        rc.id,
-                    )
+        elif held in RESIDUAL_GATES and data_gate is None:
+            # Held back on the model's own say-so. Change detection still sees it, so
+            # a model that is wrong is re-learned rather than paused for good.
+            rs.est.watch(rs.slope, rs.drive, delta_out)
+        if rs.est.relearns != relearns:
+            # Change detection (spec 4.3): the model no longer fits; re-learn it. What
+            # its residual flagged was the model, not extra heat.
+            rs.dist.forget_residual(now)
+            reasons.append(
+                Reason(
+                    "learning.relearn",
+                    f"{rc.name}: heating no longer matches what was learned, re-learning",
+                    rc.id,
                 )
+            )
 
         # Demand latch.
         hyst = (
@@ -784,6 +876,10 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         below=below,
         minute=snap.minute_of_day,
         nozzle_lph=bcfg.nozzle_lph,
+        relay_observed=snap.relay_observed,
+        live=snap.relay_follows_commands,
+        heating_burner=snap.heating_burner,
+        store_burner=snap.store_burner,
     )
     # Savings (spec 5.9): the interval since the last tick belongs to the day it started
     # in, as in the ledger, so the meter takes it before the day closes. Never feeds back.

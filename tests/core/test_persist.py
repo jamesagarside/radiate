@@ -235,3 +235,38 @@ def test_learning_memory_comes_from_the_configuration():
     restored, _ = load_state(short, dump_state(st, st.last_now), 0.0)
     assert all(rs.est.lam == forgetting(3) for rs in restored.rooms.values())
     assert all(rs.est.lam == forgetting(730) for rs in EngineState.new(cfg).rooms.values())
+
+
+def test_burner_accounting_and_model_doubt_survive_a_restart():
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    t = st.ledger.today
+    t.relay_s, t.firing_s, t.fallback_s, t.metered_s = 6000.0, 4000.0, 0.0, 7000.0
+    t.store_firing_s, t.burner_starts, t.store_starts = 540.0, 7, 1
+    t.burner_s = 4000.0
+    st.rooms["bedroom_1"].est.relearn()
+    st.rooms["bedroom_1"].est.doubt = 17
+    data = json.loads(json.dumps(dump_state(st, 100.0)))
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == []
+    r = restored.ledger.today
+    assert (r.relay_s, r.firing_s, r.fallback_s, r.metered_s) == (6000.0, 4000.0, 0.0, 7000.0)
+    assert (r.store_firing_s, r.burner_starts, r.store_starts) == (540.0, 7, 1)
+    assert restored.rooms["bedroom_1"].est.doubt == 17
+
+
+def test_older_saves_take_burner_time_as_relay_time():
+    # Before metering, `burner_s` was relay time.
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    st.ledger.today.burner_s = 3600.0
+    data = json.loads(json.dumps(dump_state(st, 100.0)))
+    for key in ("relay_s", "firing_s", "fallback_s", "metered_s", "store_firing_s"):
+        del data["accounting"][key]
+    del data["rooms"]["bedroom_1"]["est"]["change"]["doubt"]
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == []
+    r = restored.ledger.today
+    assert r.burner_s == r.relay_s == r.fallback_s == 3600.0 and r.metered_s == 0.0
+    assert restored.ledger.summary(None)["basis"] == "relay"
+    assert restored.rooms["bedroom_1"].est.doubt == 0

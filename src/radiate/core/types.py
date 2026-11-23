@@ -219,6 +219,15 @@ class Snapshot:
     demand_mode: DemandMode | None = None
     # The house has a household, so a savings baseline exists (spec 5.9).
     baseline: bool = False
+    # `heating_relay` and `store_relay` were read from the relay this tick. False: the
+    # driver could not read it and stood in the last command, which in dry run was
+    # never sent. Learning and accounting then ignore the relay (spec 4.6, 5.6).
+    relay_observed: bool = True
+    # The burner firing for each channel, from the relay's power metering (spec 3,
+    # 5.6). None: not metered. With it, heat availability and accounting follow the
+    # burner rather than the relay, which the boiler's own thermostat cycles inside.
+    heating_burner: bool | None = None
+    store_burner: bool | None = None
 
 
 @dataclass(slots=True)

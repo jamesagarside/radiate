@@ -219,3 +219,108 @@ def test_minute_unknown_assumes_the_whole_day_was_seen():
     ledger = Ledger()
     feed(ledger, 60, day=0, start=720)
     assert ledger.summary(None)["partial"] is False
+
+
+# --- burner metering and dry run (spec 5.6) ---------------------------------------------
+
+
+def test_metered_burner_time_replaces_relay_time():
+    # Relay on for 100 min; the burner fires 46 min, rests 4 on the boiler's own
+    # thermostat, then fires 3 short burns of 5 min.
+    ledger = Ledger()
+    relay = lambda m: 10 <= m < 110  # noqa: E731
+    fires = [(12, 58), (62, 67), (75, 80), (90, 95)]
+    burner = lambda m: any(a <= m < b for a, b in fires)  # noqa: E731
+    for m in range(130):
+        ledger.update(
+            m * MIN,
+            0,
+            relay_on=relay(m),
+            firing=relay(m),
+            calling=set(),
+            below={},
+            heating_burner=burner(m),
+        )
+    s = ledger.summary(nozzle_lph=1.64)
+    assert s["basis"] == "burner"
+    assert s["burner_hours"] == pytest.approx(61 / 60, abs=0.01)
+    assert s["relay_hours"] == pytest.approx(100 / 60, abs=0.01)
+    assert s["litres"] == pytest.approx(61 / 60 * 1.64, abs=0.01)
+    assert s["litres_relay"] == pytest.approx(100 / 60 * 1.64, abs=0.01)
+    assert s["starts"] == 1  # relay starts, as the boiler guard counts them
+    assert s["burner"]["metered"] is True
+    assert s["burner"]["heating_starts"] == 4
+    assert s["burner"]["heating_hours"] == pytest.approx(61 / 60, abs=0.01)
+
+
+def test_store_burner_time_is_kept_apart():
+    ledger = Ledger()
+    for m in range(60):
+        ledger.update(
+            m * MIN,
+            0,
+            relay_on=False,
+            firing=False,
+            calling=set(),
+            below={},
+            heating_burner=False,
+            store_burner=5 <= m < 14,
+        )
+    s = ledger.summary(nozzle_lph=1.64)
+    assert s["burner_hours"] == 0.0
+    assert s["burner"]["store_hours"] == pytest.approx(9 / 60, abs=0.01)
+    assert s["burner"]["store_starts"] == 1
+    assert s["burner"]["store_litres"] == pytest.approx(9 / 60 * 1.64, abs=0.01)
+
+
+def test_unmetered_relay_time_is_the_fallback_basis():
+    ledger = Ledger()
+    feed(ledger, 121, relay=lambda m: m < 120)
+    s = ledger.summary(nozzle_lph=2.0)
+    assert s["basis"] == "relay"
+    assert s["burner_hours"] == pytest.approx(2.0) == s["relay_hours"]
+    assert s["litres"] == pytest.approx(4.0) == s["litres_relay"]
+    assert s["burner"]["metered"] is False and s["burner"]["heating_hours"] is None
+
+
+def test_part_metered_day_is_mixed():
+    ledger = Ledger()
+    for m in range(120):
+        ledger.update(
+            m * MIN,
+            0,
+            relay_on=True,
+            firing=True,
+            calling=set(),
+            below={},
+            heating_burner=(m % 2 == 0) if m >= 60 else None,
+        )
+    s = ledger.summary(nozzle_lph=None)
+    assert s["basis"] == "mixed"
+    assert s["burner_hours"] == pytest.approx((60 + 30) / 60, abs=0.02)
+
+
+def test_dry_run_relay_time_is_not_burner_time():
+    # A dry run: Radiate does not run the boiler, so without metering its relay time
+    # says nothing about the burner (the 538 min burn before go-live).
+    ledger = Ledger()
+    two = lambda m: {"a", "b"} if m < 30 else ({"b"} if m < 60 else set())  # noqa: E731
+    feed(ledger, 600, relay=lambda m: m < 538, calling=two, live=False)
+    s = ledger.summary(nozzle_lph=1.64)
+    assert s["burner_hours"] == 0.0 and s["litres"] == 0.0
+    assert s["relay_hours"] == pytest.approx(538 / 60, abs=0.01)
+    assert s["balance"]["starts_measured"] == 0
+
+
+def test_dry_run_metered_burner_time_still_counts():
+    ledger = Ledger()
+    feed(ledger, 60, relay=lambda m: m < 50, live=False, heating_burner=True)
+    assert ledger.summary(None)["burner_hours"] == pytest.approx(59 / 60, abs=0.01)
+
+
+def test_relay_not_read_counts_nothing():
+    # The driver stood in its last command: no relay time, no starts.
+    ledger = Ledger()
+    feed(ledger, 120, relay=lambda m: m % 30 < 20, relay_observed=False)
+    s = ledger.summary(None)
+    assert s["burner_hours"] == 0.0 and s["relay_hours"] == 0.0 and s["starts"] == 0

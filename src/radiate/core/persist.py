@@ -39,6 +39,7 @@ VERSION = 1
 _DIST_TIMES = ("window_until", "shower_until", "fire_since", "fire_holdoff_until", "spike_until")
 _CHANGE_FLOATS = ("gain_eu", "gain_uu", "gain_ee", "level_e", "level_ee")
 _CHANGE_COUNTS = ("since_reset", "relearns")
+_LEDGER_SECONDS = ("relay_s", "firing_s", "fallback_s", "metered_s", "store_firing_s")
 
 
 def _age(t: float | None, now: float) -> float | None:
@@ -66,7 +67,10 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
                 "rejected": e.rejected,
                 "residual_var": e.residual_var,
                 # Change detection (counts of learning updates, not times).
-                "change": {k: getattr(e, k) for k in _CHANGE_FLOATS + _CHANGE_COUNTS},
+                "change": {
+                    **{k: getattr(e, k) for k in _CHANGE_FLOATS + _CHANGE_COUNTS},
+                    "doubt": e.doubt,
+                },
             },
             "lag_samples": list(rs.lag_samples),
             "lockshield_hist": list(rs.lockshield_hist),
@@ -133,6 +137,9 @@ def _dump_ledger(st: EngineState, now: float) -> dict[str, Any]:
         "started": led.started,
         "day": t.day,
         "burner_s": t.burner_s,
+        **{k: getattr(t, k) for k in _LEDGER_SECONDS},
+        "burner_starts": t.burner_starts,
+        "store_starts": t.store_starts,
         "starts": [_age(s, now) for s in t.starts],
         "burns_min": list(t.burns_min),
         "spreads_min": list(t.spreads_min),
@@ -162,6 +169,17 @@ def _load_ledger(st: EngineState, raw: Any, now: float, elapsed: float) -> None:
     burner = raw.get("burner_s")
     if isinstance(burner, (int, float)) and math.isfinite(burner) and burner >= 0:
         t.burner_s = float(burner)
+    if "relay_s" not in raw:
+        # Saved before burner metering, when burner time was relay time.
+        t.relay_s = t.fallback_s = t.burner_s
+    for k in _LEDGER_SECONDS:
+        v = raw.get(k)
+        if isinstance(v, (int, float)) and math.isfinite(v) and v >= 0:
+            setattr(t, k, float(v))
+    for k in ("burner_starts", "store_starts"):
+        v = raw.get(k)
+        if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+            setattr(t, k, v)
     t.starts = _times(raw.get("starts"), now, elapsed)
     t.burns_min = _numbers(raw.get("burns_min"))
     t.spreads_min = _numbers(raw.get("spreads_min"))
@@ -240,6 +258,9 @@ def _load_change(est: RoomEstimator, raw: Any) -> None:
         setattr(est, k, float(v))
     for k, v in zip(_CHANGE_COUNTS, counts, strict=True):
         setattr(est, k, v)
+    doubt = raw.get("doubt")  # added with burner metering; older saves have none
+    if isinstance(doubt, int) and not isinstance(doubt, bool) and doubt >= 0:
+        est.doubt = doubt
 
 
 def first_start_state(cfg: HouseConfig) -> EngineState:
