@@ -34,11 +34,13 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from .types import RoomUse
+
 MAX_TICK_S = 300.0  # as the ledger: longer gaps are not counted
 WARM_TOLERANCE_K = 0.5  # a room in use is warm at or above its setpoint less this
 DAY_S = 86400.0  # shares are of a whole day, so unseen time lowers them
 SAVINGS_VERSION = 1  # shape of the saved meter (`persist`); bump and migrate on change
-COMFORT_USES = frozenset({"in_use", "occasional"})  # RoomUse values comfort counts in
+COMFORT_USES = frozenset({RoomUse.IN_USE, RoomUse.OCCASIONAL})  # comfort counts in these
 
 BASELINE_ID = "timer_and_valves"
 BASELINE_TEXT = (
@@ -59,7 +61,7 @@ class RoomSample:
 
     temperature_c: float | None  # the room's reading; None without one
     setpoint_c: float  # the schedule's or override's setpoint, not the preheat target
-    use: str | None  # RoomUse value: "in_use", "occasional", "setback", or None
+    use: RoomUse | None  # None: no room use, so the room has no baseline and no savings
     baseline_c: float | None  # baseline setpoint now; None while the baseline timer is off
     drive: float  # RoomState.drive
     a_kph: float  # heating gain
@@ -108,6 +110,8 @@ class SavingsMeter:
         if baseline:
             self.baseline_s += dt
         for rid, s in rooms.items():
+            if s.use is None:
+                continue  # no room use, so no baseline: not part of savings
             day = self.rooms.get(rid)
             if day is None:
                 day = self.rooms[rid] = RoomDay()
@@ -345,6 +349,13 @@ def report(
     kept = [by_day[k] for k in sorted(by_day)]
     basis = str(kept[-1].get("basis", "relay")) if kept else "relay"
     weights = dict(weights)
+    latest = kept[-1].get("savings") if kept else None
+    if isinstance(latest, Mapping) and isinstance(latest.get("rooms"), Mapping):
+        # Only rooms the meter measures now: a room with no baseline has no record.
+        measured = {rid: w for rid, w in weights.items() if rid in latest["rooms"]}
+        total = sum(measured.values())
+        if total > 0:
+            weights = {rid: w / total for rid, w in measured.items()}
 
     def why(d: Mapping[str, Any]) -> str | None:
         reason = why_not_eligible(d, basis, names, params)

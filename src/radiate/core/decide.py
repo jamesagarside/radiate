@@ -629,7 +629,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     st.savings.update(
         min(dt, SAVINGS_TICK_S),
         outdoor_c=snap.outdoor,
-        baseline=getattr(snap, "baseline", False),
+        baseline=snap.baseline,
         rooms=_savings_samples(cfg, snap, st),
     )
     if day_summary is not None:
@@ -932,9 +932,8 @@ def _boiler_reason(
 
 
 def _savings_samples(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> dict[str, RoomSample]:
-    """One savings sample per controllable room. `use` and `baseline_c` come from the
-    household through the snapshot (spec 5.8, 5.9); read with defaults so snapshots
-    without them, such as recorded history, give no baseline."""
+    """One savings sample per controllable room, with its room use and baseline
+    setpoint from the snapshot (spec 5.8, 5.9)."""
     out = {}
     for rc in cfg.rooms:
         if not rc.controllable:
@@ -944,8 +943,8 @@ def _savings_samples(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> dict[
         out[rc.id] = RoomSample(
             temperature_c=rs.temperature,
             setpoint_c=inp.setpoint,
-            use=getattr(inp, "use", None),
-            baseline_c=getattr(inp, "baseline_c", None),
+            use=inp.use,
+            baseline_c=inp.baseline_c,
             drive=rs.drive,
             a_kph=rs.est.a,
             b_per_h=rs.est.b,

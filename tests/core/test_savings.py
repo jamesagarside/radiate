@@ -5,7 +5,6 @@ Property-style tests use seeded `random.Random` loops, so every run is the same.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 import random
 from datetime import date
@@ -139,6 +138,25 @@ def test_comfort_counts_only_in_use_and_occasional_minutes():
     assert r.warm_min == pytest.approx(180)
     assert r.warm_ok_min == pytest.approx(60)
     assert r.deficit_kh == pytest.approx(0.5 * 2)
+
+
+def test_room_without_room_use_has_no_baseline_and_no_savings():
+    """A room with no room use (no use key, not a household room) has no baseline at
+    all, which is not the same as its baseline timer being off: it must not count."""
+    m = SavingsMeter()
+    run(m, 5, {"bed": sample(t=16.0, baseline=18.0), "loo": sample(use=None, drive=1.0)})
+    assert "loo" not in m.rooms and "loo" not in m.lift_k
+    assert set(m.close()["rooms"]) == {"bed"}
+
+
+def test_report_weights_only_rooms_with_savings():
+    """Weights for a room the days don't measure are dropped and the rest renormalised,
+    so a room without a baseline doesn't make every day ineligible."""
+    days = month(20)
+    body = report(days, {**WEIGHTS, "loo": 0.5}, NAMES, household=True, outdoor_sensor=True)
+    assert body["status"] == "ready"
+    assert [r["room_id"] for r in body["rooms"]] == ["bed", "lounge"]
+    assert body["days"][0]["dh_actual_kh"] == rep(days)["days"][0]["dh_actual_kh"]
 
 
 def test_tick_is_capped():
@@ -560,27 +578,6 @@ def test_golden_synthetic_month():
 # --- in the engine ---------------------------------------------------------------------------
 
 
-# Slice 1 adds `use` and `baseline_c` to RoomInput and `baseline` to Snapshot. Until it
-# lands, test subclasses declare them, so this test runs before and after.
-if "baseline_c" in {f.name for f in dataclasses.fields(RoomInput)}:
-    _Input = RoomInput
-else:
-
-    @dataclasses.dataclass(slots=True)
-    class _Input(RoomInput):
-        use: str | None = None
-        baseline_c: float | None = None
-
-
-if "baseline" in {f.name for f in dataclasses.fields(Snapshot)}:
-    _Snap = Snapshot
-else:
-
-    @dataclasses.dataclass(slots=True)
-    class _Snap(Snapshot):
-        baseline: bool = False
-
-
 CFG = HouseConfig(rooms=(RoomConfig("bed", "Bedroom"), RoomConfig("lounge", "Lounge")))
 
 
@@ -592,7 +589,7 @@ def _ticks(baseline: bool, minutes: int = 3 * 1440):
         minute = i % 1440
         temps = {"bed": 16.0 + (i % 90) / 60, "lounge": 18.0 + (i % 70) / 50}
         rooms = {
-            rid: _Input(
+            rid: RoomInput(
                 temperature=t,
                 trv_temperature=t + 0.5,
                 setpoint=19.0 if 7 * 60 <= minute < 22 * 60 else 14.0,
@@ -602,7 +599,7 @@ def _ticks(baseline: bool, minutes: int = 3 * 1440):
             )
             for rid, t in temps.items()
         }
-        snap = _Snap(
+        snap = Snapshot(
             now=i * 60.0,
             minute_of_day=minute,
             outdoor=5.0,
