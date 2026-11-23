@@ -39,6 +39,7 @@ def run(
     minutes: int,
     store_on: Callable[[int], bool] = lambda m: False,
     trv_heating: bool | None = None,
+    heating_burner: bool | None = None,
 ):
     st = EngineState.new(CFG)
     relay = False
@@ -61,6 +62,7 @@ def run(
             rooms=rooms,
             heating_relay=relay,
             store_relay=store_on(m),
+            heating_burner=heating_burner,
         )
         acts = decide(CFG, snap, st)
         relay = acts.heating_relay
@@ -81,6 +83,14 @@ def test_no_heat_after_30_minutes_of_flow_keeps_calling_and_stops_learning():
     assert st.rooms["bed"].learning_gate == "no_heat"
     msg = next(a.message for a in hist[-1].alerts if a.code == "boiler.no_heat")
     assert msg == "No heat: check oil and boiler lockout"
+
+
+def test_metered_burner_lockout_is_no_heat():
+    # The burner never lights (locked out): no heat is available to the radiators, but
+    # the boiler is called, and that is exactly what the no-heat check is for.
+    st, hist = run(cold, 45, heating_burner=False)
+    assert no_heat(hist[-1])
+    assert st.rooms["bed"].learning_gate == "no_heat"
 
 
 def test_no_alert_while_every_valve_is_shut():

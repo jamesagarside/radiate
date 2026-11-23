@@ -692,11 +692,12 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                     )
                 )
 
-    # Out of oil or burner lockout (spec 7): alert, keep calling, stop learning.
+    # Out of oil or burner lockout (spec 7): alert, keep calling, stop learning. Judged
+    # on the call for heat, not on the burner: a burner that never lights is the fault.
     st.no_heat.update(
         now,
         relay_on=snap.heating_relay,
-        flowing=flowing,
+        flowing=relay_flow,
         any_open=any_open,
         trv_readings=trv_now,
         passive_readings=passive_now,
