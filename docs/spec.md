@@ -393,7 +393,7 @@ Warm periods are the live schedule's (`CompiledHousehold.periods`, at the level 
 
 ### 5.9 Savings
 
-The accounting, the house signature, the gate and the report are built in `radiate.core.savings` and every closed day summary carries its `savings` record. **Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)): the baseline in the snapshot (plan slice 1), keeping closed days and `GET /api/v1/savings` (slice 4), the view (slice 5). Decided in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed). The method follows the [usage and savings research](research/usage-and-savings.md#3-measuring-savings-honestly), with a different baseline and a correction that lets a day's saving be negative.
+The accounting, the house signature, the gate and the report are built in `radiate.core.savings` and every closed day summary carries its `savings` record. The baseline is in the snapshot (plan slice 1, with hand-written rooms added by slice 3). **Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)): keeping closed days and `GET /api/v1/savings` (slice 4), the view (slice 5). Decided in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed). The method follows the [usage and savings research](research/usage-and-savings.md#3-measuring-savings-honestly), with a different baseline and a correction that lets a day's saving be negative.
 
 Radiate estimates the oil it saved against one stated baseline, from measured room and outdoor temperatures and the oil it measured, and shows the comfort it cost beside it. The estimate is pure, in `radiate.core.savings`.
 
@@ -403,7 +403,16 @@ Radiate estimates the oil it saved against one stated baseline, from measured ro
 - Valve set to the room's temperature for that day's use level (its own `temperature` if it has one, its unused temperature on an unused day).
 - Timer off at any other time, so the baseline puts no heat in.
 
-The runtime passes it in the snapshot (built; `compile_baseline` in `radiate.config.use`): `RoomInput.baseline_c` is the baseline setpoint now, or `None` while the baseline timer is off, and `Snapshot.baseline` is true when the house has a household. Without a household there is no baseline and no savings. Rooms on hand-written schedules have no baseline.
+The runtime passes it in the snapshot (built; `compile_baseline` in `radiate.config.use`): `RoomInput.baseline_c` is the baseline setpoint now, or `None` while the baseline timer is off, and `Snapshot.baseline` is true when any room has a baseline.
+
+**Hand-written rooms.** A room on a hand-written schedule with a use level (`rooms[].use`) gets a baseline too (`compile_schedule_baseline`):
+
+- Timer on from the household's first person up, less the fixed preheat, to the last to bed, the same timer as household rooms, when there is a household with people (it need not cover any room).
+- Otherwise, timer on from the earliest warm period start to the latest warm period end across the house's hand-written schedules that day (warm periods as in 5.8). No warm period that day: the timer stays off.
+- Valve set to the room's usual temperature: the highest setpoint its schedule sets that day.
+- Timer off at any other time, as for household rooms.
+
+A room with neither a household entry nor a use level has no room use and no baseline, and takes no part in savings: the meter skips it, and `report` weighs only the rooms the latest closed day measured. Without any room with a baseline there are no savings.
 
 **Each tick**, per controllable room with a reading, while the outdoor reading is real (not the 5 °C default), with `dt` in hours, capped at 300 s, and the interval since the last tick belonging to the day it started in (as in the ledger):
 

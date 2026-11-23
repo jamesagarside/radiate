@@ -1,5 +1,6 @@
 """The runtime fills room use and the savings baseline into each snapshot (spec 5.8, 5.9)."""
 
+import dataclasses
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -78,7 +79,9 @@ async def test_hand_written_room_with_a_use_level():
     rt = make(household_data(lounge_use="in_use"), WED_0700)
     await rt.step()
     assert rt.last_snapshot.rooms["lounge"].use is RoomUse.SETBACK  # 16° is its lowest
-    assert rt.last_snapshot.rooms["lounge"].baseline_c is None
+    # The household's baseline timer is on from 06:00 (first up less preheat): the
+    # room's baseline is its usual (highest) setpoint.
+    assert rt.last_snapshot.rooms["lounge"].baseline_c == 20.0
 
     rt = make(household_data(lounge_use="in_use"), WED_1900)
     await rt.step()
@@ -113,7 +116,64 @@ async def test_hand_written_rooms_without_a_household():
     rt = make(data, WED_1900, household=False)
     await rt.step()
     snap = rt.last_snapshot
-    assert snap.baseline is False  # no household, so no savings baseline
+    # A baseline from the hand-written schedules: timer from the earliest warm start
+    # to the latest warm end in the house that day, the room at its usual setpoint.
+    assert snap.baseline is True
     assert snap.rooms["dining"].use is RoomUse.IN_USE
+    week = rt.driver.schedules()["dining"][1]
+    assert snap.rooms["dining"].baseline_c == max(sp for _, sp in week.days[2].transitions)
+    # No use key: no room use and no baseline.
+    assert snap.rooms["lounge"].use is None and snap.rooms["lounge"].baseline_c is None
+
+
+async def test_hand_written_rooms_outside_the_baseline_timer():
+    data = yaml.safe_load((EXAMPLES / "reference-house.yaml").read_text())
+    del data["shelly"]
+    next(r for r in data["rooms"] if r["id"] == "dining")["use"] = "in_use"
+    rt = make(data, datetime(2026, 11, 18, 3, 0, tzinfo=TZ).timestamp(), household=False)
+    await rt.step()
+    snap = rt.last_snapshot
+    assert snap.baseline is True  # the house has a baseline; its timer is off now
     assert snap.rooms["dining"].baseline_c is None
-    assert snap.rooms["lounge"].use is None
+
+
+def people_only(use: bool, wall: float) -> Runtime:
+    """The shape of a live house: every room hand-written (with a use level when `use`),
+    and a saved household with people, for their times, but no household rooms."""
+    people = parse_site(household_data(), env=ENV).household
+    data = yaml.safe_load((EXAMPLES / "reference-house.yaml").read_text())
+    del data["shelly"]
+    if use:
+        for r in data["rooms"]:
+            if "schedule" in r:
+                r["use"] = "in_use"
+    site = parse_site(data, env=ENV)
+    drv = LiveDriver(site, _publish, clock=lambda: 1000.0, wall=lambda: wall)
+    return Runtime(
+        site.house,
+        drv,
+        household=dataclasses.replace(people, rooms=()),
+        timezone=site.timezone,
+        wall=lambda: wall,
+        schedule_use=site.schedule_use,
+    )
+
+
+async def test_household_with_people_but_no_rooms_gives_hand_written_rooms_a_baseline():
+    rt = people_only(True, WED_0700)
+    await rt.step()
+    snap = rt.last_snapshot
+    assert snap.baseline is True
+    # Timer on from the first person up (06:30) less the 30 minute preheat, the room at
+    # its schedule's highest setpoint that day.
+    week = rt.driver.schedules()["dining"][1]
+    assert snap.rooms["dining"].baseline_c == max(sp for _, sp in week.days[2].transitions)
+    assert snap.rooms["dining"].use is not None
+
+
+async def test_household_without_any_baseline_room_sets_no_baseline():
+    rt = people_only(False, WED_1900)
+    await rt.step()
+    snap = rt.last_snapshot
+    assert snap.baseline is False
+    assert all(inp.baseline_c is None for inp in snap.rooms.values())

@@ -595,7 +595,7 @@ _Avoid_: "up to" figures, and "savings" for a simulated or projected figure.
 
 **Savings baseline**:
 What savings are measured against: a heating timer on from the first person up to the last to bed every day, with each room's valve at its usual temperature for its use level. Compiled from the household with nobody away and no room adjustments, and passed in every snapshot (built). Rooms on hand-written schedules have none. Shown on screen in one sentence.
-Code: `compile_baseline` in `radiate.config.use`, `RoomInput.baseline_c`, `Snapshot.baseline`, API `baseline` in `GET /api/v1/savings`.
+Code: `compile_baseline` and `compile_schedule_baseline` in `radiate.config.use`, `RoomInput.baseline_c`, `Snapshot.baseline`, API `baseline` in `GET /api/v1/savings`.
 
 **Degree-hours**:
 How much warmer than outside a room was kept, summed over time: `max(0, T − T_out)` per hour, in K·h. Actual degree-hours use the room's reading; baseline degree-hours use the baseline room temperature. Heat loss, and so oil, follows degree-hours.
