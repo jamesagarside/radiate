@@ -370,6 +370,19 @@ radiate bootstrap --config radiate.yaml
 
 The command replaces each room's model, arrival lags and lockshield cap with the ones learned from the history, and keeps the boiler guard and every timer as saved. It refuses to run if Radiate saved its state in the last 15 minutes, because a running server would overwrite the result. Add `--force` to run it anyway.
 
+Recorded dry-run ticks teach nothing unless the Shelly showed the burner firing (spec 4.1, `heat_unknown`), so a bootstrap after a dry run without metering learns from the live days only.
+
+To put room models back to their priors without stopping the server, for example models learned in a dry run before Radiate stopped learning from one, post to the learning reset. It writes no device:
+
+```bash
+curl -X POST -H "Authorization: Bearer $RADIATE_TOKEN" -H "Content-Type: application/json" \
+  -d '{}' http://localhost:8099/api/v1/learning/reset
+curl -X POST -H "Authorization: Bearer $RADIATE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"rooms": ["bedroom_1", "dining_room"]}' http://localhost:8099/api/v1/learning/reset
+```
+
+A replay across a reset differs from then on, because the reset is not a recorded tick.
+
 ### Upgrades
 
 - From source: `git pull`, then run the `uv pip install` command again.

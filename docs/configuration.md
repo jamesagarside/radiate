@@ -174,8 +174,17 @@ mqtt:
 | `heating_switch` | 0 | Switch ID for central heating demand (channel 1) |
 | `store_switch` | 1 | Switch ID for the hot-water store (channel 2) |
 | `auto_off_min` | 120 | The heating relay turns itself off this long after Radiate last asserted it |
+| `burner_metering` | `true` | Read burner firing from each channel's power reading |
+| `burner_threshold_w` | 100 | A channel reading at least this many watts means the burner is firing, 10 to 3000 |
+| `burner_hysteresis_w` | 20 | The burner counts as stopped once the reading falls this far below the threshold, 0 to 1000 and less than the threshold |
 
 The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep the defaults unless you also edit the script.
+
+**Burner metering.** Where the boiler's own load passes through the Shelly, its power reading shows whether the burner fires. On the reference boiler, the heating channel reads about 185 W while the burner fires, 52 to 60 W while the boiler's own thermostat holds the burner off with the pump running, and 0 W with the relay off; the store channel reads about 125 W while the store burner runs. Pick a threshold between the pump alone and the burner running: watch `heating_power_w` and `store_power_w` in the web UI telemetry through a burn. Radiate trusts a channel only after it has read at or above the threshold since it started, so a relay that switches only the boiler's thermostat input, which never carries the burner's load, is never taken to mean the burner is off.
+
+With metering, Radiate counts litres from firing time rather than relay time, ends store recovery when the store burner stops, and takes heat as available only once the burner has fired. It also learns during a dry run: without metering it does not, because the boiler's own timer, not the relay, decides when the radiators get heat. Without a `shelly` section Radiate cannot read the relay at all and does not learn.
+
+**Models learned in a dry run without metering.** Earlier versions learned from a dry run as if the relay ran the boiler, which can leave confident models that are far off (a heating gain of a fraction of a K/h). They now correct themselves over a few burns, but to start them again from priors, use `POST /api/v1/learning/reset` with `{}` for every room or `{"rooms": [...]}` for some. With the server stopped, `radiate bootstrap` re-learns every model from the tick history instead, leaving out the dry run. See [deployment](deployment.md#replay-and-bootstrap).
 
 ### boiler
 
