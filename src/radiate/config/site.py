@@ -155,6 +155,10 @@ class SiteConfig:
     # The schedule each controllable room follows when no household covers it: its own
     # `schedule`, or `default` when that exists. None: the house file gives it none.
     room_schedules: dict[str, str | None] = field(default_factory=dict)
+    # The use level of each room on a hand-written schedule that gives one (`rooms[].use`),
+    # as (weekdays, weekend), for room use (radiate.config.use). A household room's
+    # use level comes from the household instead, which wins if it covers the room.
+    schedule_use: dict[str, tuple[UseLevel, UseLevel]] = field(default_factory=dict)
     # Where the household comes from: "house_file", "saved" (the web UI's setup, from
     # the data directory) or None (no household).
     household_source: str | None = None
@@ -461,6 +465,7 @@ _ROOM_KEYS = {
     "actuate",
     "humidity",
     "trv_bias_k",
+    "use",
 }
 
 
@@ -470,6 +475,7 @@ def _rooms(
     schedules: dict[str, WeekSchedule],
     notes: list[str],
     household_rooms: set[str],
+    use_levels: dict[str, tuple[UseLevel, UseLevel]],
 ) -> tuple[list[RoomConfig], dict[str, RoomDevices], dict[str, str | None]]:
     if not isinstance(raw, list) or not raw:
         ctx.err("rooms", "expected a non-empty list")
@@ -526,6 +532,20 @@ def _rooms(
                     "the household section builds this room's schedule; remove one of them",
                 )
             sched = None
+        if item.get("use") is not None:
+            if role is RoomRole.PASSIVE:
+                ctx.err(f"{p}use", "a passive room has no valve, so it has no use level")
+            elif role is RoomRole.UNHEATED:
+                ctx.err(f"{p}use", "an unheated room has no radiator, so it has no use level")
+            elif rid in household_rooms:
+                ctx.err(
+                    f"{p}use",
+                    "the household section sets this room's use level; remove one of them",
+                )
+            else:
+                levels = _use(ctx, item["use"], f"{p}use")
+                if levels is not None:
+                    use_levels[rid] = levels
 
         if role is RoomRole.NORMAL:
             if trv is None:
@@ -1097,7 +1117,10 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         except ScheduleError as err:
             ctx.err(f"schedules.{name}", str(err))
 
-    rooms, devices, own = _rooms(ctx, data.get("rooms"), schedules, notes, household_rooms)
+    schedule_use: dict[str, tuple[UseLevel, UseLevel]] = {}
+    rooms, devices, own = _rooms(
+        ctx, data.get("rooms"), schedules, notes, household_rooms, schedule_use
+    )
     household = _household(ctx, raw_household, rooms) if raw_household else None
     balancing = ctx.get(data, "balancing", bool, True, "")
     cfg = HouseConfig(
@@ -1143,6 +1166,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         history_days=history_days,
         notes=tuple(notes),
         room_schedules=own,
+        schedule_use=schedule_use,
         file_household=household,
     )
     return apply_household(site, household, "house_file")

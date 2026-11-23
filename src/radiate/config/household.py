@@ -49,6 +49,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
 
+from radiate.core.types import DAMP_FLOOR_C
+
 from .schedule import DAYS, MAX_C, MAX_TRANSITIONS, MIN_C, DaySchedule, WeekSchedule, hhmm
 
 # Defaults. Each is a setting; see `Timing` and `AwaySettings`.
@@ -69,7 +71,9 @@ RETURN_WARMUP_MIN = 180
 WEEKEND_DAYS = frozenset({5, 6})  # Saturday and Sunday
 
 # Not settings: guidance and a fixed rule.
-DAMP_BELOW_C = 12.0  # below this, walls and window frames can get damp (a note, not a limit)
+# Below this, walls and window frames can get damp. The setup notes it; the core's damp
+# floor (spec 5.8) is the same value, so no saving rule lets a room wait below it.
+DAMP_BELOW_C = DAMP_FLOOR_C
 DAY_TYPES = ("weekdays", "weekend")
 
 Interval = tuple[int, int]  # [start, end) in minutes of the day
@@ -325,6 +329,10 @@ class CompiledHousehold:
     # Per room, Monday first: what room adjustments changed in the live week, as
     # (start, end, keep): warm time they added and warm time they took away.
     adjusted: dict[str, tuple[tuple[tuple[int, int, Keep], ...], ...]] = field(default_factory=dict)
+    # Per room, Monday first: the use level its warm periods are kept at that day, for
+    # room use (radiate.config.use). In use for warm periods a room adjustment added on
+    # an unused day; unused on an unused day without them, which has no warm periods.
+    warm_levels: dict[str, tuple[UseLevel, ...]] = field(default_factory=dict)
 
 
 def compile_household(
@@ -354,6 +362,7 @@ def compile_household(
     live: dict[str, WeekSchedule] = {}
     periods: dict[str, tuple[tuple[Interval, ...], ...]] = {}
     adjusted: dict[str, tuple[tuple[tuple[int, int, Keep], ...], ...]] = {}
+    warm_levels: dict[str, tuple[UseLevel, ...]] = {}
     dropped_periods: list[DroppedPeriod] = []
     for room in household.rooms:
         preheat = _room_preheat(household, room, preheat_min)
@@ -365,6 +374,7 @@ def compile_household(
         live_days: list[DaySchedule] = []
         room_periods: list[tuple[Interval, ...]] = []
         room_adjusted: list[tuple[tuple[int, int, Keep], ...]] = []
+        room_levels: list[UseLevel] = []
         for weekday in range(7):
             weekend = weekday in household.weekend_days
             level = room.use_weekend if weekend else room.use_weekdays
@@ -386,12 +396,14 @@ def compile_household(
             live_days.append(day.live)
             room_periods.append(day.periods)
             room_adjusted.append(day.adjusted)
+            room_levels.append(day.warm_level)
             if day.dropped:
                 groups.setdefault((weekend, key), []).append(weekday)
         schedules[room.room_id] = WeekSchedule(tuple(valve_days))
         live[room.room_id] = WeekSchedule(tuple(live_days))
         periods[room.room_id] = tuple(room_periods)
         adjusted[room.room_id] = tuple(room_adjusted)
+        warm_levels[room.room_id] = tuple(room_levels)
         label = room.name or room.room_id
         for (_, key), days in groups.items():
             when = _days_label(days, household.weekend_days)
@@ -411,6 +423,7 @@ def compile_household(
         dropped=tuple(dropped_periods),
         periods=periods,
         adjusted=adjusted,
+        warm_levels=warm_levels,
     )
 
 
@@ -707,6 +720,7 @@ class _Day:
     dropped: list[tuple[float, Interval]]  # warm periods the valve's day leaves out
     periods: tuple[Interval, ...]  # the live day's warm periods
     adjusted: tuple[tuple[int, int, Keep], ...]  # what adjustments changed in the live day
+    warm_level: UseLevel  # the level the warm periods are kept at
 
 
 def _compile_day(
@@ -768,6 +782,7 @@ def _compile_day(
         dropped=sorted(dropped, key=lambda d: d[1]),
         periods=tuple(live_warm),
         adjusted=changes,
+        warm_level=warm_level,
     )
 
 
