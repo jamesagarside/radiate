@@ -335,3 +335,27 @@ def test_unheated_room_problems():
         "rooms[8].role: must be normal, passive, internal_sensor_only or unheated",
     ):
         assert expected in problems, expected
+
+
+def test_shelly_burner_metering_defaults_and_settings():
+    site = parse_site(minimal(shelly={"host": "192.0.2.10"}))
+    s = site.shelly
+    assert (s.burner_metering, s.burner_threshold_w, s.burner_hysteresis_w) == (True, 100, 20)
+    site = parse_site(
+        minimal(
+            shelly={
+                "host": "192.0.2.10",
+                "burner_metering": False,
+                "burner_threshold_w": 80,
+                "burner_hysteresis_w": 10,
+            }
+        )
+    )
+    s = site.shelly
+    assert (s.burner_metering, s.burner_threshold_w, s.burner_hysteresis_w) == (False, 80, 10)
+
+
+def test_shelly_burner_hysteresis_below_the_threshold():
+    shelly = {"host": "192.0.2.10", "burner_threshold_w": 50, "burner_hysteresis_w": 60}
+    with pytest.raises(ConfigError, match="burner_hysteresis_w: must be less than"):
+        parse_site(minimal(shelly=shelly))

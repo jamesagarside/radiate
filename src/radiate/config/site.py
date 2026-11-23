@@ -110,6 +110,12 @@ class ShellyConfig:
     heating_switch: int = 0
     store_switch: int = 1
     auto_off_s: float = 120 * 60  # spec 5.7: the relay can never latch on indefinitely
+    # Burner firing from each channel's power reading (spec 3, 5.6): at or above the
+    # threshold the burner fires; it stops below threshold - hysteresis. Trusted on a
+    # channel only once it has read at or above the threshold since Radiate started.
+    burner_metering: bool = True
+    burner_threshold_w: float = 100.0
+    burner_hysteresis_w: float = 20.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,7 +416,20 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
     if not raw:
         return None
     p = "shelly."
-    ctx.unknown(raw, {"host", "password", "heating_switch", "store_switch", "auto_off_min"}, p)
+    ctx.unknown(
+        raw,
+        {
+            "host",
+            "password",
+            "heating_switch",
+            "store_switch",
+            "auto_off_min",
+            "burner_metering",
+            "burner_threshold_w",
+            "burner_hysteresis_w",
+        },
+        p,
+    )
     host = ctx.get(raw, "host", str, "", p)
     if not host:
         ctx.err(f"{p}host", "required")
@@ -418,12 +437,19 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
     store = int(ctx.number(raw, "store_switch", 1, 0, 3, p))
     if heating == store:
         ctx.err(f"{p}store_switch", "must differ from heating_switch")
+    threshold = ctx.number(raw, "burner_threshold_w", 100, 10, 3000, p)
+    hysteresis = ctx.number(raw, "burner_hysteresis_w", 20, 0, 1000, p)
+    if hysteresis >= threshold:
+        ctx.err(f"{p}burner_hysteresis_w", "must be less than burner_threshold_w")
     return ShellyConfig(
         host=host,
         password=ctx.get(raw, "password", str, None, p) or None,
         heating_switch=heating,
         store_switch=store,
         auto_off_s=ctx.number(raw, "auto_off_min", 120, 15, 240, p) * 60,
+        burner_metering=ctx.get(raw, "burner_metering", bool, True, p),
+        burner_threshold_w=threshold,
+        burner_hysteresis_w=hysteresis,
     )
 
 

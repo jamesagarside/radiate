@@ -317,9 +317,14 @@ class LiveDriver:
         # switched it meanwhile (spec 5.7 hand-back).
         heating, store = self._last_heating, self._last_store
         unseen = 0.0
+        observed = False  # the relay as read, not a stand-in (in dry run, never sent)
+        heating_burner = store_burner = None
         if self.boiler is not None and self.boiler.reachable and self.boiler.heating:
             heating = self.boiler.heating.output
             store = self.boiler.store.output if self.boiler.store else store
+            observed = True
+            heating_burner = self.boiler.heating_burner
+            store_burner = self.boiler.store_burner
             if self._relay_seen_at is not None:
                 unseen = now - self._relay_seen_at
             self._relay_seen_at = now
@@ -336,6 +341,10 @@ class LiveDriver:
             # In dry run the relay is not Radiate's: the guard must not adopt it.
             relay_follows_commands=not self.dry_run,
             heating_relay_unseen_s=unseen,
+            # Learning and accounting take nothing from a stand-in relay (spec 4.6, 5.6).
+            relay_observed=observed,
+            heating_burner=heating_burner,
+            store_burner=store_burner,
         )
 
     async def apply(self, actions: Actions) -> None:
