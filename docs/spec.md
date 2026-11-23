@@ -12,7 +12,7 @@ How to read this page:
 
 - Text without a marker describes the code.
 - **Not yet implemented** marks something planned and not built. Each one links to its section of [implementation status](implementation-status.md).
-- **Open question** marks a behaviour choice for the owner, where the spec and the code disagree and neither is clearly right. One is open: how unheated rooms should feed the room model (section 12).
+- **Open question** marks a behaviour choice for the owner, where the spec and the code disagree and neither is clearly right. Five are open (section 12): how unheated rooms should feed the room model, and four choices in the planned efficiency work (sections 5.8 and 5.9).
 - Section 13 lists what changed in this revision.
 
 ---
@@ -309,6 +309,8 @@ The plan weighted the pooled demand the other way, `D = Σ_r a_r · f(o_r) · ma
 
 In simulation, `eco` cuts relay starts by 19 % on mild days and 7 % on cold days against `comfort`, with longer burns. The boiler's own thermostat still sets most physical burner starts, so those barely change. On mild days the comfort deficit is the same within the spread between seeds; on cold days with an undersized pump it rises 5 %. See [simulation](simulation.md#eco-and-comfort-demand-modes).
 
+**Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)): in `eco`, each room's use right now (in use, occasional or setback, from the household) will decide whether it can start a burn on its own and how far below its target it waits first, whether it counts in pooled demand, whether it keeps the burner running and whether it can take a top-up, never below a 12 °C damp floor. See 5.8.
+
 **Not yet implemented** ([status](implementation-status.md#5-boiler-logic)): **store merging** (opt-in), shifting the store window by up to ±30 min to start just before or after a heating burn, so the burner runs once for both.
 
 ### 5.4 Open-path guarantee
@@ -339,6 +341,104 @@ A small Shelly Gen4 script runs on the relay itself:
 - A hard auto-off of 120 min on channel 1 means the relay can never latch on indefinitely.
 
 The script is published in the repository and installed by the user, or with `radiate shelly install-watchdog --config radiate.yaml --yes` over the Shelly local API. Radiate keeps the fallback windows in KVS keys `radiate_heat` (derived from the room schedules, started an hour early) and `radiate_store`.
+
+### 5.8 Room use in demand
+
+**Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)). Decided in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed); built by the [efficiency plan](plans/efficiency-mvp.md). Changes the `eco` demand mode only; `comfort` keeps the rule in 5.3.
+
+The household already says how each room is used. In `eco`, that decides each room's part in demand, so a room nobody is using does not start the boiler for half a degree, and the heat from a burn goes to rooms people are in.
+
+**Room use.** Each tick the runtime works out how each controllable room is used right now, from the compiled household, and passes it in the snapshot (`RoomInput.use`), so the tick history records it and replay decides the same way:
+
+| Room use | When |
+|---|---|
+| `in_use` | inside a warm period on a day the room's use level is in use, inside a warm period a room adjustment added, or while the room has a setpoint override |
+| `occasional` | inside a warm period on a day the room's use level is occasional |
+| `setback` | any other time: a room that is unused that day, overnight, between warm periods, and while its people are away |
+| none | the room has a hand-written schedule, or there is no household |
+
+Warm periods are the live schedule's (`CompiledHousehold.periods`), so heating ahead of a period by optimum start is preheating, not room use. A room with no room use behaves exactly as in 5.3. Snapshots recorded before room use existed have none, so they replay unchanged.
+
+**Roles in `eco`:**
+
+| Room use | Starts a burn on its own (solo limit) | Counts in pooled demand | Keeps the burner running | Burn extension | Heat sink |
+|---|---|---|---|---|---|
+| `in_use` | more than the eco limit (1.5 K) below its target | yes | yes | yes | first choice |
+| `occasional` | more than the eco limit + 1 K (2.5 K) below its target | yes | yes | yes | second choice |
+| `setback` | more than the eco limit + 1 K below its target | no | only a burn it started | no | last resort |
+| none | more than the eco limit below its target (5.3) | yes | yes | yes | coldest first (5.4) |
+
+- **Damp floor.** No solo limit lets a room with room use wait below `min(target, damp_floor_c)`. For such a room the **solo threshold**, the temperature below which a calling room starts a burn on its own, is `max(target − limit, min(target, damp_floor_c))`. The damp floor is 12 °C (`DAMP_FLOOR_C`, `BoilerConfig.damp_floor_c`, not in the configuration file), the value the household setup already warns about. With the default temperatures, a 19 °C room in use starts a burn below 17.5 °C, a 16 °C occasional room below 13.5 °C, and a 14 °C setback room below 12 °C. A room whose own target is 12 °C or lower starts a burn as soon as it calls.
+- **Pooled demand** (5.3) sums `gap / a` over calling rooms that are not `setback`. A setback room's need never helps start a burn.
+- **Taking heat.** A setback room that calls while a burn runs for other rooms is allocated and heated up to its own target, as today. It does not keep the burner on: the stop rule (5.3) counts a calling room only if it is not `setback`, or if it started the burn itself. That **solo latch** (`RoomState.solo`) is set when the room passes its solo threshold and cleared when it stops calling, so a setback room that fell to the damp floor is heated back to its setback temperature in one burn, not to a fraction above 12 °C.
+- **Burn extension** (5.3) tops up only rooms that are `in_use` or `occasional` now.
+- **Heat sinks** (5.4) are chosen `in_use` first, then `occasional`, then `setback`, coldest relative to target within each. Boiler safety still wins: when nothing else meets the open path, a setback room is opened.
+- **Unchanged:** a calling room that is preheating still fires the boiler (it is about to be in use); frost and hard frost overrides; the boiler guard; the open-path guarantee; the allocator.
+- **Reasons.** A calling room left waiting keeps `demand.pooled`. A setback room calling with the boiler idle gets `demand.setback`: "Lounge: not in use now, takes heat only when the boiler is already on". A burn a setback room starts at its floor reads `demand.floor`: "Lounge: down to 12.0 °C, heating to 14.0 °C".
+
+**Example.** A household with an office used on weekdays, a bedroom used when getting up and going to bed, a dining room and kitchen used while people are home, and a lounge, spare bedroom and toilet marked unused, with 18 °C for rooms in use and 14 °C for unused rooms and overnight. On a weekday the bedroom is `in_use` for 30 minutes after getting up; optimum start heats it before then. During working hours the office is `in_use` and the bedroom `setback`: the bedroom at 13.7 °C doesn't start a burn, but takes heat while the office's burn runs. The lounge is `setback` all week: it starts a burn of its own only if it falls to 12 °C, and is never topped up. At the weekend the office is `setback` too.
+
+**What it should save and cost.** Unverified until the simulator comparison ([plan, slice 6](plans/efficiency-mvp.md#slice-6-simulator-comparison-and-estimator-check)) has run: fewer burns started by rooms nobody is in, unused rooms between 12 °C and their unused temperature instead of held at it, and top-ups that warm rooms in use rather than empty ones. The cost is cooler unused rooms, and an occasional room that waits 1 K longer before starting a burn alone. The research estimates 1 to 3 % of space heating ([control efficiency, section 3](research/control-efficiency.md#3-room-importance-weighting)); the simulator, then the house, decide.
+
+**Not yet implemented** and outside the first cut ([status](implementation-status.md#planned-efficiency-by-room-use)). Each is to be tried in the simulator against these rules first:
+
+- **Optimum stop:** near the end of a warm period, a room stops calling if its model predicts it stays within 0.5 K of its setpoint until the period ends; pooling and burn extension ignore rooms about to set back.
+- **Arrival-tuned optimum start:** learn each room's preheat margin from its arrival error, in place of the fixed 1.2 margin and the 80 % supply factor in `_preheat_due`.
+- **Outdoor cut-off:** no comfort heating while the 24 h mean outdoor temperature is above 15 °C; frost and the damp floor still apply.
+- **Damp guard:** from each room sensor's humidity and the outdoor temperature, estimate the coldest surface's humidity; raise a damp room's floor and suggest ventilating, and let dry rooms' unused and night temperatures go lower.
+- **Room activity and usage:** `POST /api/v1/rooms/{id}/activity` with `{"active": true, "since": "...", "source": "light.lounge"}` from radiate-ha (Home Assistant areas mapped to rooms), feeding a pure per-room usage log (15 minute slots: active, idle or unknown) and two usage suggestions, "kept warm but not used" and "used outside its warm periods", each applied as a use level change or a room adjustment. Activity never drives the valves directly. Needs radiate-ha first (ADR-0003).
+- **Store hours:** ending the store windows at the last regular draw-off, and store merging (5.3).
+
+### 5.9 Savings
+
+**Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)). Decided in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed). The method follows the [usage and savings research](research/usage-and-savings.md#3-measuring-savings-honestly), with a different baseline and a correction that lets a day's saving be negative.
+
+Radiate estimates the oil it saved against one stated baseline, from measured room and outdoor temperatures and the oil it measured, and shows the comfort it cost beside it. The estimate is pure, in `radiate.core.savings`.
+
+**Baseline.** In the UI's words: "Compared with a heating timer on from the first person up to the last to bed every day, and each room's valve set to its usual temperature." Per controllable room and day, from the household compiled with nobody away and without room adjustments:
+
+- Timer on from the first person's getting up, less the fixed preheat, to the last person's bedtime: the valve schedule's day.
+- Valve set to the room's temperature for that day's use level (its own `temperature` if it has one, its unused temperature on an unused day).
+- Timer off at any other time, so the baseline puts no heat in.
+
+The runtime passes it in the snapshot: `RoomInput.baseline_c` is the baseline setpoint now, or `None` while the baseline timer is off, and `Snapshot.baseline` is true when the house has a household. Without a household there is no baseline and no savings.
+
+**Each tick**, per controllable room with a reading, while the outdoor reading is real (not the 5 °C default), with `dt` in hours, capped at 300 s, and the interval since the last tick belonging to the day it started in (as in the ledger):
+
+```
+heat_r     = 1 if the baseline timer is off, or the room's setpoint is above baseline_c; else 0
+lift_r    ← max(0, lift_r + (a_r · drive_r · heat_r − b_r · lift_r) · dt)
+B_r        = max(T_r − lift_r, baseline_c)   while the baseline timer is on
+B_r        = T_r − lift_r                    while it is off
+DH_act_r  += max(0, T_r − T_out) · dt
+DH_base_r += max(0, B_r − T_out) · dt
+```
+
+- **Anchored on the reading.** `B_r` starts from the room's real temperature, so a fire, the range cooker, the sun and warm neighbours warm both sides and cancel.
+- **Lift** is how much warmer Radiate's own heating has made the room than the baseline would have, during time the baseline would not have heated it: before the timer starts (optimum start), overnight, and in a warm period a room adjustment added. It decays at the room's loss rate. Without it, a night where Radiate holds a room warm would cost nothing; with it, a day can show a negative saving.
+- **Comfort**, per room while its room use is `in_use` or `occasional`: the **comfort deficit**, `max(0, setpoint − 0.5 − T) · dt` in K·h (the simulator's measure), and the **warm share**, the share of those minutes at or above `setpoint − 0.5 K`.
+
+The day's record goes into the closed day's summary as `savings`: per room `dh_actual_kh`, `dh_baseline_kh`, `deficit_kh`, `warm_min` and `warm_ok_min`, plus `outdoor_share` (share of the day with a real outdoor reading), `baseline_share` (share with a baseline) and `outdoor_mean_c`.
+
+**Eligible day:** not partial (5.6), `outdoor_share` and `baseline_share` at least 0.9, litres known (a nozzle rating), and the same litres basis as the other days in the fit.
+
+**Room weights.** Each room's degree-hours count in proportion to `b_r / a_r`, the radiator time each kelvin of inside minus outside needs, the same unit as pooled demand (5.3); equal weights until every counted room's confidence is at least 0.6. Weights come from the current models and are applied to every day at report time, so days stay comparable as the models learn. Whether `b / a` beats equal weights is checked in the simulator before release.
+
+**House signature.** Over the last 60 eligible days, a straight-line fit that resists odd days (Theil-Sen slope, median intercept) of litres per day against weighted actual degree-hours: `litres = k · DH_act + c`. `c` absorbs standing losses. If the fit gives `c < 0`, it is refitted through the origin (`c = 0`, `k = Σ litres / Σ DH_act`).
+
+**Gate.** Figures appear only with at least 14 eligible days, `k > 0`, a fit CV(RMSE) of 25 % or less, and weather that has varied enough to tell `k` from `c`: the 90th percentile of the fit days' weighted degree-hours at least 1.3 times the 10th. Until then the API and the UI say "still learning" and why, such as "8 of 14 days", "the weather hasn't varied enough yet" or "no outdoor sensor".
+
+**Saving** for an eligible day: `k · (DH_base − DH_act)`, weighted, in litres, kept negative when it is negative. Baseline litres are the day's litres plus its saving. The percentage is total saving over total baseline litres. A room's share, `k · w_r · (DH_base_r − DH_act_r)`, is an attribution, and is labelled as one.
+
+**Litres basis.** Litres are relay time × nozzle rating (5.6), which counts the boiler thermostat's own off periods inside a call, so they read high. `k` is inflated by the same factor on both sides, so the percentage holds and the litres are an upper bound; the UI says so. **Not yet implemented:** litres from burner firing. The driver passes the Shelly channel 1 `apower` as `Snapshot.heating_power_w`; with `boiler.firing_power_w` set (a reading between the pump alone and the burner running, taken once), the ledger counts firing seconds as well as relay seconds, and closed days get `basis: "firing"`. A fit uses days of one basis only, so switching basis restarts the 14 day gate. This works only if channel 1 carries the boiler's own load; if it only switches the boiler's thermostat input, `apower` stays near zero and a separate meter on the boiler's supply is needed (open question 1).
+
+**Persistence.** The day so far (per room accumulators and lift) is saved with the engine state as an optional `savings` section, so older saves still load. Each closed day's summary, with its `savings` record, is kept in the state database (key `daily_history`) for 730 days, the learning memory's default.
+
+**Honesty rules.** Always show comfort beside savings. Never clamp a day at zero. No figures for partial days, before 14 eligible days, for days without an outdoor reading, or without a nozzle rating. Say "about" and "estimated", never "up to". Never project a year from a short run. One baseline only.
+
+**Checked in the simulator before release** ([plan, slice 6](plans/efficiency-mvp.md#slice-6-simulator-comparison-and-estimator-check)): the estimate against the simulated true difference between the same weeks run under Radiate and under the baseline as a controller. In the simulator the baseline is a programmer that calls the boiler for the whole timer window, as a plain timer does, with each TRV on its own sensor; the boiler's standing losses while the valves are shut are not in degree-hours, so the estimate should come out at or below the true saving. Later, against oil deliveries over a winter.
+
+**Not yet implemented** beyond the first cut: an oil price (`oil_price_per_litre` in settings, stored with each day so a later change doesn't rewrite history) and money in the UI; a Kibana dashboard panel.
 
 ---
 
@@ -392,6 +492,24 @@ Order inside `decide`:
 | Clock jump or DST | monotonic clock in the server | Timers use monotonic time; schedules use local time |
 | Corrupt learned state | non-finite or out-of-bounds parameters | A whole saved state that can't be read is relearned from the tick history (section 4.3); a single corrupt room is reset to priors and logged. **Not yet implemented** ([status](implementation-status.md#7-failure-modes)): replaying history for that one room, and an alert in the UI |
 
+**Fail warm** (**Not yet implemented**, [ADR-0005](adr/0005-fail-warm-presence.md), [status](implementation-status.md#planned-efficiency-by-room-use), [plan, slice 7](plans/efficiency-mvp.md#slice-7-fail-warm-presence)). No connectivity or device problem may lower the heating. Any input that can lower a room's temperature (presence, away, room use, an outdoor reading, a sensor) must, when it is missing, silent or doubtful, count as the reading that keeps the house warmer: uncertain presence counts as home. Today presence breaks this rule. A phone that runs out of battery stays `not_home` in Home Assistant with its last update frozen, the integration keeps re-reporting `not_home` every 15 minutes, so stale presence (which measures how recently the integration reported, not how recently the phone did) never trips, and with one person in the household everyone away holds the whole house at 7 °C. The planned rules, per person:
+
+| Case | Today | Planned |
+|---|---|---|
+| `not_home`, and the source (the tracker behind the `person` entity) updated within the source silence, 120 minutes by default | away after the presence delay | away after the presence delay: positive evidence of absence |
+| `not_home`, source silent longer than the source silence | away | **unknown**, counts as home, reason `away.presence_uncertain`: "Sam: phone not heard from since 10:17, counted as home" |
+| `not_home` from an integration that doesn't send the source's time | away | away for at most the source silence after `since`; after that unknown, counts as home |
+| Presence not reported for the stale limit (Home Assistant or the integration down) | unknown | unknown (unchanged) |
+| Evidence someone is in: a setpoint override, a store boost, a fire switch, a shower detected, after the person's presence last changed | ignored | every person away by presence counts as home until their presence changes again, reason `away.home_evidence` |
+| Everyone away by presence only | frost (7 °C) with `everyone_away: frost` | every room at its unused temperature, never frost |
+| Everyone away with an away until each (said by the people) | frost with `everyone_away: frost` | frost with `everyone_away: frost` (unchanged) |
+
+- The presence report gains an optional `last_seen`: when the source last updated, whatever its state, as radiate-ha reads it from the tracker's `last_updated` (or the `person` entity's, if the tracker isn't known). Additive: the server accepts it first and treats a report without it as above; radiate-ha then sends it (ADR-0003). `POST /api/v1/people/{id}/presence` `{"state": "not_home", "since": "...", "last_seen": "2026-11-23T10:17:00+00:00"}`; `GET /api/v1/people` gains each person's `presence.last_seen`, `presence.uncertain` and `presence.why`.
+- `household.away.presence_source_silence_min`: 120 by default, 30 to 1440. Too short only costs saving, never warmth.
+- `everyone_away: frost` now applies only when every person has an away until. Presence alone, however long, sets the house back to the unused temperature. A frost hold stays the household's explicit choice.
+- Frost protection and the damp floor (5.8) are unchanged and apply in every case.
+- Other inputs that can lower heating on failure (an audit is listing them) get a row here, each with its fail warm reading, before they change behaviour.
+
 Radiate does not write anything special to the valves in safe mode: it cannot reach them. The lockshield cap is written whenever a room is not being allocated (section 4.4), so every radiator already carries a balanced opening limit, its schedule setpoint and closing degree 100, and stays balanced and thermostatic without Radiate.
 
 ---
@@ -428,9 +546,61 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 | `GET /api/v1/devices` | | The health of every device Radiate depends on: each room's TRV, room sensor and window sensor, the outdoor sensor, Zigbee2MQTT's routers (from its retained `bridge/devices`) and the boiler relay. `limits` (`low_battery_pct`, `weak_signal_lqi`, `strong_signal_lqi`, `stale_after_s`), `summary` (`total`, `attention`, `offline`, `low_battery`, `weak_signal`), `network` (`mqtt`, `zigbee2mqtt`: connected or online, or `null` when not known), `scan` (`available`, `state` of `idle`, `scanning`, `done` or `failed`, `error`, `scanned_s_ago`, `retry_in_s`, `min_interval_s`) and `devices`, each with `id` (the Zigbee2MQTT friendly name, or `boiler_relay`), `kind` (`trv`, `sensor`, `window`, `outdoor`, `router` or `relay`), `label`, `room_id`, `room_name`, `link` (`zigbee` or `wifi`), `model`, `vendor`, `firmware`, `power` (`battery` or `mains`), `battery_pct`, `battery_low`, `linkquality` (0 to 255), `signal` (`strong` at 100 and above, `fair`, `weak` below `weak_signal_lqi`), `available`, `last_seen_s`, `reading_age_s`, `temperature_c`, `humidity_pct`, `valve` (TRVs: `opening_pct`, `closing_pct`, `mode`, `running_state`, `setpoint_c`, `sensor`), `relay` (`heating`, `store`, `power_w`), `contact`, `route` (after a scan: `via`, `via_kind` of `coordinator` or `router`, and `lqi`, or `null`), `status` (`ok`, `attention` or `offline`) and `problems` (`code` and `message`). Unknown values are `null`. `404` when the driver reports no devices |
 | `POST /api/v1/devices/scan` | | Ask Zigbee2MQTT for a raw network map (`bridge/request/networkmap`), to show which router each device talks through. Only on a person's request, never on a timer: the scan slows the mesh for 10 s to 2 min. Allowed in dry run, as it changes no device. Returns `{"ok": true, "scan": {...}}` and the answer appears in `GET devices`; a scan with no answer in 3 min fails. `409` while one runs, `429` within 10 min of the last start, `503` while Zigbee2MQTT is not reachable, each with `message` and `retry_in_s`; `404` without Zigbee2MQTT |
 | `GET /api/v1/suggestions` | | House suggestions from the learned room models, the valve checks and the devices. `summary` (`total`, `act`, `consider`, `info`, `rooms_ready`, `rooms_learning`, `rooms_compared`, `lags_compared`, `min_rooms`), `suggestions`, most pressing first, each with `id` (kind and room or router, stable while it applies), `kind` (`room.heat_loss`, `radiator.undersized`, `radiator.slow_to_warm`, `valve.passing` or `zigbee.weak_link`), `severity` (`act`, `consider` or `info`), `room_id`, `room_name`, `title`, `evidence`, `action`, `confidence` (`low`, `medium` or `high`), `basis` and `values` (the numbers behind the words), then `learning`, one per controllable room, with `room_id`, `room_name`, `status` (`ready`, `learning` or `not_judged`), `hours`, `confidence` and `note`, and `settings` (the `suggestions` section in effect). Read-only; works with every driver |
+| `GET /api/v1/savings` | | **Not yet implemented** (section 5.9). The oil saved against the baseline, and the comfort beside it. See the shape below. Read-only; `status` is `unavailable` without a household |
 | `GET /api/v1/stream` | | WebSocket: the state on connect and after every tick |
 
 Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` needs `Authorization: Bearer <token>`. Browsers cannot set headers on a WebSocket, so `stream` also accepts the token as its first message, `{"token": "<token>"}`; it waits up to 10 s and closes with code 4401 if the token is missing or wrong. In the HA App, requests from the Supervisor's ingress address (`RADIATE_INGRESS_IP`) that carry an `X-Ingress-Path` header are trusted without a token. The web UI at `/` and `/static/` is not protected.
+
+**Planned additions** (**Not yet implemented**, sections 5.8 and 5.9). All additive, so radiate-ha needs no change first (ADR-0003):
+
+- `GET /api/v1/state`: each controllable room gains `use` (`in_use`, `occasional`, `setback` or `null`) and, while it is set, `solo` (the room started the current burn on its own). Each room's `reason_code` can be `demand.setback` or `demand.floor`.
+- `GET /api/v1/savings`, in this shape (numbers rounded for display; `null` where not known):
+
+```json
+{
+  "status": "ready",
+  "why": null,
+  "progress": {"eligible_days": 21, "needed_days": 14},
+  "baseline": {
+    "id": "timer_and_valves",
+    "text": "Compared with a heating timer on from the first person up to the last to bed every day, and each room's valve set to its usual temperature."
+  },
+  "basis": "relay",
+  "basis_text": "Oil is worked out from the time the boiler was called, so these litres are an upper bound.",
+  "fit": {"litres_per_100_kh": 0.9, "standing_litres_per_day": 0.4, "cv_rmse": 0.18, "days": 21, "weights": "radiator_time"},
+  "totals": {
+    "since": "2026-11-01",
+    "days": 21,
+    "litres_used": 80.1,
+    "litres_baseline": 94.3,
+    "litres_saved": 14.2,
+    "percent_saved": 15.1,
+    "comfort_deficit_kh": 2.1,
+    "warm_share": 0.98
+  },
+  "days": [
+    {
+      "date": "2026-11-20",
+      "eligible": true,
+      "why": null,
+      "partial": false,
+      "litres": 4.1,
+      "litres_baseline": 4.9,
+      "litres_saved": 0.8,
+      "dh_actual_kh": 2150.0,
+      "dh_baseline_kh": 2560.0,
+      "outdoor_mean_c": 5.1,
+      "comfort_deficit_kh": 0.1,
+      "warm_share": 0.99
+    }
+  ],
+  "rooms": [
+    {"room_id": "lounge", "name": "Lounge", "litres_saved": 6.0, "share": 0.42, "comfort_deficit_kh": 0.0, "warm_share": null}
+  ]
+}
+```
+
+`status` is `ready`, `learning` (with `why`, such as "8 of 14 days", and `progress`) or `unavailable` (with `why`: "no household", "no outdoor sensor" or "no nozzle rating"). While `learning`, `fit`, `totals` and every day's `litres_saved` and `litres_baseline` are `null`, but `days` still lists each day with `eligible` and `why` ("partial day", "outdoor sensor missing for 4 h"). `days` covers the last 60 days, oldest first. `totals` covers every eligible day kept; `rooms` covers the last 30 days, sorted by `litres_saved`, and their figures are an attribution. `percent_saved` and `litres_saved` can be negative.
 
 ### 8.2 Home Assistant integration
 
@@ -442,6 +612,7 @@ Thin client (ADR-0002): it reads `house` and `state` and posts to the routes in 
 - House: a heating mode select that posts `mode`, binary sensors for the hot-water store (`store.relay`) and a store boost (`store.boost`), a demand mode select (`select.radiate_demand_mode`, unique ID `<house id>_house_demand_mode`, options `eco` and `comfort`) that shows `settings.demand_mode` and posts `settings`; choosing `settings.demand_mode_default` posts `null`, so the server follows its configuration file again. A diagnostic pooled demand sensor in minutes (`sensor.radiate_pooled_demand`, unique ID `<house id>_house_pooled_demand`) from `boiler.pooled_demand_min`. Boiler state, boiler firing, relay starts in the last hour, predicted burn, outdoor temperature, short-cycle extra off time (with when it ends and the effective minimum off), and an alerts count with each alert's code, message and room as attributes. From `accounting`: burner hours and relay starts today, litres and kWh today when a nozzle rating is set (all reset at local midnight), and yesterday's balance score.
 - Per household person: an "away" binary sensor, on while Radiate counts them away, with `person_entity` (the linked `person` entity), `reason`, `away_until`, `presence`, `presence_since` and `presence_stale` as attributes. Each person is linked to a Home Assistant `person` entity by the integration's options or, for a person the options leave empty, by `ha_person` in `house`. The integration posts the linked entity's state to `people/{id}/presence` when it changes, and every 15 minutes as a heartbeat (`home` is home, any other state is not home, `unknown` and `unavailable` are not sent). It posts every `person` entity to `ha/persons` at setup and with each heartbeat, and ignores an error from a server without that route.
 - Services: `radiate.boost_store`, `radiate.set_mode`, `radiate.set_override` (a climate entity, `temperature`, optional `until` and `duration_min`, as in 8.1), `radiate.clear_override`, `radiate.set_away` (`person`, `until`) and `radiate.clear_away` (`person`), where `person` is a Radiate person ID or their linked `person` entity. **Not yet implemented** ([status](implementation-status.md#8-interfaces)): `radiate.recalibrate_valve`, blocked because the TRVZB has no calibration command in Zigbee2MQTT.
+- **Not yet implemented** (sections 5.8 and 5.9), radiate-ha only, reading fields the server adds: a `use` attribute on each room's climate entity, from `rooms[].use`; and two house sensors from `GET /api/v1/savings`, read once an hour and ignored when the server returns 404: "Oil saved, last 30 days" in litres (the sum of `days[].litres_saved` over eligible days in the last 30, unavailable unless `status` is `ready`), with `percent_saved`, `baseline.text`, `basis` and `warm_share` as attributes, and a diagnostic "Savings status" (`ready`, `learning` or `unavailable`, with `why`).
 
 ---
 
@@ -460,6 +631,8 @@ Common fields: `@timestamp`, `data_stream.*`, `service.{name,version}`, `radiate
 
 - **Time series data streams**: room and boiler streams are TSDS with dimensions `radiate.house.id` and `radiate.room.id`. The index templates are built by `radiate.export.elastic.index_templates()`; [deployment](deployment.md#elastic-export) shows how to install them.
 - **Buffering**: an on-disk queue (SQLite) holds up to 7 days when Elastic is unreachable; retries with backoff; batch size 500 or 10 s.
+
+**Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use), sections 5.8 and 5.9): `demand.use` and `demand.solo` in the room stream; in the daily stream `savings.{dh_actual_kh,dh_baseline_kh,outdoor_share,baseline_share,eligible}`, `comfort.{deficit_kh,warm_share}`, and `savings.{litres,fit_cv_rmse}` as estimated when the day closed (the fit moves later, so the API's figure for an old day can differ).
 
 **Not yet implemented** ([status](implementation-status.md#9-elastic-export)): `temperature.trv`, `model.eta`, `disturbance.{shower,window,cooker_spike}`, `boiler.firing`, `store.recovering`, `host.name` (edge id, not the house name), a Kibana dashboard (balance, burns, rooms), an install command for the templates, and an OTLP path to an EDOT collector.
 
@@ -481,6 +654,14 @@ One web UI, served by the server and embedded through HA ingress. It is a dashbo
 - **Demand mode**: an Eco and Comfort control beside the heating mode, with one line saying what the mode in effect does. It starts "Default:" while the server follows `boiler.demand_mode`, and picking that mode sends `null`. Hidden when the server sends no `settings`.
 - **Setup**: the first step is `radiate discover` on the command line. It reads Zigbee2MQTT's retained `bridge/devices` and `bridge/groups` (read-only), matches TRVs, temperature sensors and contact sensors into rooms by description area, friendly name or group, and writes a commented YAML draft in dry run with one pilot valve. Rooms with a TRV and no sensor become `internal_sensor_only`; sensors with no TRV are commented out as `passive`, with a note to change a room with no radiator to `unheated`, because an unvalved radiator can't be told from no radiator. Rules are in [configuration](configuration.md#start-from-your-devices).
 
+**Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use), sections 5.8 and 5.9):
+
+- **Savings view**: a fourth view (`#savings`, tab "Savings") from `GET /api/v1/savings`. At the top, a headline sentence that carries the number for people who skip the chart: "About 14 litres of oil saved since 1 November, with rooms in use warm 98 % of the time." Under it, the baseline sentence and, while litres come from relay time, "Litres are an upper bound until the burner itself is measured." Then one bar per day, or per week with a Days and Weeks switch: the day's litres as a solid bar and the baseline's litres as an outlined bar behind it, on one zero-based axis, so the gap is the saving. Days that aren't eligible are empty slots with their reason, never zero. A negative day shows its solid bar taller than the outline. Below, a small separate line of litres saved since the first eligible day, and the rooms' shares as a sorted horizontal bar list, negatives left of zero, labelled "Estimated share". Comfort sits beside every figure: the headline's warm share, and each day's comfort deficit in its tooltip and table row. While learning: "Still learning how much oil this house uses: 8 of 14 days." with a progress bar, and the eligible days listed with what is missing.
+- Accessible: a text alternative naming the chart and its trend, a "Show as table" toggle with the same numbers, outline versus fill (not colour alone) for baseline versus actual, bars reachable by keyboard with the tooltip's words, readable tooltips on touch, and no counting-up numbers. Plant room look and tokens ([design standards](standards/design.md)).
+- **House view**: the headline sentence, one line, linking to the Savings view, once `status` is `ready`.
+- **Rooms**: a setback room's status line reads "Not in use now: heated only while the boiler is on for other rooms"; a room that started a burn at its floor reads "Down to 12 °C: heating back to 14 °C".
+- **Demand mode**: the Eco line becomes "Eco: rooms share burns, and rooms not in use wait for a burn that's already running."
+
 **Not yet implemented** ([status](implementation-status.md#10-user-interface)): an arrival estimate on each room card, allocation reasons such as "Opening 35 % so it arrives with Bedroom 3 at 07:10" (the allocator gives no per-room reason yet), and a setup wizard in the UI that discovers rooms from Zigbee2MQTT or HA areas and marks bypass radiators, heat sources and the boiler relay.
 
 ---
@@ -495,6 +676,8 @@ A thermal simulator of the reference house (`src/radiate/sim`) drives the same `
 - Disturbances: open fire evenings, Aga continuous heat, showers, open windows.
 - Scenarios compare "no Radiate" (TRVs fully open, boiler on any call) with Radiate on arrival spread, comfort minutes below setpoint, relay and burner starts and burn lengths. Tests assert the guards are never violated.
 
+**Not yet implemented** ([plan, slice 6](plans/efficiency-mvp.md#slice-6-simulator-comparison-and-estimator-check)): a household scenario of the reference house (people, routines and use levels compiled by `compile_household`, so rooms get room use), the savings baseline as a third controller (each valve at its room's usual temperature on a timer, boiler on whenever a valve heats), and a comparison of oil, relay starts, burner hours and comfort deficit for `eco` today against `eco` with room use, with the savings estimate checked against the simulated difference.
+
 ---
 
 ## 12. Open questions
@@ -505,16 +688,28 @@ Hardware and legal:
 2. Will the owner fit a flow pipe clamp sensor? It replaces the inferred heat availability with a measured one.
 3. Heatslave 12/14 nozzle rating and the boiler thermostat setting, for oil accounting and the simulator.
 4. Freedom-to-operate check on EP1936290 and EP2420748 before marketing balancing in Germany or the EU.
-
 Behaviour:
 
 5. **Open question: unheated rooms in the model.** Unheated rooms are recorded and shown, but nothing in the model uses them. The room model (section 4.1) has no neighbours: each room loses heat to `T_out`, and a warm or cold neighbour shows up only as steady heat `d_r`. Should unheated-room temperatures feed the model, and how? For example: as the boundary temperature for heat lost to an adjacent unheated space (a landing or a utility room), instead of folding that loss into `b_r` against the outdoor temperature and into `d_r`; as a second regressor for the rooms next to them; or not at all, kept for reports and Elastic only. Any of these needs room adjacency in the configuration, which does not exist yet. **Not yet implemented** ([status](implementation-status.md#2-house-model)). For the owner to settle.
+
+Efficiency by room use and savings ([ADR-0004](adr/0004-efficiency-by-room-use.md), sections 5.8 and 5.9). Each has the design's recommended default, which the plan builds unless the owner decides otherwise:
+
+6. **Open question: setback rooms between burns.** Should a setback room (unused, overnight, between warm periods) be allowed to fall to the damp floor, 12 °C, before it starts a burn on its own, taking heat only from burns that run for other rooms until then? Or should it start a burn at the eco limit below its setback temperature (12.5 °C for 14 °C), as a room in use does? **Recommended:** fall to the damp floor. It is where most of the saving is, the household's setback temperature is still reached whenever the boiler runs, and the damp floor keeps it above the level the household setup already warns about. With the owner's 14 °C night temperature, bedrooms may sit between 12 and 14 °C overnight, and optimum start begins their morning warm-up earlier.
+7. **Open question: the savings baseline.** Is "a heating timer on from the first person up to the last to bed every day, with each room's valve at its usual temperature" fair? The research proposed every room at the in-use temperature, which flatters Radiate because it credits it for rooms the household would have turned down anyway. Should days when everyone is away count? A timer would have heated them, so the saving is real, but it can feel generous. **Recommended:** this baseline, away days included, with "every day" in the sentence the UI shows.
+8. **Open question: `comfort` with room use.** Should `comfort` also stop topping up and pooling on rooms that are not in use, or stay exactly as today? **Recommended:** exactly as today, so the owner has a known fallback if the new `eco` misbehaves on the real house.
+9. **Open question: money.** Show pounds as well as litres? It needs an oil price setting, stored per day. **Recommended:** litres and percentages in the first cut, money next.
+
+Hardware, raised by the efficiency work:
+
+10. Which radiators in the reference house have no valve? Section 2.2 lists the stairs radiator as the only bypass and a TRVZB in the bathroom; the owner has since described the bathroom radiator as an always-open bypass with no valve. If both are unvalved, the bathroom becomes `passive` and the bypass equivalent (`HouseConfig.bypass_equivalent`, 0.4) should rise, which also means fewer heat sinks (5.4).
 
 The three behaviour questions raised in version 0.2 (learning memory, pooled demand, learning on a stale room sensor) are decided; see section 13.
 
 ---
 
 ## 13. Changes in this revision
+
+Planned in November 2026, not built: fail warm presence (7, [ADR-0005](adr/0005-fail-warm-presence.md), proposed), after a dead phone left a one-person household held at frost. Also planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), proposed): room use in the `eco` demand mode, with solo limits, the damp floor and use-aware burn extension and heat sinks (5.3, 5.8); savings against a timer-and-valves baseline from degree-hours and a fitted house signature, with comfort beside it (5.9); `GET /api/v1/savings` and additive `state` fields (8.1); Home Assistant sensors (8.2); Elastic fields (9); the Savings view (10); the simulator comparison (11); open questions 6 to 9 and hardware question 10 (12). The implementation plan is [efficiency-mvp](plans/efficiency-mvp.md).
 
 Added since version 0.3 was settled: the `unheated` room role for a room with a sensor and no radiator (2.1, 4.6, 7, 10), and open question 5 on how unheated rooms should feed the model (section 12). Device health: battery and link quality are read (3), `GET /api/v1/devices` and `POST /api/v1/devices/scan` (8.1), and the devices view with its alerts (10). House suggestions: `GET /api/v1/suggestions` (8.1) and the suggestions view (10), with a capacity-based "radiator may be too small" check; the flow-sensitivity report of section 4.2 is still not implemented. The house model: `GET` and `PUT /api/v1/layout` and `boiler_linked` in the driver telemetry (8.1), and the house model with its room editor (10).
 
