@@ -24,11 +24,16 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 - [ADR-0001](adr/0001-standalone-vs-vtherm-companion.md): Radiate is a standalone house controller, not a Versatile Thermostat companion.
 - [ADR-0002](adr/0002-deployment-topology.md): one engine packaged three ways, and the cloud never sits in the control loop.
 - [ADR-0003](adr/0003-separate-home-assistant-integration.md): the Home Assistant integration lives in its own Apache-2.0 repository, radiate-ha.
+- [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed): in `eco`, how a room is used right now decides its part in demand, and savings are measured against one stated baseline with comfort beside them.
 - [ADR template](adr/template.md): copy it for a new decision.
 
 ## Proposals
 
 - [Household setup](proposals/household-setup.md): build heating schedules from how people live (routines, room use levels and away) instead of writing them by hand.
+
+## Plans
+
+- [Efficiency by room use, first cut](plans/efficiency-mvp.md): six slices, with file ownership, interfaces, tests and acceptance checks.
 
 ## Research
 
@@ -39,3 +44,5 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 - [Commercial products](research/commercial.md): tado, Danfoss, Homematic IP and others, from public material.
 - [Provenance](research/provenance.md): pinned source revisions, licence consequences and patents to clear.
 - [Reverse-engineering and clean-room policy](research/reverse-engineering-policy.md): what research is allowed and how findings become code.
+- [Control efficiency](research/control-efficiency.md): what saves oil on an on/off oil combi, with ranked changes and their evidence.
+- [Room usage and savings](research/usage-and-savings.md): inferring how rooms are used, and measuring and showing savings honestly.

@@ -4,7 +4,7 @@ The v1 specification ([spec.md](spec.md)) and the v1 items of the [coverage matr
 
 Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the spec was reconciled with the code at `925b7a1`: where the code had deliberately gone another way the spec now describes the code, and the rows below changed to match.
 
-**Status:** done (matches the spec), partial (works, but differs from the spec or misses part of it), missing (not in the code). Paths are relative to `src/radiate/` unless they start with a top-level folder. "Unsure" marks a row the audit could not settle from the code alone.
+**Status:** done (matches the spec), partial (works, but differs from the spec or misses part of it), missing (not in the code), planned (designed and in an implementation plan, not in the code). Paths are relative to `src/radiate/` unless they start with a top-level folder. "Unsure" marks a row the audit could not settle from the code alone.
 
 ## Summary
 
@@ -232,6 +232,31 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 | Hydraulics, boiler thermostat, store priority, disturbances | done | `sim/house.py`, `sim/runner.py` | |
 | Baseline against Radiate, guard checks | done | `sim/runner.py`, `tests/sim` | |
 | Crash and fire scenarios | done | `tests/sim/test_reference_house.py` | |
+
+## Planned: efficiency by room use
+
+Designed in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed), specified in [spec 5.8 and 5.9](spec.md#58-room-use-in-demand), and broken into slices in the [efficiency plan](plans/efficiency-mvp.md). Nothing here is built. **Planned** rows are not counted in the summary until they are built; each moves to done or partial in the same change as its code.
+
+| Item | Status | Where (planned) | Slice | Note |
+|---|---|---|---|---|
+| Room use from the household (`in_use`, `occasional`, `setback`) in the snapshot | planned | `core/types.py`, `config/household.py`, `config/use.py`, `server/runtime.py` | 1 | None without a household, so old snapshots replay unchanged |
+| Savings baseline setpoint in the snapshot | planned | `config/use.py`, `server/runtime.py` | 1 | Timer from first up less the fixed preheat to last in bed, each room at its usual temperature |
+| Damp floor as a control limit (12 °C) | planned | `core/types.py`, `config/household.py` | 1, 2 | Today only a note in the household setup |
+| `eco` solo limits by room use, floored at the damp floor | planned | `core/decide.py` | 2 | HIGH risk: changes when the boiler fires |
+| Setback rooms left out of pooled demand; solo latch in the stop rule | planned | `core/decide.py` | 2 | HIGH risk |
+| Burn extension only for rooms in use or occasional; heat sinks by room use | planned | `core/decide.py` | 2 | HIGH risk: changes which valves open |
+| Reasons `demand.setback`, `demand.floor`; `rooms[].use` and `rooms[].solo` in `state` | planned | `core/decide.py`, `server/runtime.py` | 2 | Additive API |
+| Degree-hours, lift and comfort per room per day | planned | `core/savings.py`, `core/decide.py`, `core/persist.py` | 3 | Pure; optional `savings` section in saved state |
+| House signature fit, eligible days, savings report | planned | `core/savings.py` | 3 | Theil-Sen; 14 days and CV(RMSE) 25 % gate |
+| Closed days kept for 730 days; `GET /api/v1/savings` | planned | `server/savings.py`, `server/runtime.py`, `server/bridge.py`, `server/app.py` | 4 | |
+| Elastic daily `savings.*` and `comfort.*` fields | planned | `export/elastic.py` | 4 | |
+| Savings view, headline, table view | planned | `web/savings.js`, `web/savings.css`, `web/index.html`, `web/app.js` | 5 | |
+| Simulator: household scenario, baseline controller, comparison, estimator check | planned | `sim/reference.py`, `sim/runner.py`, `sim/compare.py`, `cli.py`, `docs/simulation.md` | 6 | |
+| Home Assistant: room `use` attribute, "Oil saved, last 30 days" and savings status sensors | planned | radiate-ha | later | Reads additive fields only |
+| Litres from burner firing (Shelly `apower`) | missing | | later | Needs the wiring answer (spec open question 1) |
+| Optimum stop, arrival-tuned optimum start, outdoor cut-off, damp guard | missing | | later | Each to be simulated against slice 2 first (spec 5.8) |
+| Room activity input, usage log, usage suggestions | missing | | later | Needs radiate-ha first |
+| Oil price and money in the UI | missing | | later | Spec open question 9 |
 
 ## Coverage matrix v1 items not covered above
 

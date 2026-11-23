@@ -96,7 +96,7 @@ When a person gets up, is out, works from home, and goes to bed, on weekdays or 
 Code: `Routine` (`up_min`, `bed_min`, `out`, `work`), config keys `household.people.<id>.weekdays` and `.weekend`.
 
 **Use level**:
-How much a room is used: in use, occasional or unused. Each level has one house-wide temperature, 19, 16 and 14 °C by default. A room's level can differ at weekends.
+How much a room is used: in use, occasional or unused. Each level has one house-wide temperature, 19, 16 and 14 °C by default. A room's level can differ at weekends. With the warm periods, it gives the room use that `eco` will act on (planned, see room use).
 Code: `UseLevel`, `Temperatures`, config keys `household.rooms.<id>.use` and `household.temperatures`.
 
 **Night temperature**:
@@ -422,7 +422,7 @@ Code: `want_fire` in `decide`.
 **Demand mode**:
 How calling rooms fire the boiler. Set by `boiler.demand_mode` and changeable at runtime through the API. Two values:
 
-- `eco` (default): rooms fire the boiler together. The pooled demand must reach 1.5 minimum burns, or one room must be more than the eco limit below its target. A small room on its own waits until it is colder or other rooms join it.
+- `eco` (default): rooms fire the boiler together. The pooled demand must reach 1.5 minimum burns, or one room must be more than the eco limit below its target. A small room on its own waits until it is colder or other rooms join it. Planned: room use will set each room's part (solo limit, pooled demand, keeping the burner on, top-ups).
 - `comfort`: any calling room more than the comfort limit below its target fires the boiler, as does a predicted burn of 1.5 minimum burns.
 
 Code: `DemandMode`, `BoilerConfig.demand_mode`, `Snapshot.demand_mode`, `Runtime.demand_mode`, API `POST /api/v1/settings`, `settings.demand_mode` in `state`.
@@ -439,6 +439,28 @@ Code: `BoilerConfig.comfort_limit_k`, config key `boiler.comfort_limit_k`.
 **Eco limit**:
 In the `eco` demand mode, the most a calling room waits below its target for other rooms before it fires the boiler on its own. Default 1.5 K, 0.5 to 3 K.
 Code: `BoilerConfig.eco_limit_k`, config key `boiler.eco_limit_k`.
+
+**Room use**:
+Planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.8](spec.md#58-room-use-in-demand)), not built. How a controllable room is used right now, worked out by the runtime from the household each tick: `in_use` (inside a warm period on a day its use level is in use, in a warm period a room adjustment added, or with an override), `occasional` (inside a warm period on an occasional day) or `setback` (any other time). None for a room with a hand-written schedule or no household, which keeps today's behaviour. In `eco` it decides the room's part in demand.
+Code: `RoomUse`, `RoomInput.use`, `room_use` in `radiate.config.use`, `Runtime._apply_use`, API `rooms[].use` in `state`.
+_Avoid_: use level for this. The use level is the household's setting for a room and a day type; room use is what applies this minute.
+
+**Setback**:
+Planned, not built. The room use of a room outside its warm periods: unused that day, overnight, between warm periods, or with its people away. A setback room never counts towards pooled demand, never takes a burn extension, is the last choice for a heat sink, and starts a burn on its own only at its solo threshold.
+Code: `RoomUse.SETBACK`, reason `demand.setback`.
+_Avoid_: unused for this, which is a use level.
+
+**Solo limit, solo threshold**:
+Planned, not built. In `eco`, how far below its target a calling room waits before it starts a burn on its own: the eco limit for a room in use (or with no room use), the eco limit plus 1 K for an occasional or setback room. The solo threshold is the temperature that gives; for a room with room use it is never below the damp floor, or the room's own target if lower: `max(target − limit, min(target, damp_floor_c))`.
+Code: `solo_threshold_c` and `SOLO_EXTRA_K` in `radiate.core.decide`.
+
+**Solo latch**:
+Planned, not built. Set when a calling room passes its solo threshold and so may start a burn alone; cleared when it stops calling. A setback room keeps the burner running only while its solo latch is set.
+Code: `RoomState.solo`, API `rooms[].solo`, reason `demand.floor`.
+
+**Damp floor**:
+Planned as a control limit, not built. The temperature no saving rule lets a room wait below: 12 °C, the level below which walls and window frames can get damp. Today it is only a warning in the household setup. Frost protection sits below it and is unchanged.
+°C. Code: `DAMP_FLOOR_C` and `BoilerConfig.damp_floor_c` in `radiate.core.types`; `DAMP_BELOW_C` in `radiate.config.household` takes its value from it.
 
 **Predicted burn**:
 How long the current calling rooms need the burner, taken from the target arrival.
@@ -549,6 +571,52 @@ Code: `Snapshot.store_boost`, `Runtime.store_boost_until`, API `POST /api/v1/sto
 The period after the store relay turns on when the boiler heats the store first and radiators get no flow (hot-water priority). Heat availability is 0 and learning is gated.
 Code: `StoreConfig.recovery_s`, `StoreConfig.priority_over_heating`, gate `store_recovery`.
 _Avoid_: DHW priority.
+
+## Savings
+
+Planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.9](spec.md#59-savings)), not built.
+
+**Savings**:
+The oil Radiate estimates it saved against the savings baseline, from measured temperatures and measured oil, with the comfort it cost shown beside it. In litres, per day and in total, and as a percentage of the baseline's litres. A day's saving can be negative.
+Code: `radiate.core.savings` (`SavingsMeter`, `report`), API `GET /api/v1/savings`, UI "Savings".
+_Avoid_: "up to" figures, and "savings" for a simulated or projected figure.
+
+**Savings baseline**:
+What savings are measured against: a heating timer on from the first person up to the last to bed every day, with each room's valve at its usual temperature for its use level. Compiled from the household with nobody away and no room adjustments. Shown on screen in one sentence.
+Code: `compile_baseline` in `radiate.config.use`, `RoomInput.baseline_c`, `Snapshot.baseline`, API `baseline` in `GET /api/v1/savings`.
+
+**Degree-hours**:
+How much warmer than outside a room was kept, summed over time: `max(0, T − T_out)` per hour, in K·h. Actual degree-hours use the room's reading; baseline degree-hours use the baseline room temperature. Heat loss, and so oil, follows degree-hours.
+Symbol `DH`, K·h. Code: `RoomDay.dh_actual_kh`, `RoomDay.dh_baseline_kh`.
+
+**Lift**:
+How much warmer Radiate's own heating has made a room than the savings baseline would have, built up while the baseline would not have heated the room (timer off, or Radiate's setpoint above the baseline's) and decaying at the room's loss rate. Subtracted from the reading to get the baseline room temperature, so time Radiate spends heating outside the baseline's hours counts against the saving.
+K. Code: `SavingsMeter.lift_k`.
+
+**House signature**:
+The straight line that turns weighted degree-hours into litres for this house, `litres = k · DH + c`, fitted with Theil-Sen, which resists odd days, over the last 60 eligible days. `k` is litres per degree-hour; `c` absorbs standing losses.
+Code: `fit_signature`, `Signature` in `radiate.core.savings`, API `fit`.
+
+**Room weight**:
+How much a room's degree-hours count in the house's total for savings: in proportion to `b / a`, the radiator time each kelvin needs, or equal weights until every counted room's model is confident.
+Code: `room_weights` in `radiate.core.savings`.
+
+**Eligible day**:
+A closed day that can carry a saving: not partial, a real outdoor reading and a baseline for at least 90 % of it, litres known, and the same litres basis as the rest of the fit. Savings appear only once there are 14, and the house signature fits within 25 % CV(RMSE).
+Code: `eligible` in `radiate.core.savings`, API `days[].eligible`, `days[].why`, `progress`.
+
+**Comfort deficit**:
+For savings and the simulator: how far rooms in use (and occasional rooms) were below their setpoint less 0.5 K, summed over time, in K·h. Shown beside every saving.
+K·h. Code: `RoomDay.deficit_kh`, `Result.comfort_deficit_kh` in `radiate.sim.runner`, API `comfort_deficit_kh`.
+_Avoid_: comfort minutes below, which is the ledger's older count of minutes below the comfort limit.
+
+**Warm share**:
+The share of minutes rooms were in use (or occasional) that they were at or above their setpoint less 0.5 K. The headline's "rooms in use warm 98 % of the time".
+Code: `RoomDay.warm_ok_min / RoomDay.warm_min`, API `warm_share`.
+
+**Litres basis**:
+What litres are worked out from: `relay` (heating relay time, an upper bound, the only basis today) or `firing` (burner firing seen in the Shelly's channel 1 power, planned). A house signature uses days of one basis only.
+Code: `basis` in the daily summary and in `GET /api/v1/savings`; planned `Snapshot.heating_power_w`, `BoilerConfig.firing_power_w`.
 
 ## Safety and fallback
 
