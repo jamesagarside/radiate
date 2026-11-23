@@ -1,4 +1,4 @@
-"""Command line: `radiate serve`, `sim`, `check-config`, `discover`, `schedules`, `dashboard`,
+"""Command line: `radiate serve`, `sim`, `sim-efficiency`, `check-config`, `discover`, `schedules`, `dashboard`,
 `replay`, `bootstrap` and `shelly`."""
 
 from __future__ import annotations
@@ -186,6 +186,12 @@ def _sim(args: argparse.Namespace) -> None:
     print(f"{'':{width}}  {'smart TRVs':>11}  {'Radiate':>8}")
     for k in b:
         print(f"{k:{width}}  {b[k]:>11}  {r[k]:>8}")
+
+
+def _sim_efficiency(args: argparse.Namespace) -> None:
+    from radiate.sim.compare import main
+
+    main(args)
 
 
 def _household_line(site) -> str | None:
@@ -557,6 +563,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="how calling rooms fire the boiler (default eco)",
     )
     m.set_defaults(func=_sim)
+    e = sub.add_parser(
+        "sim-efficiency",
+        help="compare eco with and without room use, comfort and a plain timer in the simulator",
+    )
+    e.add_argument("--days", type=int, default=24)
+    e.add_argument("--warmup", type=int, default=3)
+    e.add_argument("--seeds", default="1,2,3", help="comma-separated seeds (default 1,2,3)")
+    e.add_argument(
+        "--scenarios",
+        default="fixed,mild,cold",
+        help="comma-separated: fixed, mild, cold, owner, owner_cold (default fixed,mild,cold)",
+    )
+    e.add_argument("--workers", type=int, default=None, help="parallel runs (default: CPUs)")
+    e.set_defaults(func=_sim_efficiency)
     c = sub.add_parser("check-config", help="validate a house configuration file")
     c.add_argument("path")
     c.add_argument("--data-dir", help=DATA_DIR_HELP)
