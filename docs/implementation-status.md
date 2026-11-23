@@ -10,7 +10,7 @@ Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the 
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 129 |
+| Done | 82 | 132 |
 | Partial | 26 | 22 |
 | Missing | 37 | 22 |
 
@@ -235,7 +235,7 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 
 ## Planned: efficiency by room use
 
-Designed in [ADR-0004](adr/0004-efficiency-by-room-use.md) and [ADR-0005](adr/0005-fail-warm-presence.md) (both proposed), specified in [spec 7](spec.md#7-failure-modes) (fail warm) and [spec 5.8 and 5.9](spec.md#58-room-use-in-demand), and broken into slices in the [efficiency plan](plans/efficiency-mvp.md). Slices 1 and 3 are built; the rest is not. **Planned** rows are not counted in the summary until they are built; each moves to done or partial in the same change as its code.
+Designed in [ADR-0004](adr/0004-efficiency-by-room-use.md) and [ADR-0005](adr/0005-fail-warm-presence.md) (both proposed), specified in [spec 7](spec.md#7-failure-modes) (fail warm) and [spec 5.8 and 5.9](spec.md#58-room-use-in-demand), and broken into slices in the [efficiency plan](plans/efficiency-mvp.md). Slices 1, 3, 4 and 5 are built; the rest is not. **Planned** rows are not counted in the summary until they are built; each moves to done or partial in the same change as its code.
 
 | Item | Status | Where (planned) | Slice | Note |
 |---|---|---|---|---|
@@ -249,10 +249,10 @@ Designed in [ADR-0004](adr/0004-efficiency-by-room-use.md) and [ADR-0005](adr/00
 | Burn extension only for rooms in use or occasional; heat sinks by room use | planned | `core/decide.py` | 2 | HIGH risk: changes which valves open |
 | Reasons `demand.setback`, `demand.floor`; `rooms[].use` and `rooms[].solo` in `state` | planned | `core/decide.py`, `server/runtime.py` | 2 | Additive API |
 | Degree-hours, lift and comfort per room per day | done | `core/savings.py` `SavingsMeter`, `core/decide.py`, `core/persist.py` | 3 | Pure. Every closed day summary carries a `savings` record, with each room's minutes with a reading (`read_min`) beyond the spec's fields. Lift relaxes exactly at the loss rate each tick, so any tick length is stable, and decays over downtime on restore. Saved state gains an optional, versioned `savings` section (its own `version`, with a migration table). A room without room use has no baseline and is left out, and `report` weighs only the rooms the latest closed day measured. Never feeds control: `radiate sim` output is unchanged |
-| House signature fit, eligible days, savings report | done | `core/savings.py` `fit_signature`, `why_not_eligible`, `report`, `room_weights` | 3 | Theil-Sen; 14 days, CV(RMSE) 25 % and weather spread (p90 / p10 at least 1.3) gate inside `report`, so no caller gets an ungated figure. A day is also ineligible with any room's reading missing for over 10 % of it. Not served yet (slice 4) |
-| Closed days kept for 730 days; `GET /api/v1/savings` | planned | `server/savings.py`, `server/runtime.py`, `server/bridge.py`, `server/app.py` | 4 | |
-| Elastic daily `savings.*` and `comfort.*` fields | planned | `export/elastic.py` | 4 | |
-| Savings view, headline, table view | planned | `web/savings.js`, `web/savings.css`, `web/index.html`, `web/app.js` | 5 | |
+| House signature fit, eligible days, savings report | done | `core/savings.py` `fit_signature`, `why_not_eligible`, `report`, `room_weights` | 3 | Theil-Sen; 14 days, CV(RMSE) 25 % and weather spread (p90 / p10 at least 1.3) gate inside `report`, so no caller gets an ungated figure. A day is also ineligible with any room's reading missing for over 10 % of it. Served by `GET /api/v1/savings` (slice 4) |
+| Closed days kept for 730 days; `GET /api/v1/savings` | done | `server/savings.py`, `server/runtime.py`, `server/bridge.py`, `server/app.py` | 4 | `DailyHistory` in the state database under `daily_history`, saved as `{version, days}` when a day closes; a repeated day replaces the earlier one, and a history of another version is set aside with a warning. The route answers `report` unchanged, so the API never computes a figure of its own. `status` is `unavailable` with "no household" when there is neither a household nor a hand-written room with a use level, and "no outdoor sensor" when a live house file names none (the demo and simulator always have one). Also through the browser demo's bridge |
+| Elastic daily `savings.*` and `comfort.*` fields | done | `export/elastic.py`, `server/savings.py` `day_estimate` | 4 | `outdoor_share`, `baseline_share` and `comfort.{deficit_kh,warm_share}` from the day's record; the room-weighted `dh_actual_kh`, `dh_baseline_kh` and `eligible`, and once the gate is open `savings.litres` and `savings.fit_cv_rmse`, from the report when the day closed. Mapped in the daily index template |
+| Savings view, headline, table view | done | `web/savings.js`, `web/savings.css`, `web/index.html`, `web/app.js`, `web/guide.js` (Guide text in `index.html`) | 5 | A Savings tab (`#savings`) with the headline, the baseline sentence, the upper-bound line, statistics, a Days and Weeks bar chart in inline SVG (fill for oil used, outline for the baseline, hatched empty slots for days not counted), the running total, rooms' estimated shares and a table view; a still learning state with progress and the oil used each day so far; an unavailable state saying what is missing. The House view shows the headline as one line once there are figures. Guide section `#guide/savings`. In the demo and the static demo build. Checked by eye at 1280 and 390 px in dark mode; light mode follows the same tokens. Not built: the room status lines for `demand.setback` and `demand.floor` and the new Eco line, which wait for slice 2 |
 | Simulator: household scenario, baseline controller, comparison, estimator check | planned | `sim/reference.py`, `sim/runner.py`, `sim/compare.py`, `cli.py`, `docs/simulation.md` | 6 | |
 | Home Assistant: room `use` attribute, "Oil saved, last 30 days" and savings status sensors | planned | radiate-ha | later | Reads additive fields only |
 | Litres from burner firing (Shelly `apower`) | missing | | later | Needs the wiring answer (spec open question 1) |
