@@ -12,6 +12,14 @@ barely moves a model. A long memory alone would take months to follow a real cha
 such as a radiator bled, replaced or silting up, so each model also watches its own
 residuals (change detection). When they stay biased, it inflates its covariance and
 re-learns from the data that follows, then carries on with the long memory.
+
+Confidence measures how much the data has narrowed the heating gain, not how well the
+model fits. A model fitted to bad data (heat assumed where there was none) is confident
+and wrong, and the gates that rely on its residual (`unexplained_heat`, `cooker_spike`)
+then hold back exactly the samples that would correct it. So change detection also
+watches those held-back samples, judges a confident model before the warm-up ends, and
+after a re-learn the residual gates stand down for a while (`doubt`) so the model can
+learn from the heat it could not explain.
 """
 
 from __future__ import annotations
@@ -40,11 +48,22 @@ MEMORY_DAYS_MAX = 3650.0
 # and the drive.
 CHANGE_GAIN_WINDOW = 360  # updates: about 6 h of learning
 CHANGE_GAIN_SHARE = 0.35  # drive-weighted residual bias, as a share of the heating gain
+# And at least this, K/h at full drive: a share of a gain near its lower bound is noise.
+CHANGE_GAIN_MIN_KPH = 0.5
 CHANGE_MIN_DRIVE_SQ = 0.02  # mean squared drive: enough heating in the window to judge
 CHANGE_LEVEL_WINDOW = 1440  # updates: about a day of learning
 CHANGE_LEVEL_SHARE = 0.5  # mean residual, as a share of its root mean square
 CHANGE_WARMUP = 2 * UPDATES_PER_DAY  # updates from priors before the first check
+# A model whose gain is already this certain has stopped moving on its own, so it is
+# judged before the warm-up ends: on the gain only, and only when it is grossly wrong
+# (a bias of this share of the gain). A model still settling is often a third out.
+CHANGE_CONFIDENT = 0.8
+CHANGE_GAIN_SHARE_EARLY = 1.0
 RELEARN_INFLATION = 0.3  # covariance added on a change, as a share of the prior's
+# After a re-learn, the gates that rely on the model's residual stand down for this many
+# heating updates (drive at least DOUBT_MIN_DRIVE): about an hour of heating.
+RELEARN_DOUBT_UPDATES = 60
+DOUBT_MIN_DRIVE = 0.2
 
 
 def forgetting(memory_days: float) -> float:
@@ -75,6 +94,8 @@ class RoomEstimator:
     level_ee: float = 0.0
     since_reset: int = 0  # learning updates since the statistics were last reset
     relearns: int = 0  # changes detected so far
+    # Heating updates left before the residual gates count again, after a re-learn.
+    doubt: int = 0
 
     @classmethod
     def new(
@@ -128,7 +149,9 @@ class RoomEstimator:
         err = slope - sum(t * xi for t, xi in zip(self.theta, x, strict=True))
         self._watch(err, drive)
         sd = math.sqrt(self.residual_var)
-        if self.samples > 30 and abs(err) > OUTLIER_SD * sd:
+        # In doubt, the outlier limit came from a model now known to be wrong: a large
+        # error is the evidence to learn from, not an outlier.
+        if self.samples > 30 and self.doubt == 0 and abs(err) > OUTLIER_SD * sd:
             self.rejected += 1
             return False
 
@@ -149,7 +172,19 @@ class RoomEstimator:
         ]
         self.residual_var = 0.995 * self.residual_var + 0.005 * err * err
         self.samples += 1
+        if self.doubt > 0 and drive >= DOUBT_MIN_DRIVE:
+            self.doubt -= 1
         return True
+
+    def watch(self, slope: float, drive: float, delta_out: float) -> None:
+        """Change detection only, for a sample a residual gate held back.
+
+        The model is not updated: the gate may be right (sun, guests). But if the model
+        itself is wrong, these are the samples that show it, so the gain statistic sees
+        them. The level statistic does not: heat at no drive is what the gates are for.
+        """
+        err = self.residual(slope, drive, delta_out)
+        self._watch(err, drive, level=False)
 
     def change_detected(self) -> str | None:
         """Which statistic shows a change, if any: `gain` or `level`.
@@ -159,24 +194,31 @@ class RoomEstimator:
         says. Not judged while the gain sits on the bound it is being pushed past.
         Level: the residual's mean is a large share of its root mean square, so the
         room loses or gains heat the model does not explain.
+
+        In the warm-up from priors only a confident model is judged, on the gain alone,
+        against the wider `CHANGE_GAIN_SHARE_EARLY`.
         """
-        if self.samples < CHANGE_WARMUP:
+        warm = self.samples >= CHANGE_WARMUP
+        if not warm and self.confidence < CHANGE_CONFIDENT:
             return None
         if self.since_reset >= CHANGE_GAIN_WINDOW and self.gain_uu >= CHANGE_MIN_DRIVE_SQ:
             bias = self.gain_eu / self.gain_uu
             lo, hi = self.bounds[0]
             pinned = (bias > 0 and self.a >= 0.99 * hi) or (bias < 0 and self.a <= 1.01 * lo)
-            if not pinned and abs(bias) >= CHANGE_GAIN_SHARE * self.a:
+            share = CHANGE_GAIN_SHARE if warm else CHANGE_GAIN_SHARE_EARLY
+            limit = max(share * self.a, CHANGE_GAIN_MIN_KPH)
+            if not pinned and abs(bias) >= limit:
                 return "gain"
         if (
-            self.since_reset >= CHANGE_LEVEL_WINDOW
+            warm
+            and self.since_reset >= CHANGE_LEVEL_WINDOW
             and self.level_ee > 0
             and abs(self.level_e) >= CHANGE_LEVEL_SHARE * math.sqrt(self.level_ee)
         ):
             return "level"
         return None
 
-    def _watch(self, err: float, drive: float) -> None:
+    def _watch(self, err: float, drive: float, level: bool = True) -> None:
         """Change detection: track the innovation, and re-learn when it stays biased."""
         if self.samples > 30:
             # One glitch is not a change: count each sample at most at the outlier limit.
@@ -187,8 +229,9 @@ class RoomEstimator:
         self.gain_eu += g * (err * drive - self.gain_eu)
         self.gain_uu += g * (drive * drive - self.gain_uu)
         self.gain_ee += g * (err * err - self.gain_ee)
-        self.level_e += lv * (err - self.level_e)
-        self.level_ee += lv * (err * err - self.level_ee)
+        if level:
+            self.level_e += lv * (err - self.level_e)
+            self.level_ee += lv * (err * err - self.level_ee)
         self.since_reset += 1
         if self.change_detected() is not None:
             self.relearn()
@@ -198,7 +241,8 @@ class RoomEstimator:
 
         Adds part of the prior covariance back, so the data that follows outweighs the
         long memory, and widens the outlier limit to the recent residuals so the new
-        behaviour is not rejected as outliers. The long memory then carries on.
+        behaviour is not rejected as outliers. The long memory then carries on. The
+        residual gates stand down for the next `RELEARN_DOUBT_UPDATES` heating updates.
         """
         for i, p0 in enumerate(self.p0_diag):
             self.p[i][i] += RELEARN_INFLATION * p0
@@ -207,6 +251,7 @@ class RoomEstimator:
         self.level_e = self.level_ee = 0.0
         self.since_reset = 0
         self.relearns += 1
+        self.doubt = RELEARN_DOUBT_UPDATES
 
     def to_dict(self) -> dict:
         return {

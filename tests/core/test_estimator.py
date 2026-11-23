@@ -85,6 +85,7 @@ def test_long_memory_relearns_a_radiator_that_lost_output(monkeypatch):
     assert est.relearns >= 1 and abs(est.a - 1.8) < 0.3  # re-learned within a day
     # Without change detection, the long memory is still far off a day later.
     monkeypatch.setattr(estimator, "CHANGE_WARMUP", 10**12)
+    monkeypatch.setattr(estimator, "CHANGE_CONFIDENT", 1.01)
     _feed(stiff, random.Random(4), 1.8, days)
     assert stiff.a > 2.6
 
@@ -97,7 +98,9 @@ def test_a_glitch_is_not_a_change():
     assert est.relearns == 0
 
 
-def test_no_change_check_while_warming_up_from_priors():
+def test_no_change_check_while_warming_up_from_priors(monkeypatch):
+    # An uncertain model is not judged before the warm-up: it still moves on its own.
+    monkeypatch.setattr(estimator, "CHANGE_CONFIDENT", 1.01)
     est = RoomEstimator.new()
     _feed(est, random.Random(6), 3.0, estimator.CHANGE_WARMUP - 1)
     assert est.relearns == 0 and est.change_detected() is None
@@ -113,3 +116,54 @@ def test_relearn_inflates_covariance_and_resets_the_statistics():
             before[i] + estimator.RELEARN_INFLATION * est.p0_diag[i]
         )
     assert est.since_reset == 0 and est.gain_uu == 0.0 and est.relearns == 1
+
+
+# --- a confident model that is wrong (spec 4.3 consistency) ----------------------------
+
+
+def _wrongly_confident(rng):
+    """A model trained while 'heat available' did not mean heat: the radiator drive was
+    high but the room barely warmed (a dry run with the boiler on its own timer)."""
+    est = RoomEstimator.new()
+    _feed(est, rng, 0.15, 800)
+    assert est.a < 0.5 and est.confidence > 0.8
+    assert est.samples < estimator.CHANGE_WARMUP and est.relearns == 0
+    return est
+
+
+def test_watching_a_gated_sample_does_not_move_the_model():
+    est = _wrongly_confident(random.Random(8))
+    theta, p = list(est.theta), [list(row) for row in est.p]
+    est.watch(5.0, 0.4, 10.0)
+    assert est.theta == theta and est.p == p and est.samples == 800
+
+
+def test_a_confident_wrong_model_is_relearned_from_the_samples_its_gate_holds_back():
+    # The room really warms at 6 K/h at full drive. The residual is far above +1 K/h, so
+    # `unexplained_heat` holds every heating sample back: they are only watched.
+    rng = random.Random(9)
+    est = _wrongly_confident(rng)
+    for _ in range(90):
+        drive = rng.uniform(0.3, 0.5)
+        est.watch(6.0 * drive - 0.05 * 12 + 0.1, drive, 12.0)
+        if est.relearns:
+            break
+    assert est.relearns == 1
+    assert est.confidence < 0.6  # no longer trusted to call heat "unexplained"
+    assert est.doubt == estimator.RELEARN_DOUBT_UPDATES
+
+
+def test_doubt_counts_down_on_heating_updates_only():
+    est = RoomEstimator.new()
+    est.relearn()
+    est.update(0.0, 0.0, 10.0)  # not heating: does not count
+    assert est.doubt == estimator.RELEARN_DOUBT_UPDATES
+    est.update(1.0, 0.4, 10.0)
+    assert est.doubt == estimator.RELEARN_DOUBT_UPDATES - 1
+
+
+def test_a_steady_confident_model_is_not_relearned_before_the_warm_up():
+    est = RoomEstimator.new()
+    _feed(est, random.Random(10), 3.0, estimator.CHANGE_WARMUP - 1)
+    assert est.confidence > estimator.CHANGE_CONFIDENT
+    assert est.relearns == 0
