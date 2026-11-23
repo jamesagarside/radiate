@@ -331,6 +331,7 @@ def run(
     schedule: str = "fixed",
     room_use: bool = False,
     outdoor_by_day: Sequence[float] | None = None,
+    metering: bool = True,
 ) -> Result:
     """One closed-loop run.
 
@@ -346,7 +347,9 @@ def run(
     `controller`: "radiate", "baseline" (smart TRVs) or "timer" (the savings baseline).
     `schedule`: "fixed", "household" or "owner" (see the module notes). `room_use`: fill
     `RoomInput.use` from the schedule, so `eco` acts on it. `outdoor_by_day`: each
-    day's outdoor mean in place of `outdoor_mean`. The defaults give the original runs.
+    day's outdoor mean in place of `outdoor_mean`. `metering`: Radiate sees the burner
+    firing, as from the reference install's Shelly power reading; False for a relay
+    without it. The defaults give the original runs, with metering.
     """
     d = disturbances or Disturbances()
     cfg = cfg or house_config()
@@ -428,7 +431,7 @@ def run(
                 zigbee_outage is not None and zigbee_outage[0] <= house.now < zigbee_outage[1]
             )
             if controller == "radiate" and alive:
-                snap = _snapshot(house, reports, minute, optimum_start, plan, room_use)
+                snap = _snapshot(house, reports, minute, optimum_start, plan, room_use, metering)
                 if zigbee_down:
                     for inp in snap.rooms.values():
                         inp.trv_available = False
@@ -507,6 +510,7 @@ def _snapshot(
     optimum_start: bool = True,
     plan: SchedulePlan | None = None,
     room_use: bool = False,
+    metering: bool = True,
 ) -> Snapshot:
     rooms = {}
     weekday = int(house.now // DAY) % 7
@@ -540,6 +544,7 @@ def _snapshot(
                 rooms[s.id].use = plan.use_at(s.id, weekday, minute)
             if plan.household:
                 rooms[s.id].baseline_c = plan.baseline_at(s.id, weekday, minute)
+    b = house.boiler
     snap = Snapshot(
         now=house.now,
         minute_of_day=minute,
@@ -548,6 +553,12 @@ def _snapshot(
         heating_relay=house.heating_relay,
         store_relay=house.store_relay,
         day=int(house.now // DAY),
+        # The Shelly's power metering (spec 5.6): the burner firing on each channel.
+        # The store has priority, so a burn while the store heats is the store's.
+        heating_burner=b.burner and house.heating_relay and not b.store_heating
+        if metering
+        else None,
+        store_burner=b.burner and b.store_heating if metering else None,
     )
     if plan is not None:
         snap.baseline = plan.household

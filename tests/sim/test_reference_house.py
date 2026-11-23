@@ -82,6 +82,8 @@ def test_daily_accounting_matches_the_relay(runs):
         assert [d["day"] for d in days] == [0, 1, 2, 3]
         for d in days:
             assert 0 < d["burner_hours"] < 24
+            # Metered: burner time, inside relay time (the boiler's thermostat cycles).
+            assert d["basis"] == "burner" and d["burner_hours"] <= d["relay_hours"]
             assert d["max_starts_in_hour"] <= 3
             assert d["burns"]["count"] in (d["starts"] - 1, d["starts"], d["starts"] + 1)
             assert d["balance"]["score"] is None or 0 <= d["balance"]["score"] <= 100
@@ -89,9 +91,14 @@ def test_daily_accounting_matches_the_relay(runs):
         # simulator's own count, which only differs by burns crossing the edges.
         today = radiate.engine.ledger.summary(None)
         assert today["day"] == 4
-        measured = sum(d["burner_hours"] for d in days[2:]) + today["burner_hours"]
+        measured = sum(d["relay_hours"] for d in days[2:]) + today["relay_hours"]
         relay_h = sum(radiate.relay_burns_s) / 3600
         assert abs(measured - relay_h) < 0.1 * relay_h + 1.0
+        # Heating and store burner time together match the simulated burner's.
+        burner = sum(
+            d["burner"]["heating_hours"] + d["burner"]["store_hours"] for d in [*days[2:], today]
+        )
+        assert abs(burner - radiate.burner_hours) < 0.1 * radiate.burner_hours + 1.0
 
 
 def test_no_false_failure_alerts(runs):
@@ -128,7 +135,11 @@ def test_out_of_oil_is_detected_and_the_boiler_keeps_calling():
     detected = r.first_alert_s["boiler.no_heat"]
     assert detected - out_at < 3 * 3600
     assert r.last_actions.heating_relay  # still calling in case the boiler recovers
-    assert all(rs.learning_gate == "no_heat" for rs in r.engine.rooms.values())
+    # The lounge fire lit on day 3 is still seen, the radiators being cold; every other
+    # room is held by the no-heat gate.
+    gates = {rid: rs.learning_gate for rid, rs in r.engine.rooms.items()}
+    assert gates.pop("lounge") in ("no_heat", "fire", "fire_holdoff")
+    assert set(gates.values()) == {"no_heat"}
 
 
 def test_seized_valve_is_flagged():
