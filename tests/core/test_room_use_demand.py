@@ -18,7 +18,12 @@ from radiate.core import (
     Snapshot,
     decide,
 )
-from radiate.core.decide import SOLO_EXTRA_K, solo_threshold_c
+from radiate.core.decide import (
+    PREHEAT_MAX_S,
+    PREHEAT_USE_MAX_S,
+    SOLO_EXTRA_K,
+    solo_threshold_c,
+)
 from radiate.core.history import decode_snapshot, encode_snapshot
 from radiate.core.types import Actions, BoilerConfig
 
@@ -191,6 +196,26 @@ def test_preheating_setback_room_still_fires_and_keeps_the_burner():
     assert h.st.rooms["bed"].preheating and acts.heating_relay
     acts = h.run(15, warm(bed=(14.5, 14.0, SETBACK, soon)))
     assert acts.heating_relay and acts.boiler_state is BoilerState.FIRING
+
+
+def test_optimum_start_looks_further_ahead_for_a_room_with_room_use():
+    # A room down at its damp floor needs longer than 3 hours to reach 18 °C: in eco,
+    # a room with room use may start up to PREHEAT_USE_MAX_S ahead.
+    assert PREHEAT_MAX_S == 3 * 3600 and PREHEAT_USE_MAX_S == 3.25 * 3600
+    later = {"next_setpoint": 18.0, "next_setpoint_in_s": 3.1 * 3600}
+
+    def preheating(use: RoomUse | None, mode: DemandMode | None = None) -> bool:
+        h = House(gains={"bed": 1.0})
+        h.run(1, warm(bed=(12.1, 14.0, use, later)), mode)
+        return h.st.rooms["bed"].preheating
+
+    assert preheating(SETBACK)
+    assert not preheating(None)  # as before: 3 hours
+    assert not preheating(SETBACK, DemandMode.COMFORT)  # comfort ignores room use
+    beyond = {"next_setpoint": 18.0, "next_setpoint_in_s": 3.3 * 3600}
+    h = House(gains={"bed": 1.0})
+    h.run(1, warm(bed=(12.1, 14.0, SETBACK, beyond)))
+    assert not h.st.rooms["bed"].preheating
 
 
 # --- pooled demand -----------------------------------------------------------------------

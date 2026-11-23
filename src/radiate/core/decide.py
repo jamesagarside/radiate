@@ -66,6 +66,10 @@ OPENING_WRITE_INTERVAL_S = 10 * 60
 BIG_OPENING_STEP = 15
 CLOSE_BUMP = 10
 PREHEAT_MAX_S = 3 * 3600
+# Eco, a room with room use (spec 5.8): it may have waited down at its damp floor, so
+# optimum start may look this far ahead. Tuned in the simulator (docs/simulation.md):
+# 3 h let rooms in use arrive late, 3.5 h started more burns.
+PREHEAT_USE_MAX_S = 3.25 * 3600
 PREHEAT_MARGIN = 1.2
 INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
 LOCKSHIELD_DECAY = 0.9995  # per firing sample: half-life of about 23 hours of firing
@@ -343,7 +347,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         rs.preheating = False
         rs.deadline_s = None
         if snap.mode is Mode.AUTO and temp is not None and not rs.dist.fire:
-            start = _preheat_due(cfg, rs, inp, temp, out)
+            start = _preheat_due(cfg, rs, inp, temp, out, eco)
             if start:
                 target = inp.next_setpoint
                 rs.preheating = True
@@ -930,10 +934,21 @@ def _pooled_demand_s(st: EngineState, calling: list[RoomConfig], eco: bool = Fal
     return total_h * 3600
 
 
-def _preheat_due(cfg: HouseConfig, rs: RoomState, inp: RoomInput, temp: float, out: float) -> bool:
-    """Optimum start: is it time to heat towards the next scheduled setpoint?"""
+def _preheat_due(
+    cfg: HouseConfig, rs: RoomState, inp: RoomInput, temp: float, out: float, eco: bool = False
+) -> bool:
+    """Optimum start: is it time to heat towards the next scheduled setpoint?
+
+    In eco a room with room use may have waited down to its damp floor, so it may look
+    further ahead (PREHEAT_USE_MAX_S, spec 5.8). A horizon from the input wins.
+    """
     nxt, in_s = inp.next_setpoint, inp.next_setpoint_in_s
-    horizon = PREHEAT_MAX_S if inp.preheat_max_s is None else inp.preheat_max_s
+    if inp.preheat_max_s is not None:
+        horizon = inp.preheat_max_s
+    elif eco and inp.use is not None:
+        horizon = PREHEAT_USE_MAX_S
+    else:
+        horizon = PREHEAT_MAX_S
     if nxt is None or in_s is None or in_s > horizon or nxt <= temp + cfg.hysteresis_k:
         return False
     # Assume most of the house heats at once (mornings), so the supply factor is low.
