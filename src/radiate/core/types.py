@@ -157,6 +157,13 @@ class RoomInput:
 
     temperature: float | None = None  # room sensor
     temperature_age_s: float = 0.0
+    # The room sensor reading was remembered from before a restart and the sensor has
+    # not reported since: used for demand, but not as a step for slopes or detectors.
+    temperature_restored: bool = False
+    # A room sensor is configured but has not reported since start (and nothing was
+    # remembered), for this long. The core waits for it rather than fall back to the
+    # TRV at once. None: no room sensor, or not known (snapshots from older versions).
+    sensor_missing_s: float | None = None
     trv_temperature: float | None = None  # TRV internal sensor
     trv_age_s: float = 0.0
     trv_available: bool = True

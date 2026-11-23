@@ -347,6 +347,10 @@ Symbol `η`, dimensionless. Code: `AllocRoom.eta`, `EMITTER_LIMITED_ETA`.
 A rule that stops a sample being used to update a room model. A room is learning when no gate is closed.
 Code: `RoomState.learning_gate`, values `fire`, `fire_holdoff`, `window`, `shower`, `cooker_spike`, `unexplained_heat`, `no_heat`, `valve_untrusted`, `valve_leaking`, `valve_rejected`, `no_data`, `sensor_stale`, `trv_offline`, `store_recovery`, `setpoint_change`, and `starting` before the first tick. Elastic `learning.gate`.
 
+**Remembered reading**:
+A room sensor's last reading, saved with the time it was taken and given back when Radiate starts. Battery sensors sleep and can't be asked for a reading, so without it a room would wait for its next report. Its age carries on from that time, so the usual silence and stale limits apply. It counts for demand, but slopes, detectors and learning start from the sensor's next report. A room whose sensor has no remembered reading waits up to 20 minutes for one before falling back to the TRV.
+Code: `LiveDriver.sensor_memory`, `LiveDriver.restore_sensor_memory`, `Device.remember`, store key `sensors`, `RoomInput.temperature_restored`, `RoomInput.sensor_missing_s`.
+
 **Sensor stale gate**:
 The learning gate that pauses a `normal` room while its own sensor is stale and its temperature comes from the TRV reading plus the TRV bias, and for the 15-minute slope window after the sensor is back. The TRV reads its radiator as much as the room. Set `learning.learn_on_trv_fallback: true` to learn from the TRV reading instead.
 Code: gate `sensor_stale`, `RoomState.fallback_until`, `LearningConfig.learn_on_trv_fallback`.

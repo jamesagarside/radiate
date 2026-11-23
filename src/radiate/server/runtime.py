@@ -101,6 +101,9 @@ class Driver(Protocol):
     # Optional: `devices_view()`, the `GET /api/v1/devices` body (radiate.drivers.devices),
     # and `request_network_scan()`, which starts a network scan and returns its state or
     # raises `ScanRefused`.
+    # Optional: `sensor_memory()` and `restore_sensor_memory(data)`, the room sensors'
+    # last readings with when they were taken, saved with the engine state and given
+    # back at start (spec 7, fail warm).
     # Optional: `history_days`, days of ticks to record in the state database. Only the
     # live driver sets it, so the demo never records.
 
@@ -218,6 +221,12 @@ class Runtime:
         saved_away = self.store.get("away")
         if saved_away is not None:
             self._restore_away(saved_away[0])
+        # Room sensor readings with their true age (spec 7, fail warm): battery sensors
+        # can't be asked, so without these rooms would wait for their next report.
+        saved_sensors = self.store.get("sensors")
+        restore_sensors = getattr(self.driver, "restore_sensor_memory", None)
+        if saved_sensors is not None and callable(restore_sensors):
+            restore_sensors(saved_sensors[0])
         saved_layout = self.store.get("layout")
         if saved_layout is not None:
             self.layout = layout.restore(saved_layout[0], {r.id for r in self.cfg.rooms})
@@ -273,6 +282,9 @@ class Runtime:
         now = self.driver.clock()
         self.store.put("engine", dump_state(self.state, now))
         self._save_runtime(now)
+        memory = getattr(self.driver, "sensor_memory", None)
+        if callable(memory):
+            self.store.put("sensors", memory())
         self._saved_at = now
 
     def _save_runtime(self, now: float) -> None:

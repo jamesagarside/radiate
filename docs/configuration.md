@@ -157,7 +157,7 @@ mqtt:
 | `dry_run` | `true` | Read devices, write nothing |
 | `outdoor_sensor` | none | Zigbee2MQTT name of an outdoor temperature sensor. Without one, the model assumes 5 °C |
 | `data_dir` | `./data` | Folder for `radiate.db`, and for `household.yaml` when you set up the household in the web UI |
-| `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale |
+| `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale. Room sensor readings are saved with the time they were taken, so after a restart a reading stands until this long after the sensor last reported, not after Radiate started |
 | `history_days` | 14 | Days of tick history kept in `radiate.db`, 0 to 90. Set 0 to turn recording off |
 
 ### mqtt

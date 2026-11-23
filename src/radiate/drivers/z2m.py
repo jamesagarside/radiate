@@ -118,11 +118,14 @@ class Device:
     unsupported: set[str] = field(default_factory=set)
     # Other rejected settings, with the monotonic time of the latest rejection.
     rejected: dict[str, float] = field(default_factory=dict)
+    # Attributes whose value was remembered from before a restart, not heard since.
+    restored: set[str] = field(default_factory=set)
 
     def update(self, data: dict[str, Any], now: float) -> None:
         for key, value in data.items():
             self.values[key] = value
             self.seen[key] = now
+            self.restored.discard(key)
         self.last_message = now
 
     def reject(self, key: str, now: float) -> None:
@@ -136,6 +139,18 @@ class Device:
         """Settings not to send now: the unsupported ones, and those rejected within
         `retry_s`."""
         return self.unsupported | {k for k, at in self.rejected.items() if now - at < retry_s}
+
+    def remember(self, key: str, value: float, age_s: float, now: float) -> bool:
+        """Take a reading remembered from before a restart, `age_s` old, unless a newer
+        one has arrived. Its age carries on from its true time, so the usual silence
+        and stale limits apply. Returns whether it was taken."""
+        at = now - age_s
+        if key in self.seen and self.seen[key] >= at:
+            return False
+        self.values[key] = value
+        self.seen[key] = at
+        self.restored.add(key)
+        return True
 
     def number(self, key: str) -> float | None:
         return _num(self.values.get(key))

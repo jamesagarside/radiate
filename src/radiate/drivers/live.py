@@ -30,6 +30,8 @@ from .z2m import DeviceStore, TrvWriter, Write, is_available, reading_age, trv_g
 LOG = logging.getLogger(__name__)
 NEVER = 1e9
 OUTDOOR_MAX_AGE_S = 2 * 3600
+SENSOR_MEMORY_MAX_S = 24 * 3600  # remembered sensor readings older than this are dropped
+REMEMBERED = ("temperature", "humidity")
 
 Publish = Callable[[str, dict[str, Any]], Awaitable[bool]]
 
@@ -91,6 +93,9 @@ class LiveDriver:
         self._pending: set[asyncio.Task] = set()
         # Days of ticks the runtime records for replay and bootstrap (spec 4.3, 6).
         self.history_days = site.history_days
+        self._started_at = self.clock()
+        # Room sensors: remembered across restarts, and awaited after start (spec 7).
+        self._room_sensors = {d.sensor for d in site.devices.values() if d.sensor}
 
     # --- clock -----------------------------------------------------------------------
 
@@ -191,6 +196,50 @@ class LiveDriver:
                     w.forget()
                     LOG.info("%s back online: settings will be re-sent", rid)
 
+    def sensor_memory(self) -> dict[str, dict[str, float]]:
+        """Each room sensor's last readings and when they were taken (wall-clock
+        seconds), for the runtime to save. Battery sensors sleep and cannot be asked
+        for a reading, so after a restart this is all Radiate has until they report."""
+        now, wall = self.clock(), self._wall()
+        out: dict[str, dict[str, float]] = {}
+        for name in sorted(self._room_sensors):
+            dev = self.devices.get(name)
+            if dev is None:
+                continue
+            temp, age = dev.number("temperature"), dev.age("temperature", now)
+            if temp is None or age is None:
+                continue
+            entry = {"temperature": temp, "at": wall - age}
+            humidity = dev.number("humidity")
+            if humidity is not None and dev.age("humidity", now) is not None:
+                entry["humidity"] = humidity
+            out[name] = entry
+        return out
+
+    def restore_sensor_memory(self, data: object) -> None:
+        """Take back saved room sensor readings with their true age (spec 7, fail warm).
+
+        A reading older than a day, from the future, or for a sensor the house file no
+        longer names is dropped. A reading that has arrived since start wins.
+        """
+        if not isinstance(data, dict):
+            return
+        now, wall = self.clock(), self._wall()
+        for name, entry in data.items():
+            dev = self.devices.get(name) if name in self._room_sensors else None
+            if dev is None or not isinstance(entry, dict):
+                continue
+            at = entry.get("at")
+            if isinstance(at, bool) or not isinstance(at, (int, float)):
+                continue
+            age = wall - at
+            if not 0 <= age <= SENSOR_MEMORY_MAX_S:
+                continue
+            for key in REMEMBERED:
+                value = entry.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    dev.remember(key, float(value), age, now)
+
     async def request_state(self) -> None:
         """Ask every TRV for its current state (a read, so also done in dry run)."""
         for w in self.writers.values():
@@ -222,6 +271,10 @@ class LiveDriver:
                 if age is not None and sensor.number("temperature") is not None:
                     inp.temperature = sensor.number("temperature")
                     inp.temperature_age_s = age
+                    inp.temperature_restored = "temperature" in sensor.restored
+                elif rc.role is RoomRole.NORMAL:
+                    # Not heard since start: the core waits for it before the TRV.
+                    inp.sensor_missing_s = now - self._started_at
                 if rc.has_humidity:
                     inp.humidity = sensor.number("humidity")
             trv = self.devices.get(dev.trv)

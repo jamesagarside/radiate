@@ -157,3 +157,44 @@ def test_offline_trv_room_that_does_not_warm_stops_counting():
     acts, relay = run(st, 120, 5, cold, relay=relay)
     assert st.rooms["bed"].calling
     assert "valve.offline_no_warming" not in codes(acts[-1])
+
+
+# --- C: restart readings ----------------------------------------------------------------
+
+
+def test_a_remembered_reading_is_used_but_not_learned_from():
+    st = EngineState.new(CFG)
+
+    def restored(s: Snapshot) -> None:
+        s.rooms["bed"].temperature_restored = True
+        s.rooms["lounge"].temperature_restored = True
+
+    run(st, 0, 5, {**WARM, "bed": 19.0, "lounge": 19.0}, restored)
+    bed = st.rooms["bed"]
+    assert bed.temperature == 19.0 and bed.calling
+    assert bed.readings == [] and bed.slope is None
+    assert bed.learning_gate == "no_data"
+    # The sensors report again, well off the remembered values: that is no step seen
+    # in the room, so no window, no fire and nothing learned from it.
+    acts, _ = run(st, 5, 20, {**WARM, "bed": 18.0, "lounge": 21.0})
+    assert not st.rooms["lounge"].dist.fire
+    assert not any(r.code.startswith("disturbance.") for a in acts for r in a.reasons)
+
+
+def test_a_sensor_silent_since_start_waits_before_the_trv_fallback():
+    st = EngineState.new(CFG)
+
+    def missing(since_min: float) -> Callable[[Snapshot], None]:
+        def edit(s: Snapshot) -> None:
+            s.rooms["bed"].temperature = None
+            s.rooms["bed"].sensor_missing_s = since_min * 60 + s.now
+
+        return edit
+
+    run(st, 0, 5, {**WARM, "bed": 18.0}, missing(0))
+    bed = st.rooms["bed"]
+    assert bed.temperature is None and bed.learning_gate == "no_data"
+    assert bed.fallback_until < 0  # no TRV fallback yet
+    # Past the stale limit with still nothing: the TRV reading, as for a stale sensor.
+    run(st, 5, 2, {**WARM, "bed": 18.0}, missing(20))
+    assert st.rooms["bed"].temperature == 18.5 - 1.5

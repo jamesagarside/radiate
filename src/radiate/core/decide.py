@@ -191,7 +191,19 @@ def _effective_temperature(cfg: RoomConfig, inp: RoomInput) -> float | None:
         return inp.trv_temperature + cfg.trv_bias_k if trv_ok else None
     if inp.temperature is not None and inp.temperature_age_s <= ROOM_SENSOR_STALE_S:
         return inp.temperature
+    if _sensor_awaited(inp):
+        return None  # no TRV fallback until the sensor is past its stale limit
     return inp.trv_temperature + cfg.trv_bias_k if trv_ok else None
+
+
+def _sensor_awaited(inp: RoomInput) -> bool:
+    """A room sensor not heard since start and not yet past its stale limit (spec 7):
+    its first reading is awaited rather than the TRV's, which reads its radiator."""
+    return (
+        inp.temperature is None
+        and inp.sensor_missing_s is not None
+        and inp.sensor_missing_s < ROOM_SENSOR_STALE_S
+    )
 
 
 def _target(cfg: HouseConfig, snap: Snapshot, inp: RoomInput) -> float:
@@ -263,6 +275,11 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             rs.rejected_until = now + REJECTED_HOLD_S
         temp = _effective_temperature(rc, inp)
         rs.temperature = temp
+        # A reading remembered across a restart counts for demand, but it is not a step
+        # seen in the room: slopes, detectors and learning start from the next report.
+        restored = inp.temperature_restored and temp is not None
+        if restored:
+            rs.readings = []
         if (
             rc.role is RoomRole.NORMAL
             and temp is not None
@@ -287,13 +304,14 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             rs.last_setpoint = target
 
         if temp is not None:
-            rs.readings.append((now, temp))
-            rs.readings = [p for p in rs.readings if now - p[0] <= SLOPE_WINDOW_S]
+            if not restored:
+                rs.readings.append((now, temp))
+                rs.readings = [p for p in rs.readings if now - p[0] <= SLOPE_WINDOW_S]
             if temp < bcfg.frost_c:
                 frost = True
             if temp < bcfg.hard_frost_c:
                 hard_frost = True
-        rs.slope = local_slope(rs.readings) if temp is not None else None
+        rs.slope = local_slope(rs.readings) if temp is not None and not restored else None
         if inp.trv_available and inp.trv_temperature is not None and inp.trv_age_s <= TRV_STALE_S:
             # Radiator warmth seen by the TRV: its reading above the room's, if known.
             room_t = inp.temperature if rc.role is RoomRole.NORMAL else None
@@ -375,7 +393,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             rs.dist,
             rc,
             now,
-            temperature=temp,
+            temperature=None if restored else temp,
             humidity=inp.humidity,
             window_open=inp.window_open,
             fire_switch=inp.fire_switch,
