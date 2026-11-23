@@ -25,6 +25,7 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 - [ADR-0002](adr/0002-deployment-topology.md): one engine packaged three ways, and the cloud never sits in the control loop.
 - [ADR-0003](adr/0003-separate-home-assistant-integration.md): the Home Assistant integration lives in its own Apache-2.0 repository, radiate-ha.
 - [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed): in `eco`, how a room is used right now decides its part in demand, and savings are measured against one stated baseline with comfort beside them.
+- [ADR-0005](adr/0005-fail-warm-presence.md) (proposed): fail warm, so uncertain presence counts as home and presence alone never holds the house at frost.
 - [ADR template](adr/template.md): copy it for a new decision.
 
 ## Proposals
@@ -33,7 +34,7 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 
 ## Plans
 
-- [Efficiency by room use, first cut](plans/efficiency-mvp.md): six slices, with file ownership, interfaces, tests and acceptance checks.
+- [Efficiency by room use, first cut](plans/efficiency-mvp.md): seven slices, with file ownership, interfaces, tests and acceptance checks.
 
 ## Research
 

@@ -492,6 +492,24 @@ Order inside `decide`:
 | Clock jump or DST | monotonic clock in the server | Timers use monotonic time; schedules use local time |
 | Corrupt learned state | non-finite or out-of-bounds parameters | A whole saved state that can't be read is relearned from the tick history (section 4.3); a single corrupt room is reset to priors and logged. **Not yet implemented** ([status](implementation-status.md#7-failure-modes)): replaying history for that one room, and an alert in the UI |
 
+**Fail warm** (**Not yet implemented**, [ADR-0005](adr/0005-fail-warm-presence.md), [status](implementation-status.md#planned-efficiency-by-room-use), [plan, slice 7](plans/efficiency-mvp.md#slice-7-fail-warm-presence)). No connectivity or device problem may lower the heating. Any input that can lower a room's temperature (presence, away, room use, an outdoor reading, a sensor) must, when it is missing, silent or doubtful, count as the reading that keeps the house warmer: uncertain presence counts as home. Today presence breaks this rule. A phone that runs out of battery stays `not_home` in Home Assistant with its last update frozen, the integration keeps re-reporting `not_home` every 15 minutes, so stale presence (which measures how recently the integration reported, not how recently the phone did) never trips, and with one person in the household everyone away holds the whole house at 7 °C. The planned rules, per person:
+
+| Case | Today | Planned |
+|---|---|---|
+| `not_home`, and the source (the tracker behind the `person` entity) updated within the source silence, 120 minutes by default | away after the presence delay | away after the presence delay: positive evidence of absence |
+| `not_home`, source silent longer than the source silence | away | **unknown**, counts as home, reason `away.presence_uncertain`: "Sam: phone not heard from since 10:17, counted as home" |
+| `not_home` from an integration that doesn't send the source's time | away | away for at most the source silence after `since`; after that unknown, counts as home |
+| Presence not reported for the stale limit (Home Assistant or the integration down) | unknown | unknown (unchanged) |
+| Evidence someone is in: a setpoint override, a store boost, a fire switch, a shower detected, after the person's presence last changed | ignored | every person away by presence counts as home until their presence changes again, reason `away.home_evidence` |
+| Everyone away by presence only | frost (7 °C) with `everyone_away: frost` | every room at its unused temperature, never frost |
+| Everyone away with an away until each (said by the people) | frost with `everyone_away: frost` | frost with `everyone_away: frost` (unchanged) |
+
+- The presence report gains an optional `last_seen`: when the source last updated, whatever its state, as radiate-ha reads it from the tracker's `last_updated` (or the `person` entity's, if the tracker isn't known). Additive: the server accepts it first and treats a report without it as above; radiate-ha then sends it (ADR-0003). `POST /api/v1/people/{id}/presence` `{"state": "not_home", "since": "...", "last_seen": "2026-11-23T10:17:00+00:00"}`; `GET /api/v1/people` gains each person's `presence.last_seen`, `presence.uncertain` and `presence.why`.
+- `household.away.presence_source_silence_min`: 120 by default, 30 to 1440. Too short only costs saving, never warmth.
+- `everyone_away: frost` now applies only when every person has an away until. Presence alone, however long, sets the house back to the unused temperature. A frost hold stays the household's explicit choice.
+- Frost protection and the damp floor (5.8) are unchanged and apply in every case.
+- Other inputs that can lower heating on failure (an audit is listing them) get a row here, each with its fail warm reading, before they change behaviour.
+
 Radiate does not write anything special to the valves in safe mode: it cannot reach them. The lockshield cap is written whenever a room is not being allocated (section 4.4), so every radiator already carries a balanced opening limit, its schedule setpoint and closing degree 100, and stays balanced and thermostatic without Radiate.
 
 ---
@@ -691,7 +709,7 @@ The three behaviour questions raised in version 0.2 (learning memory, pooled dem
 
 ## 13. Changes in this revision
 
-Planned in November 2026, not built ([ADR-0004](adr/0004-efficiency-by-room-use.md), proposed): room use in the `eco` demand mode, with solo limits, the damp floor and use-aware burn extension and heat sinks (5.3, 5.8); savings against a timer-and-valves baseline from degree-hours and a fitted house signature, with comfort beside it (5.9); `GET /api/v1/savings` and additive `state` fields (8.1); Home Assistant sensors (8.2); Elastic fields (9); the Savings view (10); the simulator comparison (11); open questions 6 to 9 and hardware question 10 (12). The implementation plan is [efficiency-mvp](plans/efficiency-mvp.md).
+Planned in November 2026, not built: fail warm presence (7, [ADR-0005](adr/0005-fail-warm-presence.md), proposed), after a dead phone left a one-person household held at frost. Also planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), proposed): room use in the `eco` demand mode, with solo limits, the damp floor and use-aware burn extension and heat sinks (5.3, 5.8); savings against a timer-and-valves baseline from degree-hours and a fitted house signature, with comfort beside it (5.9); `GET /api/v1/savings` and additive `state` fields (8.1); Home Assistant sensors (8.2); Elastic fields (9); the Savings view (10); the simulator comparison (11); open questions 6 to 9 and hardware question 10 (12). The implementation plan is [efficiency-mvp](plans/efficiency-mvp.md).
 
 Added since version 0.3 was settled: the `unheated` room role for a room with a sensor and no radiator (2.1, 4.6, 7, 10), and open question 5 on how unheated rooms should feed the model (section 12). Device health: battery and link quality are read (3), `GET /api/v1/devices` and `POST /api/v1/devices/scan` (8.1), and the devices view with its alerts (10). House suggestions: `GET /api/v1/suggestions` (8.1) and the suggestions view (10), with a capacity-based "radiator may be too small" check; the flow-sensitivity report of section 4.2 is still not implemented. The house model: `GET` and `PUT /api/v1/layout` and `boiler_linked` in the driver telemetry (8.1), and the house model with its room editor (10).
 

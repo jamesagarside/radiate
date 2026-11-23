@@ -2,7 +2,7 @@
 
 November 2026. Status: planned, nothing built. Design: [ADR-0004](../adr/0004-efficiency-by-room-use.md) (proposed). Behaviour: [spec 5.8](../spec.md#58-room-use-in-demand) and [5.9](../spec.md#59-savings), with the API in [8.1](../spec.md#81-server-api-v1). Status rows: [implementation status](../implementation-status.md#planned-efficiency-by-room-use). Terms: [glossary](../GLOSSARY.md) (room use, setback, solo limit, damp floor, savings and the entries under Savings).
 
-The first cut is six vertical slices, small enough to build and check overnight. Slice 1 lands the shared interfaces and changes no behaviour. Slices 2 to 5 then run in parallel, each owning its files. Slice 6 builds its scenario in parallel and runs the comparison once slices 2 and 3 are merged.
+The first cut is seven vertical slices, small enough to build and check overnight. Slice 7, fail warm presence ([ADR-0005](../adr/0005-fail-warm-presence.md)), fixes a live fault, depends on nothing else here, and goes first. Slice 1 lands the shared interfaces and changes no behaviour. Slices 2 to 5 then run in parallel, each owning its files. Slice 6 builds its scenario in parallel and runs the comparison once slices 2 and 3 are merged.
 
 Every slice follows the [engineering standards](../standards/engineering.md): test first, pure core, glossary terms, no personal details, `ruff format`, `uv run pytest -q` green, a feature branch, no attribution lines in commits. Each slice updates its rows in [implementation status](../implementation-status.md#planned-efficiency-by-room-use) and moves its spec text from **Not yet implemented** to built in the same change.
 
@@ -10,6 +10,7 @@ Every slice follows the [engineering standards](../standards/engineering.md): te
 
 | Slice | Risk | Owns | Shares (one hunk each) | Needs merged first |
 |---|---|---|---|---|
+| 7. Fail warm presence | **HIGH** (in the warm direction) | `config/away.py`, `docs/configuration.md` (away settings) | `config/household.py` (`AwaySettings`, `LIMITS`), `server/runtime.py` (`report_presence`, `_update_away`, `_frost_hold`, home evidence), `server/bridge.py` (`set_presence`), the everyone away words in `web/setup.js`, `web/household.js` and `web/guide.js` | nothing |
 | 1. Room use and baseline in the snapshot | LOW | `core/types.py`, `core/__init__.py`, `config/use.py` (new), `config/household.py` | `server/runtime.py` (`_apply_use` and its call in `step`) | nothing |
 | 2. Room use in `eco` | **HIGH** | `core/decide.py` except the two hunks slice 3 owns | `server/runtime.py` (`describe`: `use`, `solo`) | 1 |
 | 3. Savings core | LOW | `core/savings.py` (new), `core/persist.py` | `core/decide.py` (`EngineState.savings` field, the accounting block in step 7) | 1 |
@@ -17,9 +18,81 @@ Every slice follows the [engineering standards](../standards/engineering.md): te
 | 5. Savings view | LOW | `web/savings.js` (new), `web/savings.css` (new), `web/index.html`, `web/app.js`, `web/guide.js`, `scripts/build_demo.py`, `docs/standards/design.md` | | none to build (uses the spec's JSON shape); merges after 4 |
 | 6. Simulator comparison and estimator check | LOW (measures HIGH) | `sim/reference.py`, `sim/runner.py`, `sim/compare.py` (new), `cli.py`, `docs/simulation.md` | | 1 to build; 2 and 3 to run |
 
-Paths are under `src/radiate/` unless they start with a top-level folder. Merge order: 1, 3, 2, 4, 5, 6. Where two slices share a file, each keeps to its named hunk; the later one rebases.
+Paths are under `src/radiate/` unless they start with a top-level folder. Merge order: 7, 1, 3, 2, 4, 5, 6. Where two slices share a file, each keeps to its named hunk; the later one rebases.
 
 HIGH means the slice changes when the boiler fires or how valves move on the real house. It doesn't go live on the real house without the owner's go-ahead (CLAUDE.md): first a few days in dry run on the real house, reading the decision log for `demand.setback` and `demand.floor`, and the simulator results from slice 6.
+
+---
+
+## Slice 7: fail warm presence
+
+**Goal.** No connectivity or device problem turns the heating down through presence (spec 7, fail warm; ADR-0005). Uncertain presence counts as home; presence alone never holds frost.
+
+**Risk: HIGH**, in the warm direction: it changes when the house is set back, so it changes when the boiler fires. Each change only ever makes the house warmer than today.
+
+**Files.** `src/radiate/config/away.py`; in `src/radiate/config/household.py` only `AwaySettings` and `LIMITS` (new `presence_source_silence_min`) and the household view; in `src/radiate/server/runtime.py` only `report_presence`, `_update_away`, `_frost_hold`, `person_view` and a new `note_home_evidence`; in `src/radiate/server/bridge.py` only `set_presence`; the words for everyone away in `web/setup.js`, `web/household.js` and `web/guide.js`; `docs/configuration.md` (the new setting and the changed meaning of `everyone_away: frost`). Tests: `tests/config/test_away_fail_warm.py`, `tests/server/test_presence_fail_warm.py` (new).
+
+**Depends on.** Nothing in this plan.
+
+**Interfaces:**
+
+```python
+# radiate/config/household.py
+PRESENCE_SOURCE_SILENCE_MIN = 120
+
+@dataclass(frozen=True, slots=True)
+class AwaySettings:
+    ...  # existing fields unchanged
+    presence_source_silence_min: int = PRESENCE_SOURCE_SILENCE_MIN  # 30 to 1440
+
+# radiate/config/away.py
+@dataclass(frozen=True, slots=True)
+class Presence:
+    ...  # existing fields unchanged
+    last_seen: float | None = None  # when the source (tracker) last updated, any state
+    home_evidence_at: float | None = None  # latest sign someone is in, from the runtime
+
+@dataclass(frozen=True, slots=True)
+class AwayStatus:
+    away: bool
+    reason: str | None = None  # "away_until" or "presence" when away
+    uncertain: str | None = None  # why presence was set aside: "source_silent", "home_evidence"
+
+def source_silent(p: Presence, now: float, silence_s: float) -> bool:
+    """`not_home` without a recent update from its source: `last_seen` older than
+    silence_s, or, without `last_seen`, `since` older than silence_s."""
+
+def status(p: Presence, now: float, delay_s: float = ..., lead_s: float = ...,
+           stale_s: float | None = None, silence_s: float | None = None) -> AwayStatus:
+    """As today, except presence counts as away only if not stale, not source silent,
+    and no home evidence since `since`. Away until is unchanged."""
+
+def frost_allowed(people: Iterable[str], presence: Mapping[str, Presence], now: float) -> bool:
+    """True only when every person is away by an away until."""
+```
+
+```python
+# radiate/server/runtime.py
+def note_home_evidence(self, what: str) -> None:
+    """Someone is in (override, store boost, fire switch, shower): set aside every
+    presence-based away until that person's presence changes again."""
+```
+
+Home evidence comes from `set_setpoint`, `boost_store` and `set_fire` in the bridge, and from a `disturbance.shower` reason in `Runtime.step`. `_frost_hold` also needs `frost_allowed`; otherwise everyone away sets every room to its unused temperature (`EveryoneAway.UNUSED` behaviour).
+
+**Tests first.**
+
+- The incident: one person, `not_home` reported every 15 minutes with `since` and `last_seen` frozen at 10:17; at 12:18 and after, the person counts as home with `uncertain = "source_silent"`, `away.presence_uncertain` is raised once, and the house is not at frost at 22:22.
+- `not_home` with `last_seen` refreshed every 10 minutes counts as away after the presence delay, as today.
+- A report without `last_seen` counts as away from the presence delay until `since` + source silence, then as home.
+- A setpoint override, a store boost, a fire switch or a shower while someone is away by presence: they count as home until a new presence change; a later `not_home` with a fresh source counts again after the delay.
+- Everyone away by presence: every room at its unused temperature, never frost. Everyone away with an away until each, `everyone_away: frost`: frost, as today.
+- Away until is untouched by every new rule.
+- `POST presence` accepts `last_seen` (an ISO time, not in the future), rejects a malformed one with 400, and accepts reports without it; `GET people` returns `last_seen`, `uncertain` and `why`.
+- The saved presence round-trips `last_seen` and `home_evidence_at`; older saves load.
+
+**Acceptance.** `uv run pytest -q` passes, `tests/server/test_away_runtime.py` updated only where the frost rule changed on purpose; `test_ha_contract.py` passes without new fixtures; `docs/configuration.md`, the Guide and spec 8.1 describe the new behaviour. A follow-up issue in radiate-ha to send `last_seen` from the tracker's `last_updated`. Owner's go-ahead before it runs live, as for any behaviour change, though it can only make the house warmer.
+
 
 ---
 

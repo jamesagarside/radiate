@@ -235,10 +235,11 @@ Another change is refactoring `web/`; these rows were not audited in depth.
 
 ## Planned: efficiency by room use
 
-Designed in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed), specified in [spec 5.8 and 5.9](spec.md#58-room-use-in-demand), and broken into slices in the [efficiency plan](plans/efficiency-mvp.md). Nothing here is built. **Planned** rows are not counted in the summary until they are built; each moves to done or partial in the same change as its code.
+Designed in [ADR-0004](adr/0004-efficiency-by-room-use.md) and [ADR-0005](adr/0005-fail-warm-presence.md) (both proposed), specified in [spec 7](spec.md#7-failure-modes) (fail warm) and [spec 5.8 and 5.9](spec.md#58-room-use-in-demand), and broken into slices in the [efficiency plan](plans/efficiency-mvp.md). Nothing here is built. **Planned** rows are not counted in the summary until they are built; each moves to done or partial in the same change as its code.
 
 | Item | Status | Where (planned) | Slice | Note |
 |---|---|---|---|---|
+| Fail warm presence: source silence from `last_seen`, home evidence, no frost on presence alone ([ADR-0005](adr/0005-fail-warm-presence.md)) | planned | `config/away.py`, `config/household.py`, `server/runtime.py`, `server/bridge.py` | 7 | Fixes a live fault: a dead phone held a one-person household at 7 °C. radiate-ha to send `last_seen` after the server accepts it |
 | Room use from the household (`in_use`, `occasional`, `setback`) in the snapshot | planned | `core/types.py`, `config/household.py`, `config/use.py`, `server/runtime.py` | 1 | None without a household, so old snapshots replay unchanged |
 | Savings baseline setpoint in the snapshot | planned | `config/use.py`, `server/runtime.py` | 1 | Timer from first up less the fixed preheat to last in bed, each room at its usual temperature |
 | Damp floor as a control limit (12 °C) | planned | `core/types.py`, `config/household.py` | 1, 2 | Today only a note in the household setup |

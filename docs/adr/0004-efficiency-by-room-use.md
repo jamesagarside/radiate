@@ -95,6 +95,7 @@ Reasons: it meets the owner's three requirements with no new knob, it keeps safe
 - Simulator: a household scenario of the reference house, the timer-and-valves baseline as a controller, and a comparison of today's eco with the new rules.
 - `docs/spec.md` 5.3, 5.8, 5.9, 8.1, 8.2, 9, 10, 11 and 12; the glossary; implementation status.
 - Harder: `eco` now depends on the household being right. A wrong use level costs comfort in that room until the household is fixed, which is why room usage suggestions are the next step.
+- Room use follows fail warm ([ADR-0005](0005-fail-warm-presence.md)): when it can't be worked out it is none, which keeps today's behaviour.
 - The damp floor becomes a control limit, not only a note in the household setup.
 
 ## Revisit if
