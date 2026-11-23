@@ -142,7 +142,12 @@ async def _start_live(site, session):
     await asyncio.sleep(10 if transport.connected else 0)
 
     runtime = Runtime(
-        site.house, driver, store=store, household=site.household, timezone=site.timezone
+        site.house,
+        driver,
+        store=store,
+        household=site.household,
+        timezone=site.timezone,
+        schedule_use=site.schedule_use,
     )
     runtime.setup = HouseholdSetup(site, SavedFile(site.data_dir))
     for problem in runtime.restore():
