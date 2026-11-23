@@ -1,7 +1,6 @@
 /* House model view (web/house.js): the model, the whole-house plate and today's plan.
    Tokens come from app.css. Plates are .card, so they share its chamfered corner. */
 
-main { max-width: 1340px; }
 
 .hm-wrap { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 12px; align-items: stretch; }
 .hm-model, .hm-status, .hm-plan { padding: 16px 18px; min-width: 0; }
@@ -25,7 +24,7 @@ main { max-width: 1340px; }
 .hm-room { cursor: pointer; }
 .hm-room:focus { outline: none; }
 .hm-room[aria-pressed="true"] .hm-top, .hm-room:focus-visible .hm-top { stroke: var(--text); stroke-width: 2.5; }
-.hm-t { font-family: var(--readout); font-weight: 900; font-size: 17px; }
+.hm-t { font-family: var(--readout); font-weight: 900; font-size: 19px; }
 .hm-n { font-family: var(--body); font-weight: 600; font-size: 9.5px; }
 .hm-ftag { font-family: var(--display); font-size: 11px; font-weight: 600; fill: var(--muted); }
 @media (prefers-reduced-motion: no-preference) {

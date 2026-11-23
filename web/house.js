@@ -38,7 +38,16 @@ function tempRgb(t) {
   return stops.at(-1)[1];
 }
 const rgb = (c, k = 1) => `rgb(${c.map((v) => Math.round(v * k)).join(",")})`;
-const inkOn = (c) => ((0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255 > 0.55 ? "#141c18" : "#ffffff");
+// Ink or white on a temperature colour, whichever has the higher WCAG contrast.
+const lin = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+const luminance = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+const INK = [20, 28, 24];
+function inkOn(c) {
+  const l = luminance(c);
+  const onInk = (l + 0.05) / (luminance(INK) + 0.05);
+  const onWhite = 1.05 / (l + 0.05);
+  return onInk >= onWhite ? "#141c18" : "#ffffff";
+}
 
 // ---------- layout ----------
 // A first guess until the owner arranges the house: bedrooms and bathrooms upstairs,
@@ -470,7 +479,7 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     if (state.mode === "off") line = "Heating is off.";
     else if (state.mode === "frost") line = "Frost protection only.";
     else if (!calling.length) line = "No room needs heat right now.";
-    else if (!linked) line = `${calling.length === 1 ? "room wants" : "rooms want"} heat. The boiler switch isn't linked yet, so the boiler is run by its own timer.`;
+    else if (!linked) line = `${calling.length === 1 ? "room wants" : "rooms want"} heat. The boiler switch isn't linked yet, so the boiler follows its own timer.`;
     else if (b.state === "firing") line = `${calling.length === 1 ? "room is" : "rooms are"} heating. Burner on.`;
     else line = `${calling.length === 1 ? "room wants" : "rooms want"} heat.`;
 
