@@ -2,7 +2,7 @@
 
 Pure: the caller passes monotonic `now`, a local day label and what happened this
 tick. Burner time is the burner's firing time when the relay's power metering shows
-it (basis `burner`). Without metering it falls back to relay time (basis `relay`),
+it (basis `firing`). Without metering it falls back to relay time (basis `relay`),
 which includes the boiler's own thermostat cycling inside a call, so litres and kWh
 are an upper bound; a day with both is `mixed`. Relay time and relay-basis litres are
 always reported too.
@@ -216,7 +216,7 @@ class Ledger:
             # Radiate missed part of the day: totals cover what it saw, no balance score.
             "partial": t.partial,
             # What `burner_hours`, `litres` and `kwh` are counted from.
-            "basis": ("mixed" if t.fallback_s > 0 else "burner") if metered else "relay",
+            "basis": ("mixed" if t.fallback_s > 0 else "firing") if metered else "relay",
             "burner_hours": round(hours, 2),
             "relay_hours": h(t.relay_s),
             # Relay time: an upper bound, as the boiler's own thermostat cycles inside.

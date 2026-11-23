@@ -83,7 +83,7 @@ def test_daily_accounting_matches_the_relay(runs):
         for d in days:
             assert 0 < d["burner_hours"] < 24
             # Metered: burner time, inside relay time (the boiler's thermostat cycles).
-            assert d["basis"] == "burner" and d["burner_hours"] <= d["relay_hours"]
+            assert d["basis"] == "firing" and d["burner_hours"] <= d["relay_hours"]
             assert d["max_starts_in_hour"] <= 3
             assert d["burns"]["count"] in (d["starts"] - 1, d["starts"], d["starts"] + 1)
             assert d["balance"]["score"] is None or 0 <= d["balance"]["score"] <= 100

@@ -242,7 +242,7 @@ def test_metered_burner_time_replaces_relay_time():
             heating_burner=burner(m),
         )
     s = ledger.summary(nozzle_lph=1.64)
-    assert s["basis"] == "burner"
+    assert s["basis"] == "firing"
     assert s["burner_hours"] == pytest.approx(61 / 60, abs=0.01)
     assert s["relay_hours"] == pytest.approx(100 / 60, abs=0.01)
     assert s["litres"] == pytest.approx(61 / 60 * 1.64, abs=0.01)

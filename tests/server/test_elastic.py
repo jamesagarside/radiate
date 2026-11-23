@@ -188,7 +188,7 @@ def test_daily_document_carries_relay_time_and_the_metered_burner():
     exp = ElasticExporter("http://es:9200", "key", house_id="h")
     metered = {
         **SUMMARY,
-        "basis": "burner",
+        "basis": "firing",
         "relay_hours": 9.0,
         "litres_relay": 18.0,
         "burner": {
@@ -203,7 +203,7 @@ def test_daily_document_carries_relay_time_and_the_metered_burner():
     exp.record_daily(metered, ts=TS)
     (doc,) = list(exp.buffer)
     b = doc["boiler"]
-    assert b["hours_basis"] == "burner" and b["relay_hours"] == 9.0
+    assert b["hours_basis"] == "firing" and b["relay_hours"] == 9.0
     assert b["litres_relay"] == 18.0
     assert b["burner"]["heating_starts"] == 21 and b["burner"]["store_litres"] == 0.8
     mapping = index_templates()["radiate-daily"]["template"]["mappings"]["properties"]
