@@ -2,11 +2,14 @@
 
 These are the rules for Radiate's web UI (`web/`). The same UI runs standalone on port 8099, in the Home Assistant sidebar through ingress, and in the demo. It is a dashboard people glance at many times a day, so it should be crisp, fast and quiet, and explain what the heating is doing.
 
-The approach follows Emil Kowalski's design-engineering principles. The values below are the ones in `web/app.css` today; change the CSS and this page together.
+The look is called "plant room": a pale concrete ground, flat plates with one cut corner, ink rules between sections, and a temperature scale that runs from cobalt through sodium amber to signal red. Radiate no longer follows Emil Kowalski's design-engineering skill or the Claude design defaults. The owner turned down the earlier look (warm cream, rounded cards, shadows, the system font and uppercase section labels) as generic, so don't bring those back. The principles below are the ones from that approach that still hold.
+
+The values on this page are the ones in `web/app.css` and `web/house.css` today. Change the CSS and this page together.
 
 ## Principles
 
 - **Explain the house.** Every room says, in words, why Radiate is doing what it does.
+- **Readouts look like instruments.** Numbers you read at a glance (temperatures, counts, times) are set in the Doto dot-matrix face. Words stay in Funnel Sans.
 - **Motion only where it explains a state change.** A valve bar moving to its new opening limit, or the burn guard filling, tells the reader something. Decoration that people see dozens of times a day becomes friction.
 - **Good defaults over options.** No theme picker or layout settings. Light and dark follow the system.
 - **Get the small details right.** Tabular numbers that don't jiggle, press feedback on every button, and hover effects that don't fire on touch.
@@ -18,56 +21,89 @@ All colours are CSS custom properties on `:root`, with a dark set under `@media 
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `--bg` | `#f6f4f1` | `#151412` | Page background |
-| `--surface` | `#ffffff` | `#1e1c1a` | Cards, header |
-| `--surface-2` | `#f1eee9` | `#26231f` | Tracks, segmented control, neutral chips |
-| `--text` | `#1d1b19` | `#f1ede8` | Body text |
-| `--muted` | `#67615b` | `#a39b92` | Secondary text, labels |
-| `--line` | `#e6e1da` | `#34302b` | Borders |
-| `--heat` | `#d95f24` | `#f08a4b` | Burns, valve bars, the brand mark |
-| `--heat-soft` | `#fbe3d6` | `#3d2618` | Background for heating, topping up and fire states |
-| `--ember` | `#b53c0b` | `#f5a06a` | Text on `--heat-soft` |
-| `--cool` | `#386787` | `#7fb2d6` | Rest, store, demo banner, focus ring, the sign-in button, a held setpoint |
-| `--cool-soft` | `#dde9f2` | `#1d2c37` | Background for rest, heat sink, demo and a held setpoint |
-| `--ok` | `#2a7253` | `#6cc59c` | Comfortable |
-| `--ok-soft` | `#dcefe5` | `#17302a` | Background for comfortable |
-| `--warn` | `#975300` | `#f0b45a` | Lead, preheating, a room waiting for a burn, alerts, dry run, stale data, a stuck valve, short-cycling |
-| `--warn-soft` | `#fbecd2` | `#36290f` | Background for those states |
+| `--bg` | `#d6dad2` | `#0f1411` | The ground: page background, header, tabs |
+| `--surface` | `#e6e9e2` | `#171e1a` | Plates (`.card`), flat bands, the cells of the house now plate |
+| `--surface-2` | `#cdd2c9` | `#0b0f0d` | Recessed wells: bar tracks, the floor plan in the room editor, neutral chips and badges |
+| `--text` | `#141c18` | `#e2e8e1` | Ink: body text, rules, outlines, the fill of a selected segment or pressed button |
+| `--muted` | `#48554e` | `#94a198` | Secondary text, labels |
+| `--line` | `#b3bbb1` | `#2b352f` | Thin dividers, plan gridlines, the gaps between the house now cells |
+| `--heat` | `#c93d12` | `#ff6a3d` | Burns, calling, valve bars |
+| `--heat-soft` | `#f2d3c4` | `#3a1d12` | Background for heating, topping up and fire states |
+| `--ember` | `#9e2e0a` | `#ff9a78` | Text on `--heat-soft` |
+| `--cool` | `#2f4fd6` | `#7f97ff` | Cobalt, the interactive accent: primary buttons, the focus ring, rest, hot water, the demo banner's rule, a held setpoint |
+| `--cool-soft` | `#d3dbf7` | `#1a2244` | Background for rest, heat sink and a held setpoint |
+| `--on-cool` | `#ffffff` | `#0f1411` | Text on a cobalt fill. Dark mode uses the ground colour, as white on the lighter dark-mode cobalt is only 2.7:1 |
+| `--ok` | `#24654a` | `#6cc59c` | Comfortable |
+| `--ok-soft` | `#cfe3d6` | `#14291f` | Background for comfortable |
+| `--warn` | `#7f5200` | `#f5b73a` | Sodium amber darkened for text: lead, preheating, a room waiting for a burn, alerts, dry run, stale data, a stuck valve, short-cycling, devices needing attention |
+| `--warn-soft` | `#f3deb0` | `#33260b` | Background for those states |
+| `--sodium` | `#f0a81c` | `#f5b73a` | Sodium amber as a fill. Defined, not used by a rule yet |
 
-Colour carries meaning, so keep it consistent: heat colours for anything burning or calling, cool for resting and hot water, green for comfortable, amber for waiting or needing attention. Every coloured state also has a text label, so colour is never the only signal.
+The temperature scale colours rooms by their reading. The house model, the editor, today's plan, "Where every room sits", the 12° to 22° key and the brand mark all use it, interpolating between the stops and clamping outside 12° and 22°.
 
-These text pairs meet WCAG 2.1 AA for small text (4.5:1). Badges, chips and the pressed button use them at 0.72rem to 0.9rem.
+| Token | Light | Dark | Temperature |
+|---|---|---|---|
+| `--t12` | `#3557e8` | `#3f5ff5` | 12° and below, cobalt |
+| `--t15` | `#8d9ff0` | `#8a9cf2` | 15° |
+| `--t17` | `#d3d0c2` | `#9b9888` | 17°, the neutral middle |
+| `--t19` | `#f0a81c` | `#f5b73a` | 19°, sodium amber |
+| `--t22` | `#d43f17` | `#ff6a3d` | 22° and above, signal red |
+
+Colour carries meaning, so keep it consistent: heat colours for anything burning or calling, cool for resting and hot water, green for comfortable, amber for waiting or needing attention, and the temperature scale only for temperatures. Every coloured state also has a text label, so colour is never the only signal.
+
+These text pairs meet WCAG 2.1 AA for small text (4.5:1). Badges and chips use them at 0.72rem to 0.9rem.
 
 | Text on background | Light | Dark |
 |---|---|---|
-| `--ember` on `--heat-soft` | 4.7:1 | 6.8:1 |
-| `--warn` on `--warn-soft` | 5.1:1 | 7.7:1 |
-| `--ok` on `--ok-soft` | 4.8:1 | 6.8:1 |
-| `--cool` on `--cool-soft` | 4.9:1 | 6.3:1 |
-| `--muted` on `--surface-2` | 5.3:1 | 5.7:1 |
-| `--muted` on `--cool-soft` (demo banner note) | 4.9:1 | 5.2:1 |
-| `--surface` on `--cool` (sign-in button) | 6.1:1 | 7.5:1 |
+| `--ember` on `--heat-soft` | 5.23:1 | 7.44:1 |
+| `--warn` on `--warn-soft` | 5.11:1 | 8.23:1 |
+| `--warn` on `--surface` (alerts, errors, the dry run notice) | 5.51:1 | 9.47:1 |
+| `--ok` on `--ok-soft` | 5.14:1 | 7.39:1 |
+| `--cool` on `--cool-soft` | 4.75:1 | 5.73:1 |
+| `--cool` on `--surface` (held setpoint label, "Still learning") | 5.33:1 | 6.28:1 |
+| `--muted` on `--surface-2` | 5.09:1 | 7.18:1 |
+| `--muted` on `--surface` | 6.38:1 | 6.31:1 |
+| `--muted` on `--bg` (status line) | 5.52:1 | 6.92:1 |
+| `--on-cool` on `--cool` (primary button) | 6.54:1 | 6.89:1 |
+| `--bg` on `--text` (selected segment, pressed button, selected floor tab) | 12.26:1 | 14.94:1 |
 
-Bars meet 3:1 against their track: `--heat` on `--surface-2` is 3.2:1 in light mode and 6.3:1 in dark mode.
+Bars meet 3:1 against their track: `--heat` on `--surface-2` is 3.28:1 in light mode and 6.78:1 in dark mode.
+
+Text on a temperature colour (a room in the model or the editor) is ink or white, whichever has the higher contrast. The scale's ends are dark enough for 4.5:1, but blends in between reach only about 4.2:1 with either (light mode around 21.6°, dark mode around 12.9°). Readings in the model are 19px weight 900, so they count as large text and need 3:1. Room names are smaller, so they fall short in that band; each room's name and reading is also in its accessible name and in the line under the model.
 
 ## Type
 
-- System font stack: `ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`. No web fonts.
-- Body line height 1.4.
-- Every number uses `font-variant-numeric: tabular-nums`, so live values don't shift sideways as they change.
-- Headings and labels use sentence case. Section headings (`.section-h`) are the one exception: 0.85rem, uppercase, 0.06em letter spacing, weight 600.
+Three faces, served with the UI from `web/fonts` (Latin subsets from Fontsource, SIL Open Font License 1.1). The page still makes no requests outside the Radiate server. `index.html` preloads Doto 700.
 
-| Role | Size | Weight |
+| Token | Face | Weights | Use |
+|---|---|---|---|
+| `--readout` | Doto, a dot-matrix face | 700, 900 | Readouts: room temperatures, statistics, the setpoint value, outdoor temperature, device values, counts, times in "Coming up" |
+| `--display` | Funnel Display | 600, 700 | Headings, the wordmark, view tabs, legends, words in the house now cells |
+| `--body` | Funnel Sans | 400, 500, 600 | Everything else |
+
+- Body text is 15px with a line height of 1.45.
+- Every number uses `font-variant-numeric: tabular-nums`, so live values don't shift sideways as they change.
+- Headings and labels use sentence case, section headings included. A section heading (`.section-h`) is Funnel Display 600 at about 1.05rem with -0.01em tracking, under a 2px ink rule.
+- The wordmark is lowercase "radiate", Funnel Display 700.
+
+| Role | Size | Face and weight |
 |---|---|---|
-| Room temperature (`.temp .now`) | 2rem (1.7rem under 560 px) | 650, -0.02em tracking |
-| Statistic value (`.stats dd`) | 1.15rem | 600 |
-| Boiler heading | 1rem | default heading weight |
-| Room name | 0.98rem | 600 |
-| Status line | 0.95rem | 400 |
-| Buttons, segmented control, alerts | 0.9rem | 400 |
-| Demand mode note | 0.8rem | 400 |
-| Banner, reason text | 0.84rem to 0.85rem | 400 |
-| Chips, labels, metadata, timeline ticks | 0.72rem to 0.8rem | 400 to 600 |
+| Rooms calling, on the house now plate (`.hm-big`) | `clamp(3.6rem, 7vw, 5.4rem)` | Doto 700 |
+| Room temperature (`.temp .now`) | 2.2rem (1.7rem under 560 px) | Doto 700 |
+| House now cell value (`.hm-cell .hm-readout`) | 1.9rem; words 1.1rem | Doto 700; words in Funnel Display 600 |
+| Statistic value (`.stats dd`), selected room's reading | 1.35rem | Doto 700 |
+| Temperature on a model room (`.hm-t`) | 17px in the drawing | Doto 900 |
+| Outdoor temperature, setpoint value, device values | 1rem to 1.05rem | Doto 700 |
+| Wordmark | 1.35rem | Funnel Display 700, -0.03em tracking |
+| Devices, Suggestions and setup headings | 1.35rem | Funnel Display 600, -0.02em tracking |
+| Boiler heading, setup step titles | 1.2rem | Funnel Display 600 |
+| Section and plate headings, room name | 1.05rem | Funnel Display 600 |
+| View tabs | 0.98rem | Funnel Display 600 |
+| Status line | 0.95rem | Funnel Sans 400 |
+| Buttons, segmented control | 0.9rem | Funnel Sans 500; 600 when selected or primary |
+| Alerts | 0.9rem | Funnel Sans 400 |
+| Banner, dry run notice, reason text | 0.84rem to 0.85rem | Funnel Sans 400 |
+| Chips, badges, labels, metadata, timeline ticks | 0.72rem to 0.8rem | Funnel Sans 400 to 600; tab counts and the plan's hour ticks in Doto 700 |
 
 ## Spacing and shape
 
@@ -75,14 +111,16 @@ Bars meet 3:1 against their track: `--heat` on `--surface-2` is 3.2:1 in light m
 |---|---|
 | 16px | Page gutter at every width, main padding, header padding |
 | 20px | Gap between main sections |
-| 12px | Gap in the room grid and statistics grid |
-| 14px to 18px | Card padding |
-| 1180px | Maximum content width |
-| `--radius` 14px | Cards and the alerts panel |
-| 10px | Buttons, segmented control, banner |
-| 999px | Chips and badges |
-| 4px to 6px | Bars and timeline lanes |
-| `--shadow` | Cards in light mode; `none` in dark mode, where borders do the work |
+| 12px | Gap in the room grid, the statistics grid, and between the house model and the house now plate |
+| 14px to 18px | Plate padding |
+| 1340px | Maximum width of `main`, the Devices and Suggestions views, and the header and tab contents |
+| `--radius` 0 | Every corner is square. Don't round a corner anywhere |
+| `--cut` 14px | The chamfered top-right corner of every plate (`.card`), cut with `clip-path`. Anything focusable inside sits in the padding, so the clip never cuts a focus ring; a focused plate draws its ring inside, at -2px |
+| `--rule`, 2px of `--text` | Above section headings, under the header, above the setup's Back and Next |
+| 1.5px of `--text` | Outlines of buttons, segmented controls, the setpoint stepper, floor tabs and editor inputs |
+| 4px left rule | Flat bands: the demo banner (`--cool`), the dry run notice and alerts (`--warn`), a suggestion to act on, a week changed by someone being away, the house now cell for devices when any need attention |
+| 4px to 16px | Bars and strips: the guard 4px, valve bars 6px, timeline lanes 14px, week bars and today's plan 16px |
+| `--shadow` none | No drop shadows anywhere. An inset `box-shadow` only draws a rule, as on the devices cell |
 
 ## Motion
 
@@ -100,6 +138,8 @@ Bars meet 3:1 against their track: `--heat` on `--surface-2` is 3.2:1 in light m
 
 New UI that enters or leaves (a sheet, a toast) starts from `scale(0.95)` and `opacity: 0`, never from `scale(0)`. The sign-in card enters from `scale(0.98)` and `opacity: 0` with `@starting-style`. Stale data fades to `opacity: 0.55` over 200 ms.
 
+The house model has the page's one keyframe animation. A room's radiator bar blinks while the room is calling or topping up, and always on the bypass room: a hard on and off (`steps(2)`) every 1.8 s, with no fade and no movement. It stops under reduced motion and the bar stays on. "Room controls" scrolls to the room card smoothly, or jumps under reduced motion. In the room editor nothing animates: a room follows the pointer or the arrow keys exactly.
+
 The household setup is used a few times a year, so each step fades in from `opacity: 0` and `translateY(6px)` over 200 ms with `--ease-out`. When the step changed from the keyboard, or a step redraws after an answer adds or removes a question, nothing moves. Under reduced motion only the fade stays.
 
 ## Accessibility
@@ -107,12 +147,13 @@ The household setup is used a few times a year, so each step fades in from `opac
 - The page declares `lang="en-GB"` and `color-scheme: light dark`.
 - Text meets WCAG 2.1 AA contrast: 4.5:1 for body and small text, 3:1 for text at 24 px, or 19 px bold, and above. Check both themes when you add or change a token.
 - Every interactive element is a real `<button>` with a visible label. Toggles use `aria-pressed`; the heating mode and the demand mode are each a `radiogroup` of `role="radio"` buttons with `aria-checked`. The demand mode group is described by its note (`aria-describedby`).
-- The focus ring is `outline: 2px solid var(--cool)` with a 2px offset on `:focus-visible`. Never remove it.
+- The focus ring is cobalt, `outline: 2px solid var(--cool)`, with a 2px offset on `:focus-visible`. Never remove it. Inside a plate it sits at -2px, so the cut corner never clips it. A room card focused from the house model shows the same ring.
 - The status line is `aria-live="polite"`, so screen readers hear the boiler state change without being interrupted.
 - Decorative graphics (the brand mark, the guard bar) are `aria-hidden="true"`. Graphics that carry data, such as the timeline, have an `aria-label`.
 - Touch targets are at least 44 px tall on touch screens. Under `(pointer: coarse)`, buttons, the segmented controls and the token field get `min-height: 44px` (segment buttons also `min-width: 44px`), the setpoint buttons grow to 44 by 44 px, and text links get 13 px of padding above and below, cancelled by a negative margin, so the hit area grows without moving the layout. Desktop buttons stay about 32 px tall.
 - The alerts toggle is a `<button>` with `aria-expanded` and `aria-controls`. Sign-in errors use `role="alert"`.
 - In the household setup, every input has a visible `<label>`, and its one-line explanation is linked with `aria-describedby`. Groups of answers (a day's routine, who uses a room, the weekend days) are fieldsets with a legend, or `role="group"` with a heading. Moving to a step puts focus on its heading; after an answer adds a question, focus stays on that answer. Errors appear in a summary at the top of the step (`role="alert"`, focused), each linking to its answer, and again next to the answer, which gets `aria-invalid` and the error in its `aria-describedby`. Times are text inputs with `inputmode="numeric"`, so they read as 24-hour times whatever the browser's locale; "730" becomes "07:30" when the input loses focus.
+- In the house model, each room is a focusable `role="button"` with `aria-pressed` and a label such as "Lounge, 20.5 degrees, heating". Enter or Space selects it. The line under the model is `aria-live="polite"`. "Where every room sits" and each strip in today's plan are `role="img"`, labelled in words. In the room editor, each room is a `role="button"` labelled with its name and size, the floor tabs are a labelled group of `aria-pressed` buttons, and the save note is `role="status"`.
 - The setpoint stepper is a `role="group"` labelled with the room name. Each button has its own label ("Raise Lounge setpoint by 0.5°") and the value is `aria-live="polite"`, so each press is read out. A button is disabled at 5° or 28°.
 
 Stale data is the one deliberate exception to the contrast rule: it dims to 55% opacity so it reads as out of date, and the status line above it keeps full contrast and says how old it is.
@@ -139,12 +180,14 @@ Every view has to make sense in each of these states. When you add a component, 
 |---|---|---|
 | Loading | That the page is connecting | Status line "Connecting…" until the first state arrives |
 | Offline | That the data is stale and Radiate is retrying | When the WebSocket drops, the page polls once per reconnect attempt (2 s, backing off to 15 s). If the poll fails too, the page dims and the status line, in amber, says "Cannot reach Radiate. Retrying… Showing data from 14:32." The next state from either path clears it |
-| Demo | That nothing is real | Cool banner with the simulated time and boiler, store and stairs temperatures |
+| Demo | That nothing is real | Flat band with a cobalt left rule, with the simulated time and boiler, store and stairs temperatures |
 | Dry run | That Radiate is not writing to devices | Persistent notice under the header with an amber "Dry run" tag, the held-back valve writes and boiler commands, and the latest five writes behind a disclosure |
 | Alerts | What needs attention, in words | Amber "Needs attention" panel under the rooms, one alert per list item. A problem shared by several rooms is one line, for example "TRV not reachable (8 rooms): Bedroom 1, …". After four lines the rest sit behind "Show N more" |
 | Sign-in | That the server needs its token | When the API answers 401, a sign-in card replaces the page. The token is kept in `localStorage` and sent as a Bearer header and as the stream's first message. Never shown through Home Assistant ingress or in the demo |
 | Safe mode | That the boiler is stopping and why | Shown as an alert |
 | Boiler states | Idle, opening valves, firing, resting, with minimum burn and minimum off progress, and why the burner is on | Chip, status line and guard bar. The guard bar and countdown use the effective minimum off from `state` |
+| Boiler not linked | That Radiate can't switch the boiler, so it never claims the boiler is idle | When `telemetry.boiler_linked` is false (no `shelly` section), the status line reads "No room needs heat. The boiler switch isn't linked yet." or "Lounge and Toilet want heat. The boiler switch isn't linked yet, so the boiler follows its own timer." The Boiler cell on the house now plate reads "Not linked" with "Radiate can't switch it until the relay is set up." Servers that don't send `boiler_linked`, and the demo, keep the usual wording |
+| House layout | Whether the model shows the owner's layout or a guess | Until a layout is saved, a muted hint under the model heading: "Rooms are placed by a guess from their names. Arrange them to match your house." A server without `GET layout` keeps the guess, and the editor says "This server can't keep a layout. Update Radiate to save it." A refused save reads "Not saved: …" with the server's message; a failed one, "Not saved. Check the connection and move a room to try again." |
 | Short-cycling | That minimum off has been raised and for how long | Line under the guard bar with an amber "Short-cycling" tag: "Minimum off raised to 15 min for the next 23 h 30 min, so the burner starts less often." Hidden when `boiler.short_cycle` is absent or null |
 | Daily accounting | Burner time and starts today, how well balanced yesterday was | "Burner today" (hours, starts, and litres and kWh when a nozzle rating is set) and "Balance, yesterday" (score out of 100, and "Last room 22 min after the first" for the median arrival spread) in the statistics. "No full day yet" until a day has closed. Servers without `accounting` show the old "Burner hours" total |
 | Demand mode | Which mode is in effect, what it does, and whether it is the configured default | Eco and Comfort control beside the heating mode, with one muted line under it: "Default: fewer, longer burns. Rooms might warm a bit later." or "Every room held at its target, with more burns." A failed change reads "Not saved. Try again." in amber. Hidden when the server sends no `settings` |
@@ -166,6 +209,16 @@ Every view has to make sense in each of these states. When you add a component, 
 
 ## Components
 
+**House model.** The first plate on the House page (`web/house.js`), headed "Your house", with a 12° to 22° key and an "Arrange rooms" button. It draws the house as an axonometric model: each floor's rooms as blocks, floors stacked and pulled apart so an upper floor never hides the one below, each floor tagged with its name. A block's top is the room's temperature colour and its two sides are darker shades of it. The reading sits on the top in Doto 900, with the name under it when the room is at least 1.4 m wide. A room with no reading is `--surface-2` and reads `–`. A radiator bar runs along the front edge while the room is calling or topping up, and always on the bypass room (see Motion). Selecting a room outlines its top in ink and fills the line under the model: name, reading, what it's doing ("Heating to 21.0°, 0.6° to go.", "Holding 18.0°.", "No radiator. Temperature recorded, not controlled.", "Manual valve, always open."), humidity, valve opening, the next setpoint change, and a "Room controls" link. That link scrolls to the room card and focuses it. Selecting the room again clears the line. The model is redrawn on each state, when the colour scheme changes and once the fonts load. The layout only draws the model; control never reads it.
+
+**Arrange rooms.** The model plate becomes a floor-plan editor, headed "Arrange rooms", with "Start again" and a primary "Done". Under the heading: one tab per floor (ink outlines, the selected one filled), "Add floor" up to six floors, a "Floor name" field (up to 40 characters), and "Remove this floor" when a floor has no rooms and isn't the only one. The plan is a 14 by 10 m `--surface-2` well with a gridline every half metre and a stronger one every metre. Rooms are blocks in their temperature colour, with the name at the top and the size ("4 × 3.5 m") at the bottom. Dragging a room moves it, and dragging the 14 px ink square in its corner resizes it, using pointer events with `touch-action: none` on the plan. Everything snaps to 0.5 m and a side is at least 1 m. With the keyboard, Enter or Space selects a room, arrow keys move it half a metre, and Shift with an arrow resizes it. Under the plan, a tray lists rooms not placed yet as "Place Kitchen" chips (dashed outline), or says "Every room is placed.", and offers "Take Kitchen off the plan" for the selected room. A placed room goes in the first free 2 by 2 m spot on the floor. "Start again" puts every room back where the guess from their names puts them. Each change is saved with `PUT layout` 500 ms after the last one, and a muted line says "Saving…", then "Saved." or why not. While the editor is open, the house now plate becomes "Live model": the model as it will look, with "2 floors, 8 of 9 rooms placed." and a sentence saying the layout only draws the house. "Done" closes the editor and returns focus to "Arrange rooms".
+
+**Guessed layout.** Until the owner saves a layout, rooms whose names suggest an upper floor (bedroom, bathroom, landing, en suite, nursery, study, loft, attic) go on "First floor" and the rest on "Ground floor", three to a row at 3 by 3 m. If every room matches, or none does, there is one floor.
+
+**The house now.** The plate beside the model. A big Doto readout of rooms calling over controllable rooms ("3/8"), which the sentence beside it continues: "rooms want heat.", "rooms are heating. Burner on.", or, without a boiler relay, "rooms want heat. The boiler switch isn't linked yet, so the boiler is follows its own timer." With no room calling it reads "No room needs heat right now.", and with the heating off or on frost, "Heating is off." or "Frost protection only." "Where every room sits" puts every room with a reading as a tick in its temperature colour on a 12° to 22° axis, with an ink line at the target most heated rooms aim for, and says the coldest and warmest rooms in words under it. Then four cells in a 2 by 2 grid: Boiler (its state, with minutes so far while firing or starts in the last hour otherwise, or "Not linked"); Dry run with the count of held-back writes, or Mode with the demand mode when not in dry run; Devices needing attention, with a 4px `--warn` left rule and an amber count when any do; Learning, the average model confidence of the controllable rooms. Last, "Coming up": the next three times a setpoint changes, rooms at the same time on one line ("07:00 Bedroom 1 and Bedroom 2 warm to 19.0°."). Without any setpoint changes ahead, "Coming up" is left out.
+
+**Today's plan.** A plate under the model, hidden until `GET schedules` has answered. One row per scheduled room: the name, then today as a 16px strip of its setpoints in temperature colours, with an ink now line haloed in `--surface`. Hour ticks at 00, 06, 12, 18 and 24 in Doto. Each strip is labelled with the day in words. "Week schedules" moves focus to the Schedules heading.
+
 **Room card.** Name and badge; the room temperature with the target after an arrow; the setpoint row; the stuck-valve line when it applies; the opening limit bar; one reason line; learned-model metadata; the fire button for rooms with an open fire.
 
 **Setpoint row.** Shown for every controllable room. On the left, "Setpoint" or the hold; on the right, a stepper (minus, value, plus) in steps of 0.5 °C from 5 to 28 °C. Presses change the value at once and are sent together 600 ms after the last one, so several quick presses make one request. The page then asks for the state straight away, as the server only streams once a tick. The value stays as pressed until a state confirms it, or for 5 s. A hold ends at the next scheduled change by default.
@@ -174,13 +227,13 @@ Every view has to make sense in each of these states. When you add a component, 
 
 **Week card.** Name and a neutral badge, "Household" or "Hand-written"; the away line and usual week when they apply; seven day rows (Mon to Sun) of a 24-hour bar; hour ticks at 00:00, 06:00, 12:00, 18:00 and 24:00; the week in words, one line per run of identical days; dropped-period lines; "Depends on …" with the room's people. A warm period is a block with a `--heat` edge and a `--heat` fill whose opacity follows the temperature (0.3 to 1 across the coolest and warmest setpoint shown, widened to the household levels), so 19° looks the same in every room. Its temperature is written above it in `--ember`; labels never overlap, and one that cannot fit is left to the day's words. Each bar is `role="img"` labelled with the day in words, and today's row has `aria-current="date"`, a bold day name and a `--text` now marker with a `--surface` halo. Faint `--line` gridlines every 3 hours. A legend lists the household levels with their temperatures, and "Adjusted" when a room has adjustments. The bar compresses on a phone. The pure helpers in `web/week.js` take minutes of the day, so the wizard's Result step reuses them; there the bars are read-only.
 
-**Adjusting a week.** In the Schedules section, a household room's warm periods have a grip at each edge: a 6 px `--surface` pill with a `--heat` outline, `cursor: ew-resize`. With a mouse the grips fade in (opacity, 150 ms) while the pointer is over the card; on touch screens they are always shown. The hit area is 24 px wide, and 44 by 50 px under `(pointer: coarse)`. A run of identical days moves together, so dragging Wednesday's evening end moves Monday to Friday, and the change applies to those days. Dragging uses pointer events with pointer capture, one pointer at a time, `touch-action: none` on the grip only, and snaps to 15 minutes. While an edge moves, its time is written above it in bold `--text` and the day's temperature labels hide. Nothing animates: the block follows the pointer or key exactly. A later end or an earlier start keeps the room warm, the other way keeps it cold; an edge can't cross the other edge of its period, less 15 minutes, or a neighbouring period. On release the change is previewed (`POST household/preview`) and waits for Save. Keyboard: only the first day of each run is a tab stop. Each grip is `role="slider"` named "Bedroom 1, Mon to Fri, warm until 22:30", with the time as `aria-valuetext`. Arrow keys move it 15 minutes, Page Up and Page Down an hour, Home and End to its limits; the preview waits until the keys stop for 400 ms. Enter saves, Escape cancels and puts every edge back. After a save, focus returns to the same grip, or to "Adjust" after a pointer save. Adjusted time has a 3 px `--cool` line along the bottom of the bar. Under the week, a room with adjustments lists them in words ("Kept warm 22:30 to 23:00 on weekdays.") with a "Remove" link each, its week without them ("Without adjustments: …"), and "Reset to routine". "Adjust" opens a form in place with no animation: Days (every day, weekdays, weekend or a day), "Keep it" warm or cold, From and To as 24-hour text inputs. Escape or Cancel closes it and returns focus to "Adjust". An error appears under the fields in amber, and the field it is about gets `aria-invalid`. A room that someone being away has changed has no grips, as its week isn't its usual one, but keeps its list and the form.
+**Adjusting a week.** In the Schedules section, a household room's warm periods have a grip at each edge: a 6 px `--surface` bar with a `--heat` outline, `cursor: ew-resize`. With a mouse the grips fade in (opacity, 150 ms) while the pointer is over the card; on touch screens they are always shown. The hit area is 24 px wide, and 44 by 50 px under `(pointer: coarse)`. A run of identical days moves together, so dragging Wednesday's evening end moves Monday to Friday, and the change applies to those days. Dragging uses pointer events with pointer capture, one pointer at a time, `touch-action: none` on the grip only, and snaps to 15 minutes. While an edge moves, its time is written above it in bold `--text` and the day's temperature labels hide. Nothing animates: the block follows the pointer or key exactly. A later end or an earlier start keeps the room warm, the other way keeps it cold; an edge can't cross the other edge of its period, less 15 minutes, or a neighbouring period. On release the change is previewed (`POST household/preview`) and waits for Save. Keyboard: only the first day of each run is a tab stop. Each grip is `role="slider"` named "Bedroom 1, Mon to Fri, warm until 22:30", with the time as `aria-valuetext`. Arrow keys move it 15 minutes, Page Up and Page Down an hour, Home and End to its limits; the preview waits until the keys stop for 400 ms. Enter saves, Escape cancels and puts every edge back. After a save, focus returns to the same grip, or to "Adjust" after a pointer save. Adjusted time has a 3 px `--cool` line along the bottom of the bar. Under the week, a room with adjustments lists them in words ("Kept warm 22:30 to 23:00 on weekdays.") with a "Remove" link each, its week without them ("Without adjustments: …"), and "Reset to routine". "Adjust" opens a form in place with no animation: Days (every day, weekdays, weekend or a day), "Keep it" warm or cold, From and To as 24-hour text inputs. Escape or Cancel closes it and returns focus to "Adjust". An error appears under the fields in amber, and the field it is about gets `aria-invalid`. A room that someone being away has changed has no grips, as its week isn't its usual one, but keeps its list and the form.
 
 **Setup wizard.** A heading with "Close", the five steps as a list (the current one bold with a `--cool` underline, visited ones as links), then one card per step: a heading, a one-line introduction, the questions, an "Advanced: …" disclosure, and Back, "Step 2 of 5: Routines, Sam" and Next along the bottom. Next reads "See the result" on Temperatures and "Save" on the Result. Questions are plain and name the person: "When does Sam get up?", "Is Sam out or working from home during the day?", "Where does Sam work?", "When does Sam go to bed?", "How is it used?", "What kind of room?", "Who uses it?". Every answer starts filled in, so Next always works on a first visit. On People, each person is a `role="group"` row with their name, "Home Assistant person" and Remove. "Home Assistant person" is a choice of "Not linked" and the people Home Assistant reported, by name (with the entity ID when two share a name), or, when Home Assistant hasn't reported any, a text input for the entity ID. One muted line under the list says what linking does, and every link's `aria-describedby` points to it. Each Advanced setting has a one-line explanation ending with its default ("Default 1 h."); per-person and per-room settings are empty, with the house's value as the placeholder. Room kinds are explained in a sentence under the choice. Below 12° an amber line under the unused or night temperature gives the damp note. Errors are amber, at the top of the step and under the answer. The Result is the week card for every room, with any advice and a sentence on warm periods left out of the valves' own schedules.
 
 **Demand mode control.** A segmented control (Eco, Comfort) after the heating mode, in the same style. The control already names the mode, so the note under it says what the mode does. It starts "Default:" while the server follows the configuration file, and that prefix is the only sign of the default. Picking the configured default sends `null`, so Radiate follows the file again. A press shows at once and is held until a state confirms it, or for 5 s. The note sits right-aligned under the controls on wide screens.
 
-**Device card.** Name ("Lounge TRV", "Bathroom room sensor", "Router plug_hall", "Boiler relay") and a status badge: "Online" (`--ok`), "Needs attention" or "Offline" (amber), "No data yet" (neutral). Problem lines, then three values: Battery (the percentage and a 26 by 6 px meter scaled with `transform`, `--ok` or `--warn` when low; "Mains" for mains devices), Signal (three bars, `--ok` strong, `--muted` fair, `--warn` weak, the word, and "LQI 101" in muted 0.72rem under it; "Wi-Fi" for the relay) and Last seen ("just now", "4 min ago", "3 h ago"). Then the latest readings in one muted line ("18.1° at the valve, opening limit 35%, heating, auto mode", "20.4°, 56% humidity", "Heating on, hot water off"), and a meta line with the Zigbee2MQTT name in `code`, model, firmware and route ("Via plug_hall (LQI 93)", "Via the coordinator"). Cards sit in a `repeat(auto-fill, minmax(260px, 1fr))` grid under "Valves and sensors", "Zigbee network" (the scan card, the route tree and the routers) and "Boiler". The route tree is nested lists from the coordinator, each line a device with its link LQI, amber when weak. Cards are created once and updated in place; the meter is the only thing that moves.
+**Device card.** Name ("Lounge TRV", "Bathroom room sensor", "Router plug_hall", "Boiler relay"; a room whose name ends in " room" doesn't repeat it, so "Dining room sensor") and a status badge: "Online" (`--ok`), "Needs attention" or "Offline" (amber), "No data yet" (neutral). Problem lines, then three values: Battery (the percentage and a 26 by 6 px meter scaled with `transform`, `--ok` or `--warn` when low; "Mains" for mains devices), Signal (three bars, `--ok` strong, `--muted` fair, `--warn` weak, the word, and "LQI 101" in muted 0.72rem under it; "Wi-Fi" for the relay) and Last seen ("just now", "4 min ago", "3 h ago"). Then the latest readings in one muted line ("18.1° at the valve, opening limit 35%, heating, auto mode", "20.4°, 56% humidity", "Heating on, hot water off"), and a meta line with the Zigbee2MQTT name in `code`, model, firmware and route ("Via plug_hall (LQI 93)", "Via the coordinator"). Cards sit in a `repeat(auto-fill, minmax(260px, 1fr))` grid under "Valves and sensors", "Zigbee network" (the scan card, the route tree and the routers) and "Boiler". The route tree is nested lists from the coordinator, each line a device with its link LQI, amber when weak. Cards are created once and updated in place; the meter is the only thing that moves.
 
 **Suggestion card.** Title, point first and naming the room ("Bedroom 2 loses heat quickly", "Bedroom 3's radiator may be too small"), and a badge: "Act on this" (amber), "Worth considering" or "For information" (neutral). A card to act on also has a 3 px `--warn` left border, so the most pressing stand out without colour alone. Then the evidence in words, with the numbers and units ("cools by about 1.7° an hour. That is 3.3 times the house's typical 0.5° an hour."), a muted "What to do" label over the action, and a muted line with the confidence and what it rests on ("Medium confidence. From 87 h of learning in Bedroom 2."). Words that hedge ("may", "about", "Radiate's model says") are deliberate: a suggestion is never presented as fact. Cards sit in a `repeat(auto-fill, minmax(min(100%, 340px), 1fr))` grid, are created once and updated in place, and nothing on them moves.
 
@@ -191,11 +244,12 @@ Every view has to make sense in each of these states. When you add a component, 
 ## Phone width
 
 - Design for 360 px wide first. The page never scrolls sideways.
+- Under 980 px the house model and the house now plate stack, and the model drops its minimum height. Under 640 px the header stops being sticky, as it wraps to several lines there. Under 520 px the names in today's plan narrow to 84 px and the rooms-calling readout sits above its sentence.
 - The 16px gutter holds at every width.
 - The room grid uses `repeat(auto-fill, minmax(230px, 1fr))`, so it drops to one column on a phone.
 - Under 560 px the room temperature shrinks to 1.7rem and the header becomes a grid of four rows: brand and outdoor temperature; heating mode and demand mode side by side; the demand mode note; the status line. Segment buttons drop to 10 px side padding there, so both controls fit at 360 px with 44 px touch targets.
 - Above 560 px the header wraps; when the controls don't fit beside a status line of at least 280 px they move to their own row, right-aligned. Both mode controls stay reachable without scrolling.
 - Long room names and reasons wrap or clamp (reasons clamp at two lines); they never push the layout wider.
 - Suggestion cards drop to one column; long titles wrap beside their badge.
-- The House, Devices and Suggestions tabs are 44 px tall on touch screens; device cards drop to one column, and the signal's LQI sits under its word, so the three values fit at 360 px.
+- The House, Devices and Suggestions tabs, the editor's floor tabs and its room chips are 44 px tall on touch screens; device cards drop to one column, and the signal's LQI sits under its word, so the three values fit at 360 px.
 - The setup wizard is at most 820 px wide. Under 560 px the step line moves above Back and Next. Room cards in the setup drop to one column below 300 px each.
