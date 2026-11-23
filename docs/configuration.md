@@ -360,7 +360,9 @@ Every setting below is optional. The defaults describe one way of living, so cha
 | `presence_delay_min` | 60 | 0 to 720 | How long Home Assistant must say a person is not home before they count as away |
 | `presence_stale_after_min` | 60 | 20 to 1440, or 0 for off | Presence that Home Assistant hasn't reported again within this time counts as unknown, not away |
 | `return_warmup_min` | 180 | 0 to 360 | How early Radiate can start warming rooms for someone who is due back. 0 means rooms start warming when they arrive |
-| `everyone_away` | `frost` | `frost` or `unused` | What happens when everyone is away. `frost`: every room is held at the frost threshold. `unused`: every household room stays at its unused temperature, for example for pets or a house that gets damp |
+| `everyone_away` | `frost` | `frost` or `unused` | What happens when everyone is away with an away until. `frost`: every room is held at the frost threshold. `unused`: every household room stays at its unused temperature, for example for pets or a house that gets damp. When Home Assistant presence alone says everyone is out, rooms stay at their unused temperature whichever you choose |
+| `presence_evidence_max_age_min` | 240 | 30 to 1440 | Not home counts as away only while the person's phone or tracker has reported within this time. After that, Radiate counts them as home |
+| `presence_weak_source_delay_min` | 240 | 0 to 1440 | How long not home from a router or Bluetooth tracker, or from a phone at 5 % battery or less, must last before the person counts as away. The longer of this and `presence_delay_min` applies |
 
 `presence_delay_min` used to sit directly under `household`. If your file still has it there, `check-config` tells you to move it to `household.away`.
 
@@ -452,7 +454,22 @@ Away until wins over a home that Home Assistant reported before it was set, so y
 
 The integration reports each person's presence again every 15 minutes. If Home Assistant stops reporting, for example because it's down, presence older than `presence_stale_after_min` counts as unknown. An unknown person isn't away, so their rooms follow their routine. The API and the Home Assistant away entity show when presence has gone stale. Set `presence_stale_after_min` to 0 if something reports presence through the API without repeating it.
 
-When everyone is away and the heating mode is `auto`, the house holds every room at the frost threshold, like the `frost` mode, or at its unused temperature with `everyone_away: unused`. It goes back to the schedules as soon as someone is home. The heating mode you chose doesn't change, so `off` and `frost` still apply while everyone is away. Frost protection and the boiler guards work as usual.
+Radiate fails warm: when it isn't sure someone is out, it counts them as home. A not home counts as home instead of away when:
+
+- The person's phone or tracker hasn't reported for `presence_evidence_max_age_min`. A phone with a flat battery stays not home in Home Assistant, and the integration keeps repeating that, so Radiate looks at when the trackers themselves last reported (`evidence_at`, sent by the integration). With an integration too old to send it, Radiate uses the time the person left instead, so presence counts as away for at most `presence_evidence_max_age_min` after they leave.
+- Someone selects **Back now** for them in the web UI, or calls `POST /api/v1/people/{id}/home`. This lasts until Home Assistant sees them come or go again.
+- Someone shows they're in after the person left: a held temperature, a hot-water boost, the fire switch, or a shower. This also lasts until the person's presence changes.
+
+A not home from a router or Bluetooth tracker, or from a phone at 5 % battery or less, counts as away only after `presence_weak_source_delay_min`, because a phone asleep or dead at home looks like one that has left.
+
+A room set back because someone is away by presence never goes below 12 °C, so the house doesn't get damp, unless its routine already has it lower. An away until is your own choice, so it uses the unused temperature as set.
+
+When everyone is away and the heating mode is `auto`, what happens depends on why:
+
+- Everyone has set an away until: every room is held at the frost threshold, like the `frost` mode, or at its unused temperature with `everyone_away: unused`. A room with a held temperature keeps it.
+- Home Assistant presence says at least one of them is out: every household room stays at its unused temperature. Presence never holds the house at frost.
+
+It goes back to the schedules as soon as someone is home. The heating mode you chose doesn't change, so `off` and `frost` still apply while everyone is away. Frost protection and the boiler guards work as usual.
 
 #### Coming back
 

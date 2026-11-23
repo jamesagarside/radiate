@@ -374,6 +374,8 @@ def test_household_view_fills_in_defaults_and_ranges():
         "presence_stale_after_min": 60,
         "return_warmup_min": 180,
         "everyone_away": "frost",
+        "presence_evidence_max_age_min": 240,
+        "presence_weak_source_delay_min": 240,
     }
     assert view["weekend_days"] == ["saturday", "sunday"]
     worker = view["people"][1]

@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from radiate.config.away import everyone_away
+from radiate.config.away import everyone_away, frost_allowed
 from radiate.config.household import (
     CompiledHousehold,
     EveryoneAway,
@@ -51,7 +51,7 @@ SOURCE_HAND_WRITTEN = "hand_written"
 
 def schedules_view(rt: Runtime) -> dict:
     # Everyone away in auto: the core holds frost, whatever the weeks say.
-    frost = rt.everyone_away and rt.effective_mode() is not rt.mode
+    frost = rt.frost_held()
     return _view(rt, rt.household, rt.away, _driver_weeks(rt), frost)
 
 
@@ -68,11 +68,14 @@ def preview_view(
     away = rt.away & people
     linked = {r.room_id for r in household.rooms}
     weeks = {rid: named for rid, named in own.items() if rid not in linked}
+    ids = tuple(p.id for p in household.people)
     frost = (
         rt.mode is Mode.AUTO
         and rt.returning is None
-        and everyone_away(tuple(p.id for p in household.people), away)
+        and everyone_away(ids, away)
         and household.away.everyone_away is EveryoneAway.FROST
+        # Fail warm: frost only when everyone has an away until.
+        and frost_allowed(ids, rt.presence, rt.wall(), household.return_lead_min() * 60.0)
     )
     return _view(rt, household, away, weeks, frost)
 

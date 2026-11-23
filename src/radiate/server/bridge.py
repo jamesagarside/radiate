@@ -11,6 +11,7 @@ radiate imports are allowed here.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Coroutine
 from typing import Any
 
@@ -95,11 +96,17 @@ def set_away(rt: Runtime, person_id: str, body: Any) -> dict:
     return {"ok": True, "person": rt.person_view(pid)}
 
 
+SOURCE_TYPE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+
 def set_presence(rt: Runtime, person_id: str, body: Any) -> dict:
     """Presence from Home Assistant: `{"state": "home" | "not_home", "since": "..."}`.
 
     `since` is when the state last changed (optional). `{"state": null}` forgets the
     person's presence, for example when their `person` entity is no longer mapped.
+    Optional, for fail warm: `evidence_at`, the newest report from the person's trackers
+    themselves (any state); `source_type`, their kind (`gps`, `router`, `bluetooth`);
+    `battery`, the phone's charge, 0 to 100.
     """
     pid = person(rt, person_id)
     body = require_object(body)
@@ -110,7 +117,30 @@ def set_presence(rt: Runtime, person_id: str, body: Any) -> dict:
         raise RequestError(400, "state must be home, not_home or null")
     since = body.get("since")
     when = None if since is None else _local_time(rt, since, "since")
-    rt.report_presence(pid, state, when)
+    raw = body.get("evidence_at")
+    evidence_at = None if raw is None else _local_time(rt, raw, "evidence_at")
+    source_type = body.get("source_type")
+    if source_type is not None and (
+        not isinstance(source_type, str) or not SOURCE_TYPE.match(source_type)
+    ):
+        raise RequestError(400, "source_type must be a tracker type such as gps or router")
+    battery = body.get("battery")
+    if battery is not None:
+        if isinstance(battery, bool) or not isinstance(battery, (int, float)):
+            raise RequestError(400, "battery must be a number from 0 to 100")
+        if not 0 <= battery <= 100:
+            raise RequestError(400, "battery must be a number from 0 to 100")
+        battery = float(battery)
+    rt.report_presence(pid, state, when, evidence_at, source_type, battery)
+    return {"ok": True, "person": rt.person_view(pid)}
+
+
+def say_home(rt: Runtime, person_id: str, body: Any) -> dict:
+    """ "I'm home": the person counts as home now, whatever presence said before. Ends
+    their away until. Holds until their presence next changes state. Body `{}`."""
+    pid = person(rt, person_id)
+    require_object(body)
+    rt.say_home(pid)
     return {"ok": True, "person": rt.person_view(pid)}
 
 
@@ -180,6 +210,7 @@ def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
         override = rt.set_override(rc.id, value, until=until, minutes=minutes)
     except ValueError as err:
         raise RequestError(400, str(err)) from err
+    rt.note_home_evidence("override")  # someone is in (fail warm)
     view = rt.override_view(rc.id, rt.driver.clock())
     return {"ok": True, "until": override.until, "expires_in_min": view["expires_in_min"]}
 
@@ -188,6 +219,7 @@ def set_fire(rt: Runtime, room_id: str, body: Any) -> dict:
     rc = room(rt, room_id)
     if require_object(body).get("lit"):
         rt.fire.add(rc.id)
+        rt.note_home_evidence("fire_switch")  # someone lit it (fail warm)
     else:
         rt.fire.discard(rc.id)
     return {"ok": True}
@@ -203,6 +235,8 @@ def boost_store(rt: Runtime, body: Any) -> dict:
         raise RequestError(400, "minutes must be a number") from err
     minutes = max(0, min(BOOST_MAX_MIN, minutes))
     rt.store_boost_until = rt.driver.clock() + minutes * 60
+    if minutes > 0:
+        rt.note_home_evidence("store_boost")  # someone wants hot water (fail warm)
     return {"ok": True}
 
 
@@ -344,6 +378,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
                 return set_away(rt, parts[1], body)
             if parts[2] == "presence":
                 return set_presence(rt, parts[1], body)
+            if parts[2] == "home":
+                return say_home(rt, parts[1], body)
         if len(parts) == 3 and parts[0] == "rooms":
             if parts[2] == "setpoint":
                 return set_setpoint(rt, parts[1], body)

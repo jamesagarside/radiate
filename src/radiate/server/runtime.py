@@ -21,11 +21,18 @@ from zoneinfo import ZoneInfo
 from radiate import __version__
 from radiate.config.away import (
     AWAY_MAX_DAYS,
+    EVIDENCE_OLD,
+    HOME_EVIDENCE,
+    NOT_HOME,
     PRESENCE_STATES,
+    SAID_HOME,
+    AwayStatus,
     Presence,
     Return,
     effective_away,
     everyone_away,
+    evidence_seen,
+    frost_allowed,
     local_iso,
     next_return,
     stale,
@@ -47,7 +54,16 @@ from radiate.config.use import (
     room_use,
     schedule_room_use,
 )
-from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
+from radiate.core import (
+    DAMP_FLOOR_C,
+    Actions,
+    EngineState,
+    HouseConfig,
+    Mode,
+    Reason,
+    Snapshot,
+    decide,
+)
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.persist import dump_state, first_start_state, load_state
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
@@ -157,6 +173,9 @@ class Runtime:
     schedule_use: dict[str, tuple[UseLevel, UseLevel]] = field(default_factory=dict)
     _compiled: dict[frozenset[str], CompiledHousehold] = field(default_factory=dict)
     _stale: frozenset[str] = frozenset()  # people whose presence has gone stale
+    # Fail warm: why each person's presence is set aside now (AwayStatus.uncertain).
+    _uncertain: dict[str, str] = field(default_factory=dict)
+    _evidence_what: str | None = None  # the last home evidence, for messages
     _rebuild: bool = False  # the household changed: push its weeks even if away did not
     _baseline: Baseline | None = None  # the household's savings baseline, compiled once
     _return_logged: float | None = None
@@ -422,13 +441,21 @@ class Runtime:
         return tuple(p.id for p in self.household.people) if self.household else ()
 
     def _frost_hold(self) -> bool:
-        """Everyone away holds the house at frost: the household says so, mode is auto."""
+        """Everyone away holds the house at frost: the household says so, mode is auto,
+        and everyone said they are away with an away until. Presence alone never holds
+        frost (fail warm, ADR-0005): then every household room is at its unused
+        temperature, as with `everyone_away: unused`."""
         return (
             self.mode is Mode.AUTO
             and self.everyone_away
             and self.household is not None
             and self.household.away.everyone_away is EveryoneAway.FROST
+            and frost_allowed(self.people, self.presence, self._wall(), self._lead_s())
         )
+
+    def frost_held(self) -> bool:
+        """Everyone away is holding the house at frost protection right now."""
+        return self._frost_hold() and self.returning is None
 
     def effective_mode(self) -> Mode:
         """The mode the core runs in: frost while everyone is away, if the mode is auto.
@@ -454,6 +481,27 @@ class Runtime:
         if self.household is None:
             return None
         return self.household.away.presence_stale_after_min * 60.0 or None
+
+    def _max_age_s(self) -> float | None:
+        if self.household is None:
+            return None
+        return self.household.away.presence_evidence_max_age_min * 60.0
+
+    def _weak_delay_s(self) -> float | None:
+        if self.household is None:
+            return None
+        return self.household.away.presence_weak_source_delay_min * 60.0
+
+    def _status(self, p: Presence, now: float) -> AwayStatus:
+        return status(
+            p,
+            now,
+            self._delay_s(),
+            self._lead_s(),
+            self._stale_s(),
+            self._max_age_s(),
+            self._weak_delay_s(),
+        )
 
     def _compile(self, away: frozenset[str]) -> CompiledHousehold:
         if away not in self._compiled:
@@ -487,15 +535,37 @@ class Runtime:
         p = self._person(person_id)
         self._put_presence(person_id, replace(p, away_until=None, set_at=None))
 
-    def report_presence(self, person_id: str, state: str | None, since: float | None) -> None:
+    def report_presence(
+        self,
+        person_id: str,
+        state: str | None,
+        since: float | None,
+        evidence_at: float | None = None,
+        source_type: str | None = None,
+        battery: float | None = None,
+    ) -> None:
         """Home Assistant presence: `home`, `not_home`, or None to forget it.
 
         `since` is when the state last changed, never later than now. Without it, a
         repeat of the current state keeps its time and a new state starts now.
+        `evidence_at` is the newest report from the person's trackers themselves (fail
+        warm), `source_type` their kind and `battery` the phone's charge in per cent.
+        Each is optional and kept from the last report that gave it. `evidence_at` is
+        never later than now.
         """
         p = self._person(person_id)
         if state is None:
-            self._put_presence(person_id, replace(p, state=None, since=None))
+            gone = replace(
+                p,
+                state=None,
+                since=None,
+                reported_at=None,
+                evidence_at=None,
+                source_type=None,
+                battery=None,
+                home_evidence_at=None,
+            )
+            self._put_presence(person_id, gone)
             return
         if state not in PRESENCE_STATES:
             raise ValueError("state must be home or not_home")
@@ -504,7 +574,47 @@ class Runtime:
             since = p.since if state == p.state and p.since is not None else now
         # Every report, a repeat included, refreshes the presence (the heartbeat).
         fresh = replace(p, state=state, since=min(since, now), reported_at=now)
+        if evidence_at is not None:
+            fresh = replace(fresh, evidence_at=min(evidence_at, now))
+        if source_type is not None:
+            fresh = replace(fresh, source_type=source_type)
+        if battery is not None:
+            fresh = replace(fresh, battery=battery)
         self._put_presence(person_id, fresh)
+
+    def say_home(self, person_id: str) -> None:
+        """The person says they are home ("I'm home"). Their away until ends, and a
+        `not_home` that began before now counts as home until their presence changes
+        again; a heartbeat repeating the same state doesn't undo it. Saved at once."""
+        p = self._person(person_id)
+        now = self._wall()
+        self._put_presence(person_id, replace(p, away_until=None, set_at=None, home_at=now))
+        reason = Reason("away.home", "Someone said they are home: their rooms follow routine")
+        self._log(self.driver.clock(), reason)
+        self._away_log.append(reason)
+
+    def note_home_evidence(self, what: str) -> None:
+        """Someone is in (`what`: override, store boost, fire switch, shower): set aside
+        every presence-based away until that person's presence changes again.
+
+        Only people whose `not_home` isn't already set aside are touched, so a run of
+        overrides doesn't save the presence every time.
+        """
+        if self.household is None:
+            return
+        now = self._wall()
+        changed = False
+        for pid, p in list(self.presence.items()):
+            if p.state != NOT_HOME or p.since is None:
+                continue
+            if p.home_evidence_at is not None and p.home_evidence_at >= p.since:
+                continue
+            self.presence[pid] = replace(p, home_evidence_at=now)
+            changed = True
+        if changed:
+            self._evidence_what = what
+            self._save_away()
+            self._update_away()
 
     def report_ha_persons(self, persons: list[dict]) -> None:
         """The `person` entities Home Assistant has, for the setup wizard to offer.
@@ -561,8 +671,24 @@ class Runtime:
             self.presence = {pid: p for pid, p in tidied.items() if not p.empty}
             self._save_away()
         delay_s, lead_s, stale_s = self._delay_s(), self._lead_s(), self._stale_s()
-        away = effective_away(self.people, self.presence, now, delay_s, lead_s, stale_s)
+        away = effective_away(
+            self.people,
+            self.presence,
+            now,
+            delay_s,
+            lead_s,
+            stale_s,
+            self._max_age_s(),
+            self._weak_delay_s(),
+        )
         reasons: list[Reason] = []
+        uncertain = {
+            pid: why
+            for pid, p in self.presence.items()
+            if (why := self._status(p, now).uncertain) is not None
+        }
+        reasons.extend(self._uncertain_reasons(uncertain))
+        self._uncertain = uncertain
         gone_stale = frozenset(
             pid for pid, p in self.presence.items() if p.state and stale(p, now, stale_s)
         )
@@ -597,11 +723,19 @@ class Runtime:
             if not everyone:
                 message = "Someone is home or due back: rooms follow their schedules"
                 reasons.append(Reason("away.ended", message))
-            elif self.mode is Mode.AUTO:
+            elif self.mode is Mode.AUTO and self._frost_hold():
                 message = (
                     "Everyone is away: rooms held at frost protection until someone is "
                     "home or due back"
                 )
+                reasons.append(Reason("away.everyone", message))
+            elif self.mode is Mode.AUTO:
+                message = (
+                    "Everyone is away: rooms kept at their unused temperature until "
+                    "someone is home or due back"
+                )
+                if self.household.away.everyone_away is EveryoneAway.FROST:
+                    message += " (frost protection only when everyone has set an away until)"
                 reasons.append(Reason("away.everyone", message))
             else:
                 message = f"Everyone is away; the heating mode stays {self.mode.value}"
@@ -622,6 +756,33 @@ class Runtime:
             self._log(clock, r)
         self._away_log.extend(reasons)
 
+    def _uncertain_reasons(self, uncertain: dict[str, str]) -> list[Reason]:
+        """A reason when someone's presence is newly set aside. Counts only: names are
+        shown in the UI, never logged or exported."""
+        out: list[Reason] = []
+        total = len(self.people)
+        for why in (EVIDENCE_OLD, HOME_EVIDENCE):
+            new = {pid for pid, w in uncertain.items() if w == why} - {
+                pid for pid, w in self._uncertain.items() if w == why
+            }
+            if not new:
+                continue
+            if why == EVIDENCE_OLD:
+                minutes = self.household.away.presence_evidence_max_age_min
+                message = (
+                    f"Presence for {len(new)} of {total} people says not home, but their "
+                    f"trackers haven't reported for over {minutes} min: counted as home"
+                )
+                out.append(Reason("away.presence_uncertain", message))
+            else:
+                what = (self._evidence_what or "activity").replace("_", " ")
+                message = (
+                    f"Someone is in ({what}): {len(new)} of {total} people away by "
+                    "presence counted as home until their presence changes"
+                )
+                out.append(Reason("away.home_evidence", message))
+        return out
+
     def _save_away(self) -> None:
         if self.store is None:
             return
@@ -632,6 +793,11 @@ class Runtime:
                 "state": p.state,
                 "since": p.since,
                 "reported_at": p.reported_at,
+                "evidence_at": p.evidence_at,
+                "source_type": p.source_type,
+                "battery": p.battery,
+                "home_evidence_at": p.home_evidence_at,
+                "home_at": p.home_at,
             }
             for pid, p in self.presence.items()
         }
@@ -654,12 +820,18 @@ class Runtime:
             state, since = item.get("state"), num(item.get("since"))
             manual = until is not None and set_at is not None
             seen = state in PRESENCE_STATES and since is not None
+            source = item.get("source_type")
             p = Presence(
                 away_until=until if manual else None,
                 set_at=set_at if manual else None,
                 state=state if seen else None,
                 since=since if seen else None,
                 reported_at=num(item.get("reported_at")) if seen else None,
+                evidence_at=num(item.get("evidence_at")) if seen else None,
+                source_type=source if seen and isinstance(source, str) else None,
+                battery=num(item.get("battery")) if seen else None,
+                home_evidence_at=num(item.get("home_evidence_at")) if seen else None,
+                home_at=num(item.get("home_at")),
             )
             if not p.empty:
                 self.presence[pid] = p
@@ -667,7 +839,7 @@ class Runtime:
     def person_view(self, person_id: str, now: float | None = None) -> dict:
         now = self._wall() if now is None else now
         p = self.presence.get(person_id, Presence())
-        st = status(p, now, self._delay_s(), self._lead_s(), self._stale_s())
+        st = self._status(p, now)
         person = next((x for x in self.household.people if x.id == person_id), None)
         name = person.name if person and person.name else person_id.replace("_", " ").capitalize()
         return {
@@ -683,8 +855,41 @@ class Runtime:
                 "since": local_iso(p.since, self.timezone),
                 # Not reported for the stale limit: treated as unknown, not away.
                 "stale": stale(p, now, self._stale_s()),
+                # Fail warm. The trackers' newest report, their kind and the phone's
+                # battery, as the integration sent them, or None.
+                "evidence_at": None
+                if p.evidence_at is None
+                else local_iso(p.evidence_at, self.timezone),
+                "source_type": p.source_type,
+                "battery": p.battery,
+                # Why a not home counts as home: "evidence_old", "said_home" or
+                # "home_evidence", and the same in words for the UI. None otherwise.
+                "uncertain": st.uncertain,
+                "why": self._why(p, st, now),
             },
+            # When they last said they are home ("I'm home"), or None.
+            "home_at": None if p.home_at is None else local_iso(p.home_at, self.timezone),
         }
+
+    def _why(self, p: Presence, st: AwayStatus, now: float) -> str | None:
+        def at(wall: float) -> str:
+            text = local_iso(wall, self.timezone)
+            same_day = text[:10] == local_iso(now, self.timezone)[:10]
+            return text[11:16] if same_day else f"{text[:10]} {text[11:16]}"
+
+        if st.uncertain == EVIDENCE_OLD:
+            seen = evidence_seen(p)
+            when = f"since {at(seen)}" if seen is not None else "lately"
+            return f"No report from their phone or tracker {when}, so counted as home."
+        if st.uncertain == SAID_HOME and p.home_at is not None:
+            return f"Said they were home at {at(p.home_at)}, so counted as home."
+        if st.uncertain == HOME_EVIDENCE and p.home_evidence_at is not None:
+            what = (self._evidence_what or "activity").replace("_", " ")
+            return (
+                f"Someone was in at {at(p.home_evidence_at)} ({what}), so counted as home "
+                "until Home Assistant sees them come or go."
+            )
+        return None
 
     def away_view(self) -> dict:
         """People and their away state. Names are for the UI: never logged or exported."""
@@ -703,7 +908,7 @@ class Runtime:
         return {
             "everyone": self.everyone_away,
             # Everyone away is holding the house at frost protection right now.
-            "frost": self.effective_mode() is not self.mode,
+            "frost": self.frost_held(),
             "presence_delay_min": self.household.away.presence_delay_min,
             # The next known return, while rooms may warm up for it.
             "return": None if ret is None else {"at": local_iso(ret.at, self.timezone)},
@@ -743,6 +948,8 @@ class Runtime:
                 due = inp.next_setpoint  # a hand-written schedule: what it says then
             else:
                 due = inp.setpoint
+            if hold and rc.id in self.overrides:
+                continue  # an override wins over the hold
             if hold:
                 inp.setpoint = self.cfg.boiler.frost_c
             elif week is None or rc.id in self.overrides:
@@ -806,18 +1013,61 @@ class Runtime:
             return int(get())
         return datetime.fromtimestamp(self._wall(), ZoneInfo(self.timezone)).weekday()
 
+    def _hold_with_overrides(self, snap: Snapshot) -> None:
+        """While everyone away holds frost, a room with an override keeps it: the core
+        runs in auto, with every other room held at the frost threshold."""
+        for rc in self.cfg.rooms:
+            inp = snap.rooms.get(rc.id)
+            if rc.controllable and inp is not None and rc.id not in self.overrides:
+                inp.setpoint = self.cfg.boiler.frost_c
+                inp.next_setpoint, inp.next_setpoint_in_s = None, None
+
+    def _damp_floor(self, snap: Snapshot) -> None:
+        """Away inferred from presence lowers a room no further than the damp floor,
+        `DAMP_FLOOR_C` (12 °C), or what the room would have without it if lower. An away until
+        is the person's own choice, so it isn't floored."""
+        if self.household is None or snap.mode is not Mode.AUTO or not self.away:
+            return
+        now = self._wall()
+        inferred = frozenset(
+            pid
+            for pid in self.away
+            if pid in self.presence and self._status(self.presence[pid], now).reason == "presence"
+        )
+        if not inferred:
+            return
+        usual = self._compile(self.away - inferred).live
+        local = datetime.fromtimestamp(now, ZoneInfo(self.timezone))
+        weekday, minute = local.weekday(), local.hour * 60 + local.minute
+        for rc in self.cfg.rooms:
+            inp, week = snap.rooms.get(rc.id), usual.get(rc.id)
+            if inp is None or week is None or rc.id in self.overrides:
+                continue
+            floor = min(week.setpoint_at(weekday, minute), DAMP_FLOOR_C)
+            if inp.setpoint is not None and inp.setpoint < floor:
+                inp.setpoint = floor
+
     async def step(self) -> Actions:
         now = self.driver.clock()
         self._expire_overrides(now)
         self._update_away()
+        mode = self.effective_mode()
+        # Everyone away holding frost: overrides still win, so with one the core runs
+        # in auto and every other room is held at frost.
+        held = mode is Mode.FROST and self.mode is Mode.AUTO and bool(self.overrides)
         snap = await self.driver.snapshot(
-            self.effective_mode(), self.overrides, now < self.store_boost_until, self.fire
+            Mode.AUTO if held else mode, self.overrides, now < self.store_boost_until, self.fire
         )
+        if held:
+            self._hold_with_overrides(snap)
         self._apply_return(snap)
+        self._damp_floor(snap)
         self._apply_use(snap)
         # Always explicit, so the tick history records the mode each tick was decided in.
         snap.demand_mode = self.effective_demand_mode
         actions = decide(self.cfg, snap, self.state)
+        if any(r.code == "disturbance.shower" for r in actions.reasons):
+            self.note_home_evidence("shower")
         recorder = self.recorder
         compact = recorder.compact(actions) if recorder is not None else None
         await self.driver.apply(actions)

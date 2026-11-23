@@ -443,6 +443,11 @@ function personText(p, away) {
     const back = when(p.until, today);
     return [`Due back ${/^\d/.test(back) ? "at " : ""}${back}. Warming up their rooms.`, "Due back", "back"];
   }
+  // Fail warm: a not home Radiate doesn't trust, with the server's reason in words.
+  if (p.presence?.uncertain && p.presence.why) {
+    const label = p.presence.uncertain === "evidence_old" ? "No update" : "Home";
+    return [p.presence.why, label, p.presence.uncertain === "evidence_old" ? "stale" : ""];
+  }
   // Not reported within the stale limit: unknown, which Radiate treats as home.
   if (p.presence?.stale) {
     const limit = house?.household?.away?.presence_stale_after_min;
@@ -508,9 +513,15 @@ function ensurePerson(p) {
     close();
     refresh();
   });
+  // "I'm home": ends an away until and sets aside a not home from Home Assistant until
+  // their presence next changes. An older server without the route: clear the away until.
   clear.addEventListener("click", async () => {
     clear.disabled = true;
-    try { await post(`people/${p.id}/away`, { until: null }); } catch { /* the state shows what holds */ }
+    try {
+      await post(`people/${p.id}/home`, {});
+    } catch {
+      try { await post(`people/${p.id}/away`, { until: null }); } catch { /* the state shows what holds */ }
+    }
     clear.disabled = false;
     refresh();
   });
@@ -540,8 +551,8 @@ function renderPeople(away) {
     const badge = n.querySelector(".badge");
     badge.textContent = label;
     badge.dataset.kind = kind;
-    // Clearing ends an away until; presence from Home Assistant clears itself.
-    n.querySelector(".away-clear").hidden = !p.until;
+    // Back now: for an away until, or away from Home Assistant presence.
+    n.querySelector(".away-clear").hidden = !p.until && !p.away;
     const open = n.querySelector(".away-open");
     open.textContent = p.until ? "Change" : "Set away";
     open.setAttribute("aria-label", p.until ? `Change when ${p.name} is back` : `Set ${p.name} away`);
