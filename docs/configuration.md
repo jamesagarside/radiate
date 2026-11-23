@@ -551,13 +551,13 @@ rooms:
     use: {weekdays: unused, weekend: occasional}
 ```
 
-The room's warm periods are the parts of each day where its schedule is above that day's lowest temperature. Inside them the room is in use or occasional, by its level; outside them, and all day when its level is `unused`, it is set back. With `daily: "00:00/14 06:30/19 08:00/16 21:30/19 23:00/14"`, a bedroom is warm from 06:30 to 23:00 and set back overnight. A day at one temperature all day has no warm periods, so give a used room a lower overnight temperature. `weekend` means Saturday and Sunday, as in `schedules`. A setpoint override counts as in use.
+The room's warm periods are the parts of each day where its schedule is above that day's lowest temperature. Inside them the room is in use or occasional, by its level; outside them, and all day when its level is `unused`, it is set back. With `daily: "00:00/14 06:30/19 08:00/16 21:30/19 23:00/14"`, a bedroom is warm from 06:30 to 23:00 and set back overnight. A day at one temperature all day has no warm periods: on an `in_use` or `occasional` day the room counts as warm all day at that level, and on an `unused` day it is set back all day. `weekend` means Saturday and Sunday, as in `schedules`. A setpoint override counts as in use.
 
 Without `use` the room has no room use, as before, and no savings baseline.
 
 With `use`, the room also gets a savings baseline ([spec 5.9](spec.md#59-savings)): a heating timer on from the first person up, less the fixed preheat, to the last to bed when a household with people is saved (even one that covers no rooms), or otherwise from the earliest warm period start to the latest warm period end across all hand-written schedules that day. While the timer is on, the baseline holds the room at the highest temperature its schedule sets that day; while it is off, the baseline puts no heat in. So a house of hand-written rooms shows savings once every heated room has `use`.
 
-Today Radiate only records room use, in each tick's snapshot. A later release uses it in `eco` to let set-back rooms wait longer before they start the boiler.
+In `eco`, room use decides how far below its target a room waits before it starts the boiler on its own, and whether it counts towards a shared burn: a set-back room only takes heat while the boiler runs for other rooms, unless it falls to 12 °C ([spec 5.8](spec.md#58-room-use-in-demand)). `comfort` ignores it.
 
 #### Unheated rooms
 
