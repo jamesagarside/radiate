@@ -509,6 +509,14 @@ Code: `HouseConfig.sink_min`, `_ensure_sink`.
 A radiator that stays cold for three burns in a row while its valve should be open and other radiators warm. Radiate alerts and stops trusting that valve until it warms again.
 Code: `ValveCheck` in `radiate.core.health`, reason `valve.stuck`, API `rooms[].valve` (`untrusted`, `misses`), HA binary sensor "Stuck valve", UI line "Valve may be stuck".
 
+**TRV disagrees**:
+A calling room whose TRV reports `idle` for 20 minutes while the burner fires and its valve is open for it. Usually the TRV is comparing with its own sensor beside the radiator (no external input, or one that lapsed). Radiate steps the TRV setpoint up 0.5 K every 10 minutes, to at most target + 3 K, until the room stops calling, and alerts.
+Code: `_watch_trv`, `RoomState.trv_nudge_k`, `TRV_IDLE_GRACE_S`, `TRV_NUDGE_MAX_K`, alert `valve.trv_disagrees`.
+
+**Offline TRV room**:
+A normal room whose TRV is offline but whose room sensor is fresh. It still counts for demand, so the house doesn't stay cold, though Radiate can't write to its valve: the TRV keeps its last setpoint and opening limit. It counts for no heat sink. If an hour of heat doesn't warm it by 0.3 K, its valve may be shut, so it stops counting until the TRV is back.
+Code: `RoomState.offline_call`, `RoomState.offline_stalled`, `OFFLINE_FLOW_S`, reason `room.trv_offline`, alert `valve.offline_no_warming`.
+
 **Leaking valve**:
 A radiator that warms during a burn while its valve should be shut: the TRV's reading rises at least 1 K against the room sensor in 2 of the last 5 judged burns. Usually lost calibration or a worn seat. Radiate alerts, stops trusting the valve and pauses learning for the room until 5 judged burns in a row stay cool. The spec calls this "rise with valve closed".
 Code: `ValveCheck.observe_shut`, `LEAK_RISE_K`, reason `valve.leaking`, learning gate `valve_leaking`, API `rooms[].valve` (`leaking`, `leak_burns`, and `untrusted`, which covers both checks), UI line "Valve may not be closing".
@@ -680,7 +688,7 @@ The Unix time Radiate writes to the Shelly every tick so the watchdog knows it i
 Code: KVS key `radiate_hb`, `HEARTBEAT_KEY`, `ShellyBoiler.command`.
 
 **Fallback windows**:
-The heating and store windows the watchdog follows when it has taken over. Radiate derives the heating windows from the room schedules, starting each an hour early, and keeps both in the Shelly's key-value store.
+The heating and store windows the watchdog follows when it has taken over. Radiate derives the heating windows from the room schedules for everyone at home (never the away weeks), starting each an hour early, and keeps both in the Shelly's key-value store. The heating windows are never empty: with none from the schedules, Radiate writes the script's defaults.
 Code: KVS keys `radiate_heat` and `radiate_store`, `fallback_heating_windows`, `ShellyBoiler.push_fallback`.
 
 **Auto-off**:

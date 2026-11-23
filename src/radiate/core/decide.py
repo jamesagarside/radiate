@@ -74,6 +74,18 @@ ECO_LEAD_HOLD = 0.75  # share of that pooled demand that keeps a valve lead goin
 # Not `unexplained_heat`: the check compares the TRV with the room, which sun or guests
 # warm together, and a strong leak itself raises `unexplained_heat`.
 LEAK_BLIND_GATES = frozenset({"fire", "fire_holdoff", "window", "shower", "cooker_spike"})
+# The TRV disagrees (spec 7, fail warm): a calling room whose TRV stays idle while heat
+# flows, usually because the TRV compares with its own sensor beside the radiator. Its
+# setpoint steps up within a limit, and an alert says so.
+TRV_IDLE_GRACE_S = 20 * 60
+TRV_NUDGE_STEP_K = 0.5
+TRV_NUDGE_EVERY_S = 10 * 60
+TRV_NUDGE_MAX_K = 3.0  # the TRV setpoint stays at or below target + this
+# An offline TRV with a fresh room sensor still counts for demand (spec 7). If its room
+# does not warm by this much over this much heat, its valve is likely shut: it stops
+# counting until the TRV is back.
+OFFLINE_FLOW_S = 60 * 60
+OFFLINE_RISE_K = 0.3
 
 
 @dataclass(slots=True)
@@ -107,6 +119,14 @@ class RoomState:
     # A normal room's own sensor is stale and its temperature comes from the TRV, or
     # did within the slope window: the `sensor_stale` gate holds until then.
     fallback_until: float = -1e12
+    # The TRV disagrees: calling, heat flowing, TRV idle since; the setpoint step-up.
+    trv_idle_since: float | None = None
+    trv_nudge_k: float = 0.0
+    trv_nudged_at: float = -1e12
+    # Calling with the TRV offline: (temperature at the start, seconds of heat since),
+    # and whether the room failed to warm, which leaves it out until the TRV is back.
+    offline_call: tuple[float, float] | None = None
+    offline_stalled: bool = False
 
     @property
     def arrival_lag_s(self) -> float:
@@ -427,7 +447,39 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         )
         if temp is not None and not rs.dist.fire:
             below[rc.id] = temp < _target(cfg, snap, inp) - bcfg.comfort_limit_k
-        excluded = temp is None or not inp.trv_available or rs.dist.fire
+        # Fail warm (spec 7): a room whose TRV is offline still counts on a fresh room
+        # sensor, unless heat has not warmed it (its valve may be stuck shut).
+        offline_ok = False
+        if inp.trv_available:
+            rs.offline_call, rs.offline_stalled = None, False
+        elif _room_sensor_fresh(rc, inp) and temp is not None and not rs.offline_stalled:
+            offline_ok = True
+            if rs.calling:
+                start, heat_s = rs.offline_call or (temp, 0.0)
+                heat_s += min(dt, MAX_TICK_S) if flowing else 0.0
+                rs.offline_call = (start, heat_s)
+                if heat_s >= OFFLINE_FLOW_S and temp < start + OFFLINE_RISE_K:
+                    rs.offline_stalled, offline_ok = True, False
+            else:
+                rs.offline_call = None
+        if rs.offline_stalled:
+            alerts.append(
+                Reason(
+                    "valve.offline_no_warming",
+                    f"{rc.name}: TRV offline and the room is not warming: "
+                    "left out of demand until the TRV is back",
+                    rc.id,
+                )
+            )
+        elif offline_ok:
+            reasons.append(
+                Reason(
+                    "room.trv_offline",
+                    f"{rc.name}: TRV offline, still heated on the room sensor",
+                    rc.id,
+                )
+            )
+        excluded = temp is None or rs.dist.fire or not (inp.trv_available or offline_ok)
         if excluded:
             rs.calling = False
             rs.topup = rs.extend = False
@@ -643,6 +695,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
 
     # --- 6: openings ---------------------------------------------------------------------
     firing = guard.state in (BoilerState.LEAD, BoilerState.FIRING)
+    burning = guard.state is BoilerState.FIRING and flowing  # heat reaching the radiators
     valves: dict[str, ValveAction] = {}
     for rc in cfg.rooms:
         if not rc.controllable:
@@ -673,6 +726,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             else None
         )
         heat = want_heat and firing and not rs.dist.fire
+        _watch_trv(rc, rs, inp, now, watch=heat and rs.calling and burning, alerts=alerts)
         # What the TRV compares its setpoint with: its own sensor in an internal-sensor
         # room, otherwise the room sensor sent to it (or Radiate's best estimate).
         reading = inp.trv_temperature if rc.role is RoomRole.INTERNAL_SENSOR_ONLY else ext
@@ -769,12 +823,64 @@ def _trv_setpoint(
     base = _topup_target(target, rs.topup_base) if rs.topup else target
     # A learned bias is not a whole number of 0.5 K steps: round up so the TRV's
     # hysteresis band stays above the reading at which Radiate calls.
-    setpoint = _trv_step(base + frame + CALL_BIAS_K, up=internal)
+    setpoint = _trv_step(base + frame + CALL_BIAS_K + rs.trv_nudge_k, up=internal)
+    if rs.trv_nudge_k > 0:
+        setpoint = min(setpoint, _trv_step(target + frame + TRV_NUDGE_MAX_K))
     if rs.topup and reading is not None:
         # A top-up or dump room is often already at or above its target, inside the
         # TRV's own hysteresis band, where the TRV would stay shut. Clear the band.
         setpoint = max(setpoint, _trv_step(reading + SINK_LEAD_K, up=True))
     return setpoint
+
+
+def _room_sensor_fresh(rc: RoomConfig, inp: RoomInput) -> bool:
+    return (
+        rc.role is RoomRole.NORMAL
+        and inp.temperature is not None
+        and inp.temperature_age_s <= ROOM_SENSOR_STALE_S
+    )
+
+
+def _watch_trv(
+    rc: RoomConfig,
+    rs: RoomState,
+    inp: RoomInput,
+    now: float,
+    *,
+    watch: bool,
+    alerts: list[Reason],
+) -> None:
+    """The TRV disagrees (spec 7, fail warm).
+
+    `watch`: the room is calling, its valve is open for it and heat is flowing. If its
+    TRV still reports idle after a grace period, it is most likely comparing with its
+    own sensor beside the radiator (no external input, or one that lapsed). Step its
+    setpoint up 0.5 K every 10 minutes, at most to target + 3 K, and alert. The step-up
+    holds until the room stops calling.
+    """
+    if not rs.calling:
+        rs.trv_idle_since, rs.trv_nudge_k = None, 0.0
+        return
+    if not (watch and inp.trv_available and inp.trv_heating is False):
+        rs.trv_idle_since = None
+        return
+    if rs.trv_idle_since is None:
+        rs.trv_idle_since = now
+    idle_s = now - rs.trv_idle_since
+    if idle_s < TRV_IDLE_GRACE_S:
+        return
+    if now - rs.trv_nudged_at >= TRV_NUDGE_EVERY_S:
+        rs.trv_nudge_k = min(TRV_NUDGE_MAX_K - CALL_BIAS_K, rs.trv_nudge_k + TRV_NUDGE_STEP_K)
+        rs.trv_nudged_at = now
+    alerts.append(
+        Reason(
+            "valve.trv_disagrees",
+            f"{rc.name}: calling with heat on, but its TRV keeps its valve shut: "
+            "setpoint raised. Check the TRV is using the room sensor",
+            rc.id,
+            values={"idle_min": idle_s / 60, "raised_k": rs.trv_nudge_k},
+        )
+    )
 
 
 def _topup_target(target: float, temp: float | None) -> float:
@@ -809,7 +915,9 @@ def _ensure_sink(cfg: HouseConfig, snap: Snapshot, st: EngineState, reasons: lis
     def sink() -> float:
         total = cfg.bypass_equivalent
         for rc in cfg.rooms:
-            if rc.controllable and (st.rooms[rc.id].calling or st.rooms[rc.id].topup):
+            if not rc.controllable or not snap.rooms.get(rc.id, RoomInput()).trv_available:
+                continue  # an offline TRV's valve may be shut
+            if st.rooms[rc.id].calling or st.rooms[rc.id].topup:
                 total += 1.0  # allocation floors keep each open room near full flow fraction
         return total
 
