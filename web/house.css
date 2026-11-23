@@ -12,7 +12,7 @@
 .hm-model h2, .hm-status h2, .hm-plan h2 { font-family: var(--display); font-weight: 600; font-size: 1.05rem; }
 .hm-muted { color: var(--muted); font-size: 0.82rem; }
 .hm-hint { color: var(--muted); font-size: 0.82rem; margin: 0; }
-.hm-readout { font-family: var(--readout); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 0.9; }
+.hm-readout { font-family: var(--readout); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
 
 /* temperature key */
 .hm-scale { display: flex; align-items: center; gap: 6px; }
@@ -24,7 +24,7 @@
 .hm-room { cursor: pointer; }
 .hm-room:focus { outline: none; }
 .hm-room[aria-pressed="true"] .hm-top, .hm-room:focus-visible .hm-top { stroke: var(--text); stroke-width: 2.5; }
-.hm-t { font-family: var(--readout); font-weight: 900; font-size: 19px; }
+.hm-t { font-family: var(--readout); font-weight: 700; font-size: 19px; font-variant-numeric: tabular-nums; }
 .hm-n { font-family: var(--body); font-weight: 600; font-size: 9.5px; }
 .hm-ftag { font-family: var(--display); font-size: 11px; font-weight: 600; fill: var(--muted); }
 @media (prefers-reduced-motion: no-preference) {
@@ -37,7 +37,7 @@
 
 /* whole-house plate */
 .hm-hero { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; align-items: end; }
-.hm-big { font-family: var(--readout); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 0.85; font-size: clamp(3.6rem, 7vw, 5.4rem); }
+.hm-big { font-family: var(--readout); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 0.95; letter-spacing: -0.02em; font-size: clamp(3.4rem, 6.5vw, 5rem); }
 .hm-big small { font-size: 0.45em; color: var(--muted); }
 .hm-hero p { margin: 0; max-width: 26ch; font-family: var(--display); font-weight: 600; font-size: 1.1rem; line-height: 1.25; }
 .hm-spread { display: grid; gap: 6px; }

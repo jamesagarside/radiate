@@ -9,7 +9,7 @@ The values on this page are the ones in `web/app.css` and `web/house.css` today.
 ## Principles
 
 - **Explain the house.** Every room says, in words, why Radiate is doing what it does.
-- **Readouts look like instruments.** Numbers you read at a glance (temperatures, counts, times) are set in the Doto dot-matrix face. Words stay in Funnel Sans.
+- **Readouts look like instruments.** Numbers you read at a glance (temperatures, counts, times) are set in Funnel Display 700 with tabular figures, so digits line up. Words stay in Funnel Sans. The owner turned down a dot-matrix face as too cyberpunk.
 - **Motion only where it explains a state change.** A valve bar moving to its new opening limit, or the burn guard filling, tells the reader something. Decoration that people see dozens of times a day becomes friction.
 - **Good defaults over options.** No theme picker or layout settings. Light and dark follow the system.
 - **Get the small details right.** Tabular numbers that don't jiggle, press feedback on every button, and hover effects that don't fire on touch.
@@ -73,11 +73,11 @@ Text on a temperature colour (a room in the model or the editor) is ink or white
 
 ## Type
 
-Three faces, served with the UI from `web/fonts` (Latin subsets from Fontsource, SIL Open Font License 1.1). The page still makes no requests outside the Radiate server. `index.html` preloads Doto 700.
+Two families, served with the UI from `web/fonts` (Latin subsets from Fontsource, SIL Open Font License 1.1). The page still makes no requests outside the Radiate server. `index.html` preloads Funnel Display 700.
 
 | Token | Face | Weights | Use |
 |---|---|---|---|
-| `--readout` | Doto, a dot-matrix face | 700, 900 | Readouts: room temperatures, statistics, the setpoint value, outdoor temperature, device values, counts, times in "Coming up" |
+| `--readout` | Funnel Display, tabular figures | 700 | Readouts: room temperatures, statistics, the setpoint value, outdoor temperature, device values, counts, times in "Coming up" |
 | `--display` | Funnel Display | 600, 700 | Headings, the wordmark, view tabs, legends, words in the house now cells |
 | `--body` | Funnel Sans | 400, 500, 600 | Everything else |
 
@@ -88,12 +88,12 @@ Three faces, served with the UI from `web/fonts` (Latin subsets from Fontsource,
 
 | Role | Size | Face and weight |
 |---|---|---|
-| Rooms calling, on the house now plate (`.hm-big`) | `clamp(3.6rem, 7vw, 5.4rem)` | Doto 700 |
-| Room temperature (`.temp .now`) | 2.2rem (1.7rem under 560 px) | Doto 700 |
-| House now cell value (`.hm-cell .hm-readout`) | 1.9rem; words 1.1rem | Doto 700; words in Funnel Display 600 |
-| Statistic value (`.stats dd`), selected room's reading | 1.35rem | Doto 700 |
-| Temperature on a model room (`.hm-t`) | 17px in the drawing | Doto 900 |
-| Outdoor temperature, setpoint value, device values | 1rem to 1.05rem | Doto 700 |
+| Rooms calling, on the house now plate (`.hm-big`) | `clamp(3.4rem, 6.5vw, 5rem)` | Funnel Display 700 |
+| Room temperature (`.temp .now`) | 2.2rem (1.7rem under 560 px) | Funnel Display 700 |
+| House now cell value (`.hm-cell .hm-readout`) | 1.9rem; words 1.1rem | Funnel Display 700; words in Funnel Display 600 |
+| Statistic value (`.stats dd`), selected room's reading | 1.35rem | Funnel Display 700 |
+| Temperature on a model room (`.hm-t`) | 17px in the drawing | Funnel Display 700 |
+| Outdoor temperature, setpoint value, device values | 1rem to 1.05rem | Funnel Display 700 |
 | Wordmark | 1.35rem | Funnel Display 700, -0.03em tracking |
 | Devices, Suggestions and setup headings | 1.35rem | Funnel Display 600, -0.02em tracking |
 | Boiler heading, setup step titles | 1.2rem | Funnel Display 600 |
@@ -103,7 +103,7 @@ Three faces, served with the UI from `web/fonts` (Latin subsets from Fontsource,
 | Buttons, segmented control | 0.9rem | Funnel Sans 500; 600 when selected or primary |
 | Alerts | 0.9rem | Funnel Sans 400 |
 | Banner, dry run notice, reason text | 0.84rem to 0.85rem | Funnel Sans 400 |
-| Chips, badges, labels, metadata, timeline ticks | 0.72rem to 0.8rem | Funnel Sans 400 to 600; tab counts and the plan's hour ticks in Doto 700 |
+| Chips, badges, labels, metadata, timeline ticks | 0.72rem to 0.8rem | Funnel Sans 400 to 600; tab counts and the plan's hour ticks in Funnel Display 700 |
 
 ## Spacing and shape
 
@@ -209,15 +209,15 @@ Every view has to make sense in each of these states. When you add a component, 
 
 ## Components
 
-**House model.** The first plate on the House page (`web/house.js`), headed "Your house", with a 12° to 22° key and an "Arrange rooms" button. It draws the house as an axonometric model: each floor's rooms as blocks, floors stacked and pulled apart so an upper floor never hides the one below, each floor tagged with its name. A block's top is the room's temperature colour and its two sides are darker shades of it. The reading sits on the top in Doto 900, with the name under it when the room is at least 1.4 m wide. A room with no reading is `--surface-2` and reads `–`. A radiator bar runs along the front edge while the room is calling or topping up, and always on the bypass room (see Motion). Selecting a room outlines its top in ink and fills the line under the model: name, reading, what it's doing ("Heating to 21.0°, 0.6° to go.", "Holding 18.0°.", "No radiator. Temperature recorded, not controlled.", "Manual valve, always open."), humidity, valve opening, the next setpoint change, and a "Room controls" link. That link scrolls to the room card and focuses it. Selecting the room again clears the line. The model is redrawn on each state, when the colour scheme changes and once the fonts load. The layout only draws the model; control never reads it.
+**House model.** The first plate on the House page (`web/house.js`), headed "Your house", with a 12° to 22° key and an "Arrange rooms" button. It draws the house as an axonometric model: each floor's rooms as blocks, floors stacked and pulled apart so an upper floor never hides the one below, each floor tagged with its name. A block's top is the room's temperature colour and its two sides are darker shades of it. The reading sits on the top in Funnel Display 700, with the name under it when the room is at least 1.4 m wide. A room with no reading is `--surface-2` and reads `–`. A radiator bar runs along the front edge while the room is calling or topping up, and always on the bypass room (see Motion). Selecting a room outlines its top in ink and fills the line under the model: name, reading, what it's doing ("Heating to 21.0°, 0.6° to go.", "Holding 18.0°.", "No radiator. Temperature recorded, not controlled.", "Manual valve, always open."), humidity, valve opening, the next setpoint change, and a "Room controls" link. That link scrolls to the room card and focuses it. Selecting the room again clears the line. The model is redrawn on each state, when the colour scheme changes and once the fonts load. The layout only draws the model; control never reads it.
 
 **Arrange rooms.** The model plate becomes a floor-plan editor, headed "Arrange rooms", with "Start again" and a primary "Done". Under the heading: one tab per floor (ink outlines, the selected one filled), "Add floor" up to six floors, a "Floor name" field (up to 40 characters), and "Remove this floor" when a floor has no rooms and isn't the only one. The plan is a 14 by 10 m `--surface-2` well with a gridline every half metre and a stronger one every metre. Rooms are blocks in their temperature colour, with the name at the top and the size ("4 × 3.5 m") at the bottom. Dragging a room moves it, and dragging the 14 px ink square in its corner resizes it, using pointer events with `touch-action: none` on the plan. Everything snaps to 0.5 m and a side is at least 1 m. With the keyboard, Enter or Space selects a room, arrow keys move it half a metre, and Shift with an arrow resizes it. Under the plan, a tray lists rooms not placed yet as "Place Kitchen" chips (dashed outline), or says "Every room is placed.", and offers "Take Kitchen off the plan" for the selected room. A placed room goes in the first free 2 by 2 m spot on the floor. "Start again" puts every room back where the guess from their names puts them. Each change is saved with `PUT layout` 500 ms after the last one, and a muted line says "Saving…", then "Saved." or why not. While the editor is open, the house now plate becomes "Live model": the model as it will look, with "2 floors, 8 of 9 rooms placed." and a sentence saying the layout only draws the house. "Done" closes the editor and returns focus to "Arrange rooms".
 
 **Guessed layout.** Until the owner saves a layout, rooms whose names suggest an upper floor (bedroom, bathroom, landing, en suite, nursery, study, loft, attic) go on "First floor" and the rest on "Ground floor", three to a row at 3 by 3 m. If every room matches, or none does, there is one floor.
 
-**The house now.** The plate beside the model. A big Doto readout of rooms calling over controllable rooms ("3/8"), which the sentence beside it continues: "rooms want heat.", "rooms are heating. Burner on.", or, without a boiler relay, "rooms want heat. The boiler switch isn't linked yet, so the boiler is follows its own timer." With no room calling it reads "No room needs heat right now.", and with the heating off or on frost, "Heating is off." or "Frost protection only." "Where every room sits" puts every room with a reading as a tick in its temperature colour on a 12° to 22° axis, with an ink line at the target most heated rooms aim for, and says the coldest and warmest rooms in words under it. Then four cells in a 2 by 2 grid: Boiler (its state, with minutes so far while firing or starts in the last hour otherwise, or "Not linked"); Dry run with the count of held-back writes, or Mode with the demand mode when not in dry run; Devices needing attention, with a 4px `--warn` left rule and an amber count when any do; Learning, the average model confidence of the controllable rooms. Last, "Coming up": the next three times a setpoint changes, rooms at the same time on one line ("07:00 Bedroom 1 and Bedroom 2 warm to 19.0°."). Without any setpoint changes ahead, "Coming up" is left out.
+**The house now.** The plate beside the model. A big readout of rooms calling over controllable rooms ("3/8"), which the sentence beside it continues: "rooms want heat.", "rooms are heating. Burner on.", or, without a boiler relay, "rooms want heat. The boiler switch isn't linked yet, so the boiler follows its own timer." With no room calling it reads "No room needs heat right now.", and with the heating off or on frost, "Heating is off." or "Frost protection only." "Where every room sits" puts every room with a reading as a tick in its temperature colour on a 12° to 22° axis, with an ink line at the target most heated rooms aim for, and says the coldest and warmest rooms in words under it. Then four cells in a 2 by 2 grid: Boiler (its state, with minutes so far while firing or starts in the last hour otherwise, or "Not linked"); Dry run with the count of held-back writes, or Mode with the demand mode when not in dry run; Devices needing attention, with a 4px `--warn` left rule and an amber count when any do; Learning, the average model confidence of the controllable rooms. Last, "Coming up": the next three times a setpoint changes, rooms at the same time on one line ("07:00 Bedroom 1 and Bedroom 2 warm to 19.0°."). Without any setpoint changes ahead, "Coming up" is left out.
 
-**Today's plan.** A plate under the model, hidden until `GET schedules` has answered. One row per scheduled room: the name, then today as a 16px strip of its setpoints in temperature colours, with an ink now line haloed in `--surface`. Hour ticks at 00, 06, 12, 18 and 24 in Doto. Each strip is labelled with the day in words. "Week schedules" moves focus to the Schedules heading.
+**Today's plan.** A plate under the model, hidden until `GET schedules` has answered. One row per scheduled room: the name, then today as a 16px strip of its setpoints in temperature colours, with an ink now line haloed in `--surface`. Hour ticks at 00, 06, 12, 18 and 24 in Funnel Display. Each strip is labelled with the day in words. "Week schedules" moves focus to the Schedules heading.
 
 **Room card.** Name and badge; the room temperature with the target after an arrow; the setpoint row; the stuck-valve line when it applies; the opening limit bar; one reason line; learned-model metadata; the fire button for rooms with an open fire.
 
