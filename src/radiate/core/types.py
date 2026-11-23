@@ -44,6 +44,20 @@ class DemandMode(StrEnum):
     COMFORT = "comfort"  # any calling room past the comfort limit fires the boiler
 
 
+# No saving rule lets a room wait below this (spec 5.8). The household setup warns
+# about unused and night temperatures below it (`config.household.DAMP_BELOW_C`).
+DAMP_FLOOR_C = 12.0
+
+
+class RoomUse(StrEnum):
+    """How a room is used right now, from the household or a hand-written schedule's
+    use level (spec 5.8)."""
+
+    IN_USE = "in_use"
+    OCCASIONAL = "occasional"
+    SETBACK = "setback"  # unused today, overnight, between warm periods, away
+
+
 @dataclass(frozen=True, slots=True)
 class RoomConfig:
     id: str
@@ -73,6 +87,7 @@ class BoilerConfig:
     nozzle_lph: float | None = None
     demand_mode: DemandMode = DemandMode.ECO  # the default; the runtime can change it
     eco_limit_k: float = 1.5  # eco: the most a calling room waits below its target
+    damp_floor_c: float = DAMP_FLOOR_C  # not in the configuration file (spec 5.8)
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +174,12 @@ class RoomInput:
     # TRV settings the device did not accept after the reconciler's retries (spec 4.5),
     # for example ("valve_opening_degree",). Empty when every write landed.
     trv_rejected: tuple[str, ...] = ()
+    # Room use now (spec 5.8). None: no household and no use level for a hand-written
+    # schedule; `eco` then behaves as before.
+    use: RoomUse | None = None
+    # Savings baseline (spec 5.9): the timer-and-valve setpoint now; None while the
+    # baseline timer is off, or without a household.
+    baseline_c: float | None = None
 
 
 @dataclass(slots=True)
@@ -186,6 +207,8 @@ class Snapshot:
     # The demand mode chosen at runtime (spec 5.3). None: `BoilerConfig.demand_mode`.
     # In the snapshot so the tick history records it and replay decides the same way.
     demand_mode: DemandMode | None = None
+    # The house has a household, so a savings baseline exists (spec 5.9).
+    baseline: bool = False
 
 
 @dataclass(slots=True)
