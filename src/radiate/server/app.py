@@ -208,6 +208,14 @@ async def set_settings(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_settings)
 
 
+async def get_layout(request: web.Request) -> web.Response:
+    return web.json_response({"layout": _rt(request).layout})
+
+
+async def put_layout(request: web.Request) -> web.Response:
+    return await _post(request, bridge.set_layout)
+
+
 async def devices(request: web.Request) -> web.Response:
     try:
         return web.json_response(bridge.devices(_rt(request)))
@@ -296,6 +304,8 @@ def create_app(
             web.post("/api/v1/ha/persons", set_ha_persons),
             web.get("/api/v1/settings", settings),
             web.post("/api/v1/settings", set_settings),
+            web.get("/api/v1/layout", get_layout),
+            web.put("/api/v1/layout", put_layout),
             web.get("/api/v1/devices", devices),
             web.post("/api/v1/devices/scan", scan_network),
             web.get(STREAM_PATH, stream),

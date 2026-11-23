@@ -43,6 +43,7 @@ from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapsh
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.persist import dump_state, first_start_state, load_state
 from radiate.core.types import BoilerState, DemandMode, RoomRole
+from radiate.server import layout
 
 LOG = logging.getLogger(__name__)
 
@@ -140,6 +141,7 @@ class Runtime:
     ha_persons: list[dict] | None = None
     ha_persons_at: float | None = None
     setup: object | None = None  # radiate.server.setup.HouseholdSetup; None: not offered
+    layout: dict | None = None  # where rooms sit, for the web UI's model (server.layout)
     _compiled: dict[frozenset[str], CompiledHousehold] = field(default_factory=dict)
     _stale: frozenset[str] = frozenset()  # people whose presence has gone stale
     _rebuild: bool = False  # the household changed: push its weeks even if away did not
@@ -181,6 +183,9 @@ class Runtime:
         saved_away = self.store.get("away")
         if saved_away is not None:
             self._restore_away(saved_away[0])
+        saved_layout = self.store.get("layout")
+        if saved_layout is not None:
+            self.layout = layout.restore(saved_layout[0], {r.id for r in self.cfg.rooms})
         now = self.driver.clock()
         data, elapsed = None, 0.0
         saved = self.store.get("engine")
@@ -255,6 +260,18 @@ class Runtime:
                 "demand_mode": self.demand_mode.value if self.demand_mode else None,
             },
         )
+
+    # --- layout --------------------------------------------------------------------------
+
+    def set_layout(self, body: object) -> dict:
+        """Replace the house layout (radiate.server.layout); saved straight away.
+
+        Raises layout.LayoutError when the body is not a valid layout.
+        """
+        self.layout = layout.validate(body, {r.id for r in self.cfg.rooms})
+        if self.store is not None:
+            self.store.put("layout", self.layout)
+        return {"layout": self.layout}
 
     # --- settings ------------------------------------------------------------------------
 

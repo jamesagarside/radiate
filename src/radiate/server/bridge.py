@@ -20,6 +20,7 @@ from radiate.core import DemandMode, Mode
 from radiate.core.types import RoomConfig, RoomRole
 from radiate.drivers.devices import ScanRefused
 
+from .layout import LayoutError
 from .runtime import Runtime
 from .schedules import schedules_view
 from .setup import HouseholdSetup, SetupError
@@ -287,6 +288,14 @@ def scan_network(rt: Runtime, body: Any = None) -> dict:
     return {"ok": True, "scan": scan}
 
 
+def set_layout(rt: Runtime, body: Any) -> dict:
+    """Replace where rooms sit in the web UI's house model (radiate.server.layout)."""
+    try:
+        return rt.set_layout(body)
+    except LayoutError as err:
+        raise RequestError(400, str(err)) from err
+
+
 def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
     """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`."""
     method = method.upper()
@@ -295,6 +304,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
         return household(rt, method, body)
     if parts == ["household", "preview"] and method == "POST":
         return household(rt, "PREVIEW", body)
+    if parts == ["layout"] and method == "PUT":
+        return set_layout(rt, body)
     if method == "GET":
         if parts == ["house"]:
             return rt.house()
@@ -308,6 +319,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return schedules_view(rt)
         if parts == ["settings"]:
             return rt.settings()
+        if parts == ["layout"]:
+            return {"layout": rt.layout}
         if parts == ["devices"]:
             return devices(rt)
         if parts == ["suggestions"]:
