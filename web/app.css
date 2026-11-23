@@ -5,8 +5,6 @@
    - prefers-reduced-motion keeps colour/opacity, drops movement. */
 
 /* Fonts are served with the UI (web/fonts, SIL OFL): the page calls nothing outside the server. */
-@font-face { font-family: "Doto"; font-weight: 700; font-display: swap; src: url("fonts/doto-700.woff2") format("woff2"); }
-@font-face { font-family: "Doto"; font-weight: 900; font-display: swap; src: url("fonts/doto-900.woff2") format("woff2"); }
 @font-face { font-family: "Funnel Display"; font-weight: 600; font-display: swap; src: url("fonts/funnel-display-600.woff2") format("woff2"); }
 @font-face { font-family: "Funnel Display"; font-weight: 700; font-display: swap; src: url("fonts/funnel-display-700.woff2") format("woff2"); }
 @font-face { font-family: "Funnel Sans"; font-weight: 400; font-display: swap; src: url("fonts/funnel-sans-400.woff2") format("woff2"); }
@@ -15,7 +13,7 @@
 
 /* Plant room: pale concrete ground, raised plates with one chamfered corner, ink
    rules, square corners everywhere. Temperature runs cobalt (cold) through a neutral
-   to sodium amber and signal red (warm). Readouts use the Doto dot-matrix face.
+   to sodium amber and signal red (warm). Readouts use Funnel Display with tabular figures.
    Older names (--bg, --surface, --heat...) are kept so every view shares one set. */
 :root {
   --bg: #d6dad2;          /* ground */
@@ -36,7 +34,7 @@
   --warn-soft: #f3deb0;
   --sodium: #f0a81c;
   --t12: #3557e8; --t15: #8d9ff0; --t17: #d3d0c2; --t19: #f0a81c; --t22: #d43f17;
-  --readout: "Doto", ui-monospace, "SF Mono", Menlo, monospace;
+  --readout: "Funnel Display", "Funnel Sans", system-ui, sans-serif;
   --display: "Funnel Display", ui-sans-serif, system-ui, sans-serif;
   --body: "Funnel Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --cut: 14px;
@@ -247,7 +245,7 @@ main { max-width: 1340px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .badge[data-kind="sink"] { background: var(--cool-soft); color: var(--cool); }
 
 .temp { display: flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; }
-.temp .now { font-family: var(--readout); font-size: 2.2rem; font-weight: 700; line-height: 0.9; letter-spacing: 0; }
+.temp .now { font-family: var(--readout); font-size: 2.2rem; font-weight: 700; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .temp .target { color: var(--muted); }
 
 /* Setpoint: label or hold on the left, stepper on the right. Quiet until it holds a
@@ -731,4 +729,7 @@ body[data-link="stale"] .status { color: var(--warn); }
   .demand-note { order: 2; grid-column: 1 / -1; margin-top: -4px; text-align: left; }
   .status { grid-column: 1 / -1; min-width: 0; }
   .seg button { padding-inline: 10px; }
+  /* Four view tabs fit at 360 px; the row wraps rather than scroll sideways. */
+  .views { gap: 0; flex-wrap: wrap; }
+  .view-tab { padding-inline: 8px; }
 }
