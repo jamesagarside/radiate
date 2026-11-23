@@ -83,8 +83,8 @@ The web UI's wizard for the household: People, Routines, Rooms, Temperatures and
 Code: `web/setup.js`, `web/household.js` (the draft and `toSection`), `HouseholdSetup` in `radiate.server.setup`, API `GET`, `PUT` and `DELETE /api/v1/household` and `POST /api/v1/household/preview`.
 
 **Saved household**:
-A household saved from the household setup, in `<data_dir>/household.yaml`. It replaces the house file's `household` section for the server, `check-config` and `radiate schedules` given the same data directory. Deleting it goes back to the house file's.
-Code: `radiate.config.saved`, `apply_saved`, `parse_household` and `apply_household` in `radiate.config.site`, `SiteConfig.household_source`, `SiteConfig.file_household`, `SiteConfig.saved_problems`; reason `household.setup`.
+A household saved from the household setup, in `<data_dir>/household.yaml`. It replaces the house file's `household` section as a whole, away settings included, for the server, `check-config` and `radiate schedules` given the same data directory, so later edits to that section in the house file have no effect; `check-config` names them. Deleting it goes back to the house file's.
+Code: `radiate.config.saved`, `apply_saved`, `parse_household`, `apply_household` and `shadowed_household_keys` in `radiate.config.site`, `SAVED_SOURCE_WARNING`, `SiteConfig.household_source`, `SiteConfig.file_household`, `SiteConfig.saved_problems`, API `GET /api/v1/household` `source`, `source_warning` and `house_file_ignored`; reason `household.setup`.
 _Avoid_: wizard file, override file.
 
 **Person**:

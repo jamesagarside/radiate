@@ -54,6 +54,7 @@ from .household import (
     UseLevel,
     compile_household,
     household_advice,
+    household_section,
 )
 from .schedule import (
     DAY_ALIASES,
@@ -1258,6 +1259,36 @@ def apply_household(site: SiteConfig, household: Household | None, source: str) 
         notes=base + tuple(notes),
         saved_problems=(),
     )
+
+
+SAVED_SOURCE_WARNING = (
+    "The household saved from the web UI replaces the house file's household section "
+    "as a whole, away settings included. Changes to that section in the house file have "
+    "no effect until the saved setup is deleted (DELETE /api/v1/household, or remove "
+    "household.yaml from the data directory)."
+)
+
+
+def shadowed_household_keys(site: SiteConfig) -> list[str]:
+    """Settings in the house file's `household` section that the household saved from
+    the web UI hides, because it differs there: dotted keys such as
+    `away.everyone_away`, or a whole part such as `people`. Empty unless the saved
+    household is in use and the house file has a section of its own.
+    """
+    if site.household_source != "saved" or site.file_household is None or not site.household:
+        return []
+    mine, saved = household_section(site.file_household), household_section(site.household)
+    out: list[str] = []
+    for key in sorted(set(mine) | set(saved)):
+        a, b = mine.get(key), saved.get(key)
+        if a == b:
+            continue
+        if key in ("timing", "away", "temperatures"):
+            a, b = a or {}, b or {}
+            out.extend(f"{key}.{k}" for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k))
+        else:
+            out.append(key)
+    return out
 
 
 def apply_saved(site: SiteConfig) -> SiteConfig:

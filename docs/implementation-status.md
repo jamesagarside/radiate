@@ -10,7 +10,7 @@ Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the 
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 133 |
+| Done | 82 | 139 |
 | Partial | 26 | 22 |
 | Missing | 37 | 22 |
 
@@ -137,6 +137,7 @@ Top remaining gaps, most important first:
 |---|---|---|---|
 | Room sensor stale | done | `core/decide.py` | Falls back to the TRV reading and stops sending external temperature; learning pauses (`sensor_stale`) unless `learning.learn_on_trv_fallback` is `true` |
 | TRV offline | partial | `core/decide.py`, `drivers/live.py` | Alert raised, learning paused; with a fresh room sensor it still counts for demand (fail warm), and stops counting if heat doesn't warm it; not counted as possibly open in the supply factor |
+| Fail warm: warn when a saved household hides the house file's | done | `config/site.py` `shadowed_household_keys`, `server/setup.py`, `cli.py` | Precedence unchanged; `check-config`, the start-up log and `GET /api/v1/household` name the hidden settings |
 | Fail warm: room sensor plausibility | done | `core/decide.py` `_implausible_sensors` | Out of range or frozen while its TRV and other rooms move: treated as missing. Hard frost from a room sensor needs a second source. No check of a sensor that reads plausibly but wrong (on a shelf by the radiator) |
 | Fail warm: manual fire flag expires | done | `server/runtime.py` `set_fire`, `config/site.py` | 6 hours by default, local midnight at the latest. Auto-clearing when the room cools is not built |
 | Fail warm: room sensor readings remembered across a restart | done | `drivers/live.py` `sensor_memory`, `drivers/z2m.py` `Device.remember`, `server/runtime.py`, `core/decide.py` | True age carried forward; no step into slopes or detectors; no TRV fallback before the stale limit. Z2M's own `last_seen` is not used |

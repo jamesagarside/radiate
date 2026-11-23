@@ -327,6 +327,8 @@ The web UI doesn't change the house file, which may be read-only or managed by t
 
 When `household.yaml` exists, it replaces the house file's `household` section. The house file's other sections still apply, and a room the saved household leaves out follows its own `schedule`. To go back to the house file's setup, choose **Use the house file's setup instead** in the wizard, or delete the file and restart Radiate.
 
+> **Warning:** the saved household replaces the house file's `household` section as a whole, including `household.away` (`everyone_away`, `presence_delay_min`, `presence_stale_after_min` and the rest), `timing` and `temperatures`. While `household.yaml` exists, editing any of those in the house file, for example through GitOps, has no effect. Change them in the web UI, or delete the saved household first. Saving the household in the web UI also never merges in later house file edits. `check-config` and the server's start-up log name every house file setting that is not in effect, and `GET /api/v1/household` returns the same as `source_warning` and `house_file_ignored`.
+
 `check-config` and `radiate schedules` read `household.yaml` from the same data directory as the server, so they agree with it. Give them `--data-dir` when the server runs with one:
 
 ```bash

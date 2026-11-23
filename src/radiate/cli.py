@@ -98,6 +98,8 @@ async def _start_live(site, session):
     log = logging.getLogger("radiate")
     if site.household_source == "saved":
         log.info("household: saved from the web UI, in %s", Path(site.data_dir))
+    for warning in _household_warnings(site):
+        log.warning("household: %s", warning)
     for note in site.notes:
         log.info("config: %s", note)
     store = Store(Path(site.data_dir) / "radiate.db")
@@ -199,12 +201,27 @@ def _household_line(site) -> str | None:
     return None
 
 
+def _household_warnings(site) -> list[str]:
+    """The config-source trap: a saved household hides the house file's section."""
+    from radiate.config.site import SAVED_SOURCE_WARNING, shadowed_household_keys
+
+    if site.household_source != "saved" or site.file_household is None:
+        return []
+    out = [SAVED_SOURCE_WARNING[0].lower() + SAVED_SOURCE_WARNING[1:]]
+    hidden = shadowed_household_keys(site)
+    if hidden:
+        out.append("house file household settings not in effect: " + ", ".join(hidden))
+    return out
+
+
 def _check_config(args: argparse.Namespace) -> None:
     site = _load(args.path, args.data_dir)
     print(f"{args.path}: OK")
     line = _household_line(site)
     if line:
         print(f"  {line}")
+    for warning in _household_warnings(site):
+        print(f"  warning: {warning}")
     for r in site.house.rooms:
         dev = site.devices[r.id]
         parts = [f"role={r.role.value}"]
