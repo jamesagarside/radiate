@@ -123,3 +123,13 @@ def test_browser_demo_answers_the_same():
     done = json.loads(s.request("GET", "devices"))["body"]["scan"]
     assert done["state"] == "done"
     assert json.loads(s.request("POST", "devices/scan"))["status"] == 429
+
+
+def test_room_sensor_label_does_not_repeat_room():
+    from radiate.drivers.devices import DeviceHealth
+
+    fields = {f: None for f in DeviceHealth.__dataclass_fields__}
+    dining = DeviceHealth(**{**fields, "id": "s1", "kind": "sensor", "room_name": "Dining room"})
+    bath = DeviceHealth(**{**fields, "id": "s2", "kind": "sensor", "room_name": "Bathroom"})
+    assert dining.label() == "Dining room sensor"
+    assert bath.label() == "Bathroom room sensor"
