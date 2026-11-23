@@ -93,6 +93,9 @@ def boiler_doc(state: dict, house_id: str, ts: datetime) -> dict:
         "predicted_burn_min": b["predicted_burn_min"],
     }
     doc["store"] = {"relay": state["store"]["relay"], "boost": state["store"]["boost"]}
+    # The burner firing, from the relay's power metering (None: not metered).
+    doc["boiler"]["burner"] = b.get("burner")
+    doc["store"]["burner"] = state["store"].get("burner")
     doc["supply"] = {"factor": b["supply"]}
     doc["outdoor"] = {"temperature": state.get("outdoor")}
     doc["radiate"]["mode"] = state["mode"]
@@ -132,6 +135,12 @@ def daily_doc(summary: dict, house_id: str, ts: datetime, estimate: dict | None 
         "kwh": summary["kwh"],
         "burns": summary["burns"],
     }
+    # Added with burner metering (spec 5.6); older summaries have neither.
+    if "relay_hours" in summary:
+        doc["boiler"]["relay_hours"] = summary["relay_hours"]
+        doc["boiler"]["litres_relay"] = summary.get("litres_relay")
+    if isinstance(summary.get("burner"), dict):
+        doc["boiler"]["burner"] = dict(summary["burner"])
     doc["balance"] = dict(summary["balance"])
     doc["rooms"] = {
         "comfort_minutes_below": round(sum(summary["comfort_minutes_below"].values()), 1)
@@ -256,6 +265,8 @@ def index_templates() -> dict[str, dict]:
         "radiate.mode": {"type": "keyword"},
         "boiler.state": {"type": "keyword"},
         "boiler.relay": {"type": "boolean"},
+        "boiler.burner": {"type": "boolean"},
+        "store.burner": {"type": "boolean"},
         "boiler.burn.elapsed_s": gauge(),
         "boiler.starts_1h": gauge("short"),
         "boiler.predicted_burn_min": gauge(),
@@ -300,6 +311,14 @@ def index_templates() -> dict[str, dict]:
                                 "boiler.hours_basis": {"type": "keyword"},
                                 "boiler.litres": {"type": "float"},
                                 "boiler.kwh": {"type": "float"},
+                                "boiler.relay_hours": {"type": "float"},
+                                "boiler.litres_relay": {"type": "float"},
+                                "boiler.burner.metered": {"type": "boolean"},
+                                "boiler.burner.heating_hours": {"type": "float"},
+                                "boiler.burner.heating_starts": {"type": "short"},
+                                "boiler.burner.store_hours": {"type": "float"},
+                                "boiler.burner.store_starts": {"type": "short"},
+                                "boiler.burner.store_litres": {"type": "float"},
                                 "boiler.burns.count": {"type": "short"},
                                 "boiler.burns.mean_min": {"type": "float"},
                                 "boiler.burns.min_min": {"type": "float"},
