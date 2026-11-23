@@ -393,7 +393,7 @@ Warm periods are the live schedule's (`CompiledHousehold.periods`, at the level 
 
 ### 5.9 Savings
 
-**Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)). Decided in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed). The method follows the [usage and savings research](research/usage-and-savings.md#3-measuring-savings-honestly), with a different baseline and a correction that lets a day's saving be negative.
+The accounting, the house signature, the gate and the report are built in `radiate.core.savings` and every closed day summary carries its `savings` record. The baseline is in the snapshot (plan slice 1, with hand-written rooms added by slice 3). **Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)): keeping closed days and `GET /api/v1/savings` (slice 4), the view (slice 5). Decided in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed). The method follows the [usage and savings research](research/usage-and-savings.md#3-measuring-savings-honestly), with a different baseline and a correction that lets a day's saving be negative.
 
 Radiate estimates the oil it saved against one stated baseline, from measured room and outdoor temperatures and the oil it measured, and shows the comfort it cost beside it. The estimate is pure, in `radiate.core.savings`.
 
@@ -403,7 +403,16 @@ Radiate estimates the oil it saved against one stated baseline, from measured ro
 - Valve set to the room's temperature for that day's use level (its own `temperature` if it has one, its unused temperature on an unused day).
 - Timer off at any other time, so the baseline puts no heat in.
 
-The runtime passes it in the snapshot (built; `compile_baseline` in `radiate.config.use`): `RoomInput.baseline_c` is the baseline setpoint now, or `None` while the baseline timer is off, and `Snapshot.baseline` is true when the house has a household. Without a household there is no baseline and no savings. Rooms on hand-written schedules have no baseline.
+The runtime passes it in the snapshot (built; `compile_baseline` in `radiate.config.use`): `RoomInput.baseline_c` is the baseline setpoint now, or `None` while the baseline timer is off, and `Snapshot.baseline` is true when any room has a baseline.
+
+**Hand-written rooms.** A room on a hand-written schedule with a use level (`rooms[].use`) gets a baseline too (`compile_schedule_baseline`):
+
+- Timer on from the household's first person up, less the fixed preheat, to the last to bed, the same timer as household rooms, when there is a household with people (it need not cover any room).
+- Otherwise, timer on from the earliest warm period start to the latest warm period end across the house's hand-written schedules that day (warm periods as in 5.8). No warm period that day: the timer stays off.
+- Valve set to the room's usual temperature: the highest setpoint its schedule sets that day.
+- Timer off at any other time, as for household rooms.
+
+A room with neither a household entry nor a use level has no room use and no baseline, and takes no part in savings: the meter skips it, and `report` weighs only the rooms the latest closed day measured. Without any room with a baseline there are no savings.
 
 **Each tick**, per controllable room with a reading, while the outdoor reading is real (not the 5 °C default), with `dt` in hours, capped at 300 s, and the interval since the last tick belonging to the day it started in (as in the ledger):
 
@@ -420,9 +429,9 @@ DH_base_r += max(0, B_r − T_out) · dt
 - **Lift** is how much warmer Radiate's own heating has made the room than the baseline would have, during time the baseline would not have heated it: before the timer starts (optimum start), overnight, and in a warm period a room adjustment added. It decays at the room's loss rate. Without it, a night where Radiate holds a room warm would cost nothing; with it, a day can show a negative saving.
 - **Comfort**, per room while its room use is `in_use` or `occasional`: the **comfort deficit**, `max(0, setpoint − 0.5 − T) · dt` in K·h (the simulator's measure), and the **warm share**, the share of those minutes at or above `setpoint − 0.5 K`.
 
-The day's record goes into the closed day's summary as `savings`: per room `dh_actual_kh`, `dh_baseline_kh`, `deficit_kh`, `warm_min` and `warm_ok_min`, plus `outdoor_share` (share of the day with a real outdoor reading), `baseline_share` (share with a baseline) and `outdoor_mean_c`.
+The day's record goes into the closed day's summary as `savings`: per room `dh_actual_kh`, `dh_baseline_kh`, `deficit_kh`, `warm_min`, `warm_ok_min` and `read_min` (minutes with a reading), plus `outdoor_share` (share of the day with a real outdoor reading), `baseline_share` (share with a baseline) and `outdoor_mean_c`.
 
-**Eligible day:** not partial (5.6), `outdoor_share` and `baseline_share` at least 0.9, litres known (a nozzle rating), and the same litres basis as the other days in the fit.
+**Eligible day:** not partial (5.6), `outdoor_share`, `baseline_share` and each room's share of the day with a reading at least 0.9, litres known (a nozzle rating), and the same litres basis as the other days in the fit.
 
 **Room weights.** Each room's degree-hours count in proportion to `b_r / a_r`, the radiator time each kelvin of inside minus outside needs, the same unit as pooled demand (5.3); equal weights until every counted room's confidence is at least 0.6. Weights come from the current models and are applied to every day at report time, so days stay comparable as the models learn. Whether `b / a` beats equal weights is checked in the simulator before release.
 
@@ -434,7 +443,7 @@ The day's record goes into the closed day's summary as `savings`: per room `dh_a
 
 **Litres basis.** Litres are relay time × nozzle rating (5.6), which counts the boiler thermostat's own off periods inside a call, so they read high. `k` is inflated by the same factor on both sides, so the percentage holds and the litres are an upper bound; the UI says so. **Not yet implemented:** litres from burner firing. The driver passes the Shelly channel 1 `apower` as `Snapshot.heating_power_w`; with `boiler.firing_power_w` set (a reading between the pump alone and the burner running, taken once), the ledger counts firing seconds as well as relay seconds, and closed days get `basis: "firing"`. A fit uses days of one basis only, so switching basis restarts the 14 day gate. This works only if channel 1 carries the boiler's own load; if it only switches the boiler's thermostat input, `apower` stays near zero and a separate meter on the boiler's supply is needed (open question 1).
 
-**Persistence.** The day so far (per room accumulators and lift) is saved with the engine state as an optional `savings` section, so older saves still load. Each closed day's summary, with its `savings` record, is kept in the state database (key `daily_history`) for 730 days, the learning memory's default.
+**Persistence.** The day so far (per room accumulators and lift) is saved with the engine state as an optional `savings` section with its own `version`, so older saves still load and a later shape can be migrated. Lift decays over the downtime at each room's loss rate. Each closed day's summary, with its `savings` record, is kept in the state database (key `daily_history`) for 730 days, the learning memory's default.
 
 **Honesty rules.** Always show comfort beside savings. Never clamp a day at zero. No figures for partial days, before 14 eligible days, for days without an outdoor reading, or without a nozzle rating. Say "about" and "estimated", never "up to". Never project a year from a short run. One baseline only.
 

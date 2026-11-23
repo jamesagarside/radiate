@@ -16,15 +16,22 @@ same way.
 - Any other room has no room use (None), which keeps today's behaviour.
 
 The savings baseline is a heating timer on from the first person up to the last to
-bed every day, with each room's valve at its usual temperature (`compile_baseline`).
+bed every day, with each room's valve at its usual temperature. Household rooms take
+it from the household (`compile_baseline`). Hand-written rooms with a use level take
+the household's timer too, or without a household (or one without people) the span of
+the house's warm periods that day, each at its schedule's highest setpoint that day
+(`compile_schedule_baseline`). Other rooms have no baseline.
 
 Pure: no I/O and no clock. Times are minutes of the day; weekdays start at Monday = 0.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+# One sentence, kept with the savings core that reports it; re-exported here.
+from radiate.core.savings import BASELINE_TEXT as BASELINE_TEXT
 from radiate.core.types import RoomUse
 
 from .household import (
@@ -35,11 +42,6 @@ from .household import (
     round_half,
 )
 from .schedule import DAY_ALIASES, DaySchedule, WeekSchedule
-
-BASELINE_TEXT = (
-    "Compared with a heating timer on from the first person up to the last to bed "
-    "every day, and each room's valve set to its usual temperature."
-)
 
 # The days a hand-written schedule's `weekend` key covers: Saturday and Sunday.
 SCHEDULE_WEEKEND = frozenset(DAY_ALIASES["weekend"])
@@ -131,19 +133,71 @@ def compile_baseline(household: Household) -> Baseline:
         preheat = _or(room.preheat_min, household.timing.preheat_min)
         days: list[BaselineDay | None] = []
         for weekday in range(7):
-            routines = [p.routine_on(weekday, household.weekend_days) for p in household.people]
-            if not routines:
+            timer = _people_timer(household, weekday, preheat)
+            if timer is None:
                 days.append(None)
                 continue
-            first_up = min(r.up_min for r in routines)
-            last_bed = max(r.bed_min for r in routines)
             level = room.use_weekend if weekday in household.weekend_days else room.use_weekdays
             if level is UseLevel.UNUSED:
                 setpoint = round_half(_or(room.unused_c, temps.unused_c))
             else:
                 setpoint = round_half(_or(room.temperature_c, temps.level(level)))
-            days.append(BaselineDay(max(0, first_up - preheat), last_bed, setpoint))
+            days.append(BaselineDay(*timer, setpoint))
         rooms[room.room_id] = tuple(days)
+    return Baseline(rooms)
+
+
+def _people_timer(household: Household, weekday: int, preheat_min: int) -> Interval | None:
+    """The baseline timer from the household's people: first up less the fixed
+    preheat (not below 0) to the last to bed. None without people."""
+    routines = [p.routine_on(weekday, household.weekend_days) for p in household.people]
+    if not routines:
+        return None
+    first_up = min(r.up_min for r in routines)
+    return max(0, first_up - preheat_min), max(r.bed_min for r in routines)
+
+
+def _schedule_timer(weeks: Mapping[str, WeekSchedule], weekday: int) -> Interval | None:
+    """The baseline timer from hand-written schedules: the earliest warm period start
+    to the latest warm period end across them that day. None with no warm period."""
+    periods = [p for w in weeks.values() for p in schedule_periods(w.days[weekday % 7])]
+    if not periods:
+        return None
+    return min(a for a, _ in periods), max(b for _, b in periods)
+
+
+def compile_schedule_baseline(
+    weeks: Mapping[str, WeekSchedule],
+    room_ids: Iterable[str],
+    household: Household | None = None,
+) -> Baseline:
+    """The savings baseline for hand-written rooms with a use level (`rooms[].use`).
+
+    `weeks` holds every hand-written room's week; `room_ids` the rooms that get a
+    baseline. The timer is the household's (first person up less the fixed preheat, to
+    the last to bed) when there is a household with people, otherwise the span of the
+    house's warm periods that day (`_schedule_timer`). Inside it each room is at its
+    usual setpoint, the highest its schedule sets that day; outside it the timer is off
+    and the baseline puts no heat in (None), as for household rooms.
+    """
+    rooms: dict[str, tuple[BaselineDay | None, ...]] = {}
+    for rid in room_ids:
+        week = weeks.get(rid)
+        if week is None:
+            continue
+        days: list[BaselineDay | None] = []
+        for weekday in range(7):
+            timer = None
+            if household is not None and household.people:
+                timer = _people_timer(household, weekday, household.timing.preheat_min)
+            else:
+                timer = _schedule_timer(weeks, weekday)
+            if timer is None or timer[0] >= timer[1]:
+                days.append(None)
+                continue
+            usual = max(sp for _, sp in week.days[weekday].transitions)
+            days.append(BaselineDay(timer[0], timer[1], usual))
+        rooms[rid] = tuple(days)
     return Baseline(rooms)
 
 

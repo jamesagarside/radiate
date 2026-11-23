@@ -586,7 +586,7 @@ _Avoid_: DHW priority.
 
 ## Savings
 
-Planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.9](spec.md#59-savings)), not built.
+Planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.9](spec.md#59-savings)). The core (`radiate.core.savings`) is built; the API and view are not.
 
 **Savings**:
 The oil Radiate estimates it saved against the savings baseline, from measured temperatures and measured oil, with the comfort it cost shown beside it. In litres, per day and in total, and as a percentage of the baseline's litres. A day's saving can be negative.
@@ -595,7 +595,7 @@ _Avoid_: "up to" figures, and "savings" for a simulated or projected figure.
 
 **Savings baseline**:
 What savings are measured against: a heating timer on from the first person up to the last to bed every day, with each room's valve at its usual temperature for its use level. Compiled from the household with nobody away and no room adjustments, and passed in every snapshot (built). Rooms on hand-written schedules have none. Shown on screen in one sentence.
-Code: `compile_baseline` in `radiate.config.use`, `RoomInput.baseline_c`, `Snapshot.baseline`, API `baseline` in `GET /api/v1/savings`.
+Code: `compile_baseline` and `compile_schedule_baseline` in `radiate.config.use`, `RoomInput.baseline_c`, `Snapshot.baseline`, API `baseline` in `GET /api/v1/savings`.
 
 **Degree-hours**:
 How much warmer than outside a room was kept, summed over time: `max(0, T − T_out)` per hour, in K·h. Actual degree-hours use the room's reading; baseline degree-hours use the baseline room temperature. Heat loss, and so oil, follows degree-hours.
@@ -615,7 +615,7 @@ Code: `room_weights` in `radiate.core.savings`.
 
 **Eligible day**:
 A closed day that can carry a saving: not partial, a real outdoor reading and a baseline for at least 90 % of it, litres known, and the same litres basis as the rest of the fit. Savings appear only once there are 14, and the house signature fits within 25 % CV(RMSE).
-Code: `eligible` in `radiate.core.savings`, API `days[].eligible`, `days[].why`, `progress`.
+Code: `why_not_eligible` in `radiate.core.savings`, API `days[].eligible`, `days[].why`, `progress`.
 
 **Comfort deficit**:
 For savings and the simulator: how far rooms in use (and occasional rooms) were below their setpoint less 0.5 K, summed over time, in K·h. Shown beside every saving.

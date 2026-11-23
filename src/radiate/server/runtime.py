@@ -40,7 +40,13 @@ from radiate.config.household import (
     compile_household,
     household_view,
 )
-from radiate.config.use import Baseline, compile_baseline, room_use, schedule_room_use
+from radiate.config.use import (
+    Baseline,
+    compile_baseline,
+    compile_schedule_baseline,
+    room_use,
+    schedule_room_use,
+)
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.persist import dump_state, first_start_state, load_state
@@ -747,19 +753,28 @@ class Runtime:
         """Room use and the savings baseline for every household room, in house time.
 
         A hand-written room with a use level (`schedule_use`) gets room use from the
-        week the driver follows for it, and no baseline. A room with a setpoint override
-        is IN_USE. Without a household: no baseline, and `snap.baseline` stays False.
-        Nothing in the core acts on either yet (spec 5.8, 5.9).
+        week the driver follows for it, and a baseline from `compile_schedule_baseline`
+        (the household's timer, or without one the span of the house's warm periods).
+        A room with a setpoint override is IN_USE. `snap.baseline` is True when any room
+        has a savings baseline (spec 5.8, 5.9).
         """
         compiled = self._compile(self.away) if self.household is not None else None
         if self.household is not None and self._baseline is None:
             self._baseline = compile_baseline(self.household)
         baseline = self._baseline if self.household is not None else None
-        snap.baseline = baseline is not None
+        snap.baseline = baseline is not None and bool(baseline.rooms)
         if compiled is None and not self.schedule_use:
             return
         weekday, minute = self._weekday(), snap.minute_of_day
-        weeks: dict | None = None
+        weeks: dict = {}
+        hand: Baseline | None = None
+        if self.schedule_use:
+            get = getattr(self.driver, "schedules", None)
+            named_weeks = dict(get()) if callable(get) else {}
+            # Hand-written weeks have a schedule name; household rooms' have None.
+            weeks = {rid: w for rid, (name, w) in named_weeks.items() if name is not None}
+            hand = compile_schedule_baseline(weeks, self.schedule_use, self.household)
+            snap.baseline = snap.baseline or bool(hand.rooms)
         for rc in self.cfg.rooms:
             inp = snap.rooms.get(rc.id)
             if not rc.controllable or inp is None:
@@ -770,12 +785,11 @@ class Runtime:
                 if baseline is not None:
                     inp.baseline_c = baseline.setpoint_at(rc.id, weekday, minute)
             elif rc.id in self.schedule_use:
-                if weeks is None:
-                    get = getattr(self.driver, "schedules", None)
-                    weeks = dict(get()) if callable(get) else {}
-                named = weeks.get(rc.id)
-                if named is not None:
-                    use = schedule_room_use(named[1], self.schedule_use[rc.id], weekday, minute)
+                week = weeks.get(rc.id)
+                if week is not None:
+                    use = schedule_room_use(week, self.schedule_use[rc.id], weekday, minute)
+                if hand is not None:
+                    inp.baseline_c = hand.setpoint_at(rc.id, weekday, minute)
             if use is not None and rc.id in self.overrides:
                 use = RoomUse.IN_USE
             inp.use = use

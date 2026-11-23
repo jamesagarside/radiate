@@ -21,6 +21,7 @@ from radiate.config.use import (
     Baseline,
     BaselineDay,
     compile_baseline,
+    compile_schedule_baseline,
     room_use,
     schedule_periods,
     schedule_room_use,
@@ -235,3 +236,45 @@ def test_use_key_on_a_household_room_is_an_error():
         p.startswith("rooms[4].use: the household section sets this room's use")
         for p in err.value.problems
     ), err.value.problems
+
+
+# --- savings baseline for hand-written rooms ---------------------------------------------
+
+LOUNGE = parse_week({"weekdays": "00:00/15 17:00/20 22:00/15", "weekend": "00:00/15 09:00/20"})
+
+
+def test_schedule_baseline_without_a_household_spans_the_houses_warm_periods():
+    weeks = {"office": OFFICE, "bedroom": BEDROOM, "lounge": LOUNGE}
+    base = compile_schedule_baseline(weeks, ("office", "lounge"))
+    # Wednesday: earliest warm start 06:30 (bedroom), latest end 23:00 (bedroom).
+    assert base.rooms["office"][WED] == BaselineDay(t("06:30"), t("23:00"), 20.0)
+    assert base.rooms["lounge"][WED] == BaselineDay(t("06:30"), t("23:00"), 20.0)
+    # Saturday: the lounge is warm from 09:00 to midnight, the bedroom from 06:30.
+    assert base.rooms["lounge"][SAT] == BaselineDay(t("06:30"), 1440, 20.0)
+    # The office's Saturday has one setpoint: that is its usual one.
+    assert base.rooms["office"][SAT] == BaselineDay(t("06:30"), 1440, 15.0)
+    # Only rooms with a use level get a baseline.
+    assert "bedroom" not in base.rooms
+    assert base.setpoint_at("office", WED, t("06:29")) is None  # the timer is off
+    assert base.setpoint_at("office", WED, t("07:00")) == 20.0
+    assert base.setpoint_at("office", WED, t("23:00")) is None
+
+
+def test_schedule_baseline_with_a_household_uses_its_peoples_times():
+    base = compile_schedule_baseline({"office": OFFICE}, ("office",), REFERENCE)
+    # The same timer as household rooms: first up less the fixed preheat, to last bed.
+    assert base.rooms["office"][WED] == BaselineDay(t("06:00"), t("22:30"), 20.0)
+    assert base.rooms["office"][SAT] == BaselineDay(t("08:00"), t("22:30"), 15.0)
+
+
+def test_schedule_baseline_with_a_household_without_people_falls_back_to_schedules():
+    nobody = replace(REFERENCE, people=(), rooms=())
+    base = compile_schedule_baseline({"office": OFFICE}, ("office",), nobody)
+    assert base.rooms["office"][WED] == BaselineDay(t("08:00"), t("17:30"), 20.0)
+
+
+def test_schedule_baseline_day_without_warm_periods_has_the_timer_off():
+    flat = parse_week({"daily": "00:00/16"})
+    base = compile_schedule_baseline({"spare": flat}, ("spare",))
+    assert base.rooms["spare"] == (None,) * 7
+    assert base.setpoint_at("spare", WED, t("12:00")) is None

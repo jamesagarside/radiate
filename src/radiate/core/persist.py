@@ -13,7 +13,8 @@ updates, so they need no clock), arrival lags, lockshield histograms, disturbanc
 stuck and leaking valve verdicts, the boiler guard, the short-cycle adaptation and the day's oil
 and runtime totals with the last 7 days' summaries. The ledger's last tick is kept
 too, so the time Radiate was down counts as unseen and a long outage marks the day
-partial. Dropped: short-lived signals (reading windows, radiator drive, demand
+partial. The savings meter (the day's degree-hours and comfort, and each room's lift)
+is kept in its own versioned section. Dropped: short-lived signals (reading windows, radiator drive, demand
 latches, the no-heat check), which rebuild within a few ticks. Sections added after
 version 1 are optional, so older saves still load.
 
@@ -31,6 +32,7 @@ from .decide import EngineState, RoomState, new_estimator
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator
 from .health import LEAK_WINDOW
+from .savings import SAVINGS_VERSION, RoomDay, SavingsMeter
 from .types import BoilerState, HouseConfig
 
 VERSION = 1
@@ -102,6 +104,26 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
             },
         },
         "accounting": _dump_ledger(st, now),
+        "savings": _dump_savings(st.savings),
+    }
+
+
+_ROOM_DAY = ("dh_actual_kh", "dh_baseline_kh", "deficit_kh", "warm_min", "warm_ok_min", "read_s")
+_METER = ("seen_s", "outdoor_s", "baseline_s")
+# Savings section migrations: saved version to a function that returns the next version's
+# shape. Empty while there is only version 1.
+_SAVINGS_MIGRATIONS: dict[int, Any] = {}
+
+
+def _dump_savings(m: SavingsMeter) -> dict[str, Any]:
+    """The savings meter: the day so far and each room's lift. Durations and
+    temperatures only, no clock times, so nothing needs shifting on restore."""
+    return {
+        "version": SAVINGS_VERSION,
+        "rooms": {rid: {k: getattr(r, k) for k in _ROOM_DAY} for rid, r in m.rooms.items()},
+        "lift_k": dict(m.lift_k),
+        **{k: getattr(m, k) for k in _METER},
+        "outdoor_sum_cs": m.outdoor_sum_cs,
     }
 
 
@@ -319,4 +341,57 @@ def load_state(
         st.relay_unseen_s = math.inf
     _load_health(st, data.get("health"), now, elapsed)
     _load_ledger(st, data.get("accounting"), now, elapsed)
+    _load_savings(st, data.get("savings"), elapsed, problems)
     return st, problems
+
+
+def _finite(v: Any, low: float | None = 0.0) -> float | None:
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        return None
+    if low is not None and v < low:
+        return None
+    return float(v)
+
+
+def _load_savings(st: EngineState, raw: Any, elapsed: float, problems: list[str]) -> None:
+    """The savings meter. Missing (older saves) keeps an empty meter; a newer or
+    unknown version, or malformed data, drops the day so far (that day then reads as
+    ineligible, never as zero use) and never stops the load. Rooms no longer in the
+    house are dropped. Lift decays over the downtime at the room's loss rate."""
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        problems.append("savings: saved meter invalid, starting the day's savings afresh")
+        return
+    version = raw.get("version")
+    while version != SAVINGS_VERSION and version in _SAVINGS_MIGRATIONS:
+        raw = _SAVINGS_MIGRATIONS[version](raw)
+        version = raw.get("version")
+    if version != SAVINGS_VERSION:
+        problems.append(f"savings: saved meter version {version!r} unknown, starting afresh")
+        return
+    m = SavingsMeter()
+    rooms = raw.get("rooms")
+    if isinstance(rooms, dict):
+        for rid, r in rooms.items():
+            if rid not in st.rooms or not isinstance(r, dict):
+                continue
+            values = {k: _finite(r.get(k, 0.0)) for k in _ROOM_DAY}
+            if any(v is None for v in values.values()):
+                problems.append(f"savings: {rid}: saved day invalid, dropped")
+                continue
+            m.rooms[rid] = RoomDay(**values)
+    lift = raw.get("lift_k")
+    if isinstance(lift, dict):
+        for rid, v in lift.items():
+            v = _finite(v)
+            if rid in st.rooms and v is not None:
+                m.lift_k[rid] = v * math.exp(-max(0.0, st.rooms[rid].est.b) * elapsed / 3600)
+    for k in _METER:
+        v = _finite(raw.get(k, 0.0))
+        if v is not None:
+            setattr(m, k, v)
+    v = _finite(raw.get("outdoor_sum_cs", 0.0), low=None)
+    if v is not None:
+        m.outdoor_sum_cs = v
+    st.savings = m
