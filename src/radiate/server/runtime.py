@@ -52,6 +52,7 @@ from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.persist import dump_state, first_start_state, load_state
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.server import layout
+from radiate.server.savings import DailyHistory, day_estimate, savings_view
 
 LOG = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ class Runtime:
     house_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     tick_s: float = 60.0
     state: EngineState = field(init=False)
+    daily: DailyHistory = field(init=False)
     mode: Mode = Mode.AUTO
     # Demand mode chosen through the API (spec 5.3); None follows `boiler.demand_mode`.
     demand_mode: DemandMode | None = None
@@ -165,6 +167,8 @@ class Runtime:
 
     def __post_init__(self) -> None:
         self.state = EngineState.new(self.cfg)
+        # Closed day summaries for savings (spec 5.9), kept in the state database.
+        self.daily = DailyHistory(self.store)
 
     # --- persistence ---------------------------------------------------------------------
 
@@ -198,6 +202,7 @@ class Runtime:
         saved_layout = self.store.get("layout")
         if saved_layout is not None:
             self.layout = layout.restore(saved_layout[0], {r.id for r in self.cfg.rooms})
+        self.daily = DailyHistory(self.store)
         now = self.driver.clock()
         data, elapsed = None, 0.0
         saved = self.store.get("engine")
@@ -827,6 +832,11 @@ class Runtime:
             self.save()
         self.last_actions, self.last_snapshot = actions, snap
         self.relay_history.append((now, actions.heating_relay, actions.store_relay))
+        estimate = None
+        if actions.day_summary is not None:
+            self.daily.add(actions.day_summary)
+            if self.exporter is not None:
+                estimate = self._day_estimate(actions.day_summary)
         logged = [(r.code, r.message, r.room_id) for r in self._away_log]
         self._away_log.clear()
         for r in actions.reasons:
@@ -849,13 +859,22 @@ class Runtime:
         if self.exporter is not None:
             self.exporter.record(payload, logged)
             if actions.day_summary is not None:
-                self.exporter.record_daily(actions.day_summary)
+                self.exporter.record_daily(actions.day_summary, estimate=estimate)
         for q in list(self.listeners):
             if q.full():
                 with contextlib.suppress(asyncio.QueueEmpty):
                     q.get_nowait()
             q.put_nowait(payload)
         return actions
+
+    def _day_estimate(self, summary: dict) -> dict | None:
+        """The savings figures for the day that just closed, for the exporter. Never
+        stops the tick: the export is a convenience."""
+        try:
+            return day_estimate(savings_view(self), summary)
+        except Exception as err:
+            LOG.warning("savings: no estimate for the closed day: %s", err)
+            return None
 
     def _log(self, now: float, r: Reason) -> None:
         self.decisions.append(DecisionRecord(now, r.code, r.message, r.room_id))

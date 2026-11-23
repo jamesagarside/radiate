@@ -107,8 +107,15 @@ def _calendar_day(label: object) -> str | None:
     return day.isoformat() if day.year >= 2000 else None
 
 
-def daily_doc(summary: dict, house_id: str, ts: datetime) -> dict:
-    """One document per closed day from `core.accounting` (spec 9)."""
+def daily_doc(summary: dict, house_id: str, ts: datetime, estimate: dict | None = None) -> dict:
+    """One document per closed day from `core.accounting` (spec 9).
+
+    With a `savings` record in the summary (spec 5.9), the document also carries the
+    day's degree-hours, shares and comfort; `estimate` (`server.savings.day_estimate`)
+    adds the room-weighted figures and, once the gate is open, the litres saved and the
+    fit's CV(RMSE) as estimated when the day closed. The fit moves later, so the API's
+    figure for an old day can differ.
+    """
     doc = _base(DAILY_STREAM, house_id, ts)
     day = _calendar_day(summary.get("day"))
     if day is not None:
@@ -129,7 +136,43 @@ def daily_doc(summary: dict, house_id: str, ts: datetime) -> dict:
     doc["rooms"] = {
         "comfort_minutes_below": round(sum(summary["comfort_minutes_below"].values()), 1)
     }
+    savings, comfort = _savings_fields(summary.get("savings"), estimate)
+    if savings:
+        doc["savings"] = savings
+    if comfort:
+        doc["comfort"] = comfort
     return doc
+
+
+def _savings_fields(record: object, estimate: dict | None) -> tuple[dict, dict]:
+    """`savings.*` and `comfort.*` for the daily document; empty without a record."""
+    if not isinstance(record, dict) or not isinstance(record.get("rooms"), dict):
+        return {}, {}
+    rooms = [r for r in record["rooms"].values() if isinstance(r, dict)]
+
+    def total(key: str) -> float:
+        return round(sum(float(r.get(key) or 0.0) for r in rooms), 2)
+
+    savings: dict = {
+        "outdoor_share": record.get("outdoor_share"),
+        "baseline_share": record.get("baseline_share"),
+    }
+    warm = total("warm_min")
+    comfort: dict = {
+        "deficit_kh": total("deficit_kh"),
+        "warm_share": round(total("warm_ok_min") / warm, 3) if warm > 0 else None,
+    }
+    if estimate is None:
+        return savings, comfort  # degree-hours only as the API weights them
+    savings.update(
+        dh_actual_kh=estimate.get("dh_actual_kh"),
+        dh_baseline_kh=estimate.get("dh_baseline_kh"),
+        eligible=bool(estimate.get("eligible")),
+    )
+    if estimate.get("litres_saved") is not None:
+        savings["litres"] = estimate["litres_saved"]
+        savings["fit_cv_rmse"] = estimate.get("fit_cv_rmse")
+    return savings, comfort
 
 
 def decision_doc(code: str, message: str, room_id: str | None, house_id: str, ts: datetime) -> dict:
@@ -269,6 +312,15 @@ def index_templates() -> dict[str, dict]:
                                 "balance.arrival_spread_min": {"type": "float"},
                                 "balance.score": {"type": "float"},
                                 "rooms.comfort_minutes_below": {"type": "float"},
+                                "savings.dh_actual_kh": {"type": "float"},
+                                "savings.dh_baseline_kh": {"type": "float"},
+                                "savings.outdoor_share": {"type": "float"},
+                                "savings.baseline_share": {"type": "float"},
+                                "savings.eligible": {"type": "boolean"},
+                                "savings.litres": {"type": "float"},
+                                "savings.fit_cv_rmse": {"type": "float"},
+                                "comfort.deficit_kh": {"type": "float"},
+                                "comfort.warm_share": {"type": "float"},
                             }
                         ),
                     }
@@ -336,9 +388,14 @@ class ElasticExporter:
             docs.append(decision_doc(code, message, room, self.house_id, ts))
         self.buffer.extend(docs)
 
-    def record_daily(self, summary: dict, ts: datetime | None = None) -> None:
-        """Queue the summary of a day that just closed (`metrics-radiate.daily-default`)."""
-        self.buffer.extend([daily_doc(summary, self.house_id, ts or datetime.now(UTC))])
+    def record_daily(
+        self, summary: dict, ts: datetime | None = None, estimate: dict | None = None
+    ) -> None:
+        """Queue the summary of a day that just closed (`metrics-radiate.daily-default`),
+        with its savings estimate when there is one."""
+        self.buffer.extend(
+            [daily_doc(summary, self.house_id, ts or datetime.now(UTC), estimate=estimate)]
+        )
 
     async def flush(self, session) -> bool:
         if not self.buffer:

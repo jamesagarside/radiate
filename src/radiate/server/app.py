@@ -13,6 +13,7 @@ from aiohttp import WSMsgType, web
 
 from . import bridge
 from .runtime import Runtime
+from .savings import savings_view
 from .schedules import schedules_view
 from .suggestions import suggestions_view
 
@@ -155,6 +156,10 @@ async def suggestions(request: web.Request) -> web.Response:
     return web.json_response(suggestions_view(_rt(request)))
 
 
+async def savings(request: web.Request) -> web.Response:
+    return web.json_response(savings_view(_rt(request)))
+
+
 async def _household(request: web.Request, method: str, with_body: bool) -> web.Response:
     """The household setup (`bridge.household`). Errors with field paths go as JSON."""
     rt = _rt(request)
@@ -295,6 +300,7 @@ def create_app(
             web.get("/api/v1/people", people),
             web.get("/api/v1/schedules", schedules),
             web.get("/api/v1/suggestions", suggestions),
+            web.get("/api/v1/savings", savings),
             web.get("/api/v1/household", household),
             web.post("/api/v1/household/preview", household_preview),
             web.put("/api/v1/household", household_save),
