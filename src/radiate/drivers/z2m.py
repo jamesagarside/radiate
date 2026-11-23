@@ -14,11 +14,20 @@ Attribute names and value ranges are from the Zigbee2MQTT converter
 - `temperature_sensor_select` local_temperature, remote_temperature, remote_source_offline
 - `smart_temperature_control` true/false (adaptive PID; disables opening limits)
 - `weekly_schedule_<day>` "HH:mm/temp ...", used when `system_mode` is auto
+
+A TRV may not support every governed setting: TRVZB firmware 1.3.0 rejects
+`smart_temperature_control` with `UNSUPPORTED_ATTRIBUTE`. Zigbee2MQTT writes each key of
+a `/set` payload separately and logs a failure on `bridge/logging` as
+`Publish 'set' '<key>' to '<device>' failed: '...'`, or `No converter available for
+'<key>' on '<device>'` for a key the converter lacks (`lib/extension/publish.ts`).
+Radiate stops sending a governed setting the device rejected as unsupported, or one its
+definition doesn't expose (`bridge/devices`).
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,6 +39,12 @@ GOVERNED_STATIC = {
     "valve_closing_degree": 100,
     "smart_temperature_control": False,
 }
+# Settings only sent to turn something off: a TRV without them loses nothing, so their
+# absence is not a failure. Adaptive PID would disable the opening limits, so it is
+# turned off where it exists.
+OFF_IF_PRESENT = frozenset({"smart_temperature_control"})
+_PUBLISH_FAILED = re.compile(r"Publish 'set' '([^']+)' to '(.+?)' failed: .*UNSUPPORTED_ATTRIBUTE")
+_NO_CONVERTER = re.compile(r"No converter available for '([^']+)' on '(.+?)'")
 SETPOINT_MIN, SETPOINT_MAX = 4.0, 35.0
 EXTERNAL_MIN, EXTERNAL_MAX = 0.0, 99.9
 RECONCILE_GRACE_S = 5 * 60
@@ -72,6 +87,19 @@ def _num(v: Any) -> float | None:
     return float(v)
 
 
+def parse_rejection(entry: Any) -> tuple[str, str] | None:
+    """(device, key) for a `bridge/logging` entry saying a device can't take a setting:
+    the write failed with UNSUPPORTED_ATTRIBUTE, or the converter has no such key.
+    Other failures (a timeout) may work next time, so they return None."""
+    if not isinstance(entry, dict) or entry.get("level") != "error":
+        return None
+    message = entry.get("message")
+    if not isinstance(message, str):
+        return None
+    match = _PUBLISH_FAILED.search(message) or _NO_CONVERTER.search(message)
+    return (match.group(2), match.group(1)) if match else None
+
+
 @dataclass(slots=True)
 class Device:
     """Latest known state of one Zigbee2MQTT device."""
@@ -80,6 +108,9 @@ class Device:
     seen: dict[str, float] = field(default_factory=dict)  # attribute -> monotonic time
     last_message: float | None = None
     available: bool | None = None  # None: Z2M availability not reported
+    # Settings Zigbee2MQTT said the device can't take (`parse_rejection`). Kept while the
+    # process runs, across the device going offline and back.
+    unsupported: set[str] = field(default_factory=set)
 
     def update(self, data: dict[str, Any], now: float) -> None:
         for key, value in data.items():
@@ -122,6 +153,11 @@ class DeviceStore:
             state = parse_availability(payload)
             if state is not None:
                 self.bridge_online = state
+            return None
+        if rest == "bridge/logging":
+            rejected = parse_rejection(parse_json(payload))
+            if rejected is not None and rejected[0] in self.devices:
+                self.devices[rejected[0]].unsupported.add(rejected[1])
             return None
         if rest == "bridge/devices":
             listed = parse_bridge_devices(payload)
@@ -268,12 +304,25 @@ class TrvWriter:
         echo: Device | None,
         now: float,
         schedule: dict[str, str] | None = None,
+        exposes: frozenset[str] | None = None,
     ) -> list[Write]:
+        """The writes for `action`. `exposes` is what the device's definition offers,
+        from `bridge/devices`, or None when unknown."""
         want = self.desired(action)
         payload: dict[str, Any] = {}
         bump: int | None = None
+        # Never sent: settings the device rejected as unsupported, and governed settings
+        # its definition doesn't expose. Each is dropped on its own, so the rest still go.
+        skip = set(echo.unsupported) if echo is not None else set()
+        if exposes is not None:
+            skip |= {k for k in GOVERNED_STATIC if k not in exposes}
 
         for key, value in want.items():
+            if key in skip:
+                self.sent.pop(key, None)
+                if key not in OFF_IF_PRESENT:
+                    self.failed.add(key)  # reported as rejected: the TRV needs it
+                continue
             prev = self.sent.get(key)
             if prev is None or not _same(key, prev.value, value):
                 if key == "valve_opening_degree" and action.pre_opening is not None and prev:

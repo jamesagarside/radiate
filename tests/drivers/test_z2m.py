@@ -7,6 +7,7 @@ from radiate.drivers.z2m import (
     TrvWriter,
     is_available,
     parse_availability,
+    parse_rejection,
     reading_age,
 )
 
@@ -186,3 +187,80 @@ def test_forget_resends_everything():
     w.forget()
     (write,) = w.plan(action(), None, 10.0)
     assert len(write.payload) == 7
+
+
+# --- settings a TRV does not support ---------------------------------------------------
+
+# Zigbee2MQTT 2.x logs a failed write on `bridge/logging` (`lib/extension/publish.ts`).
+UNSUPPORTED_LOG = {
+    "level": "error",
+    "message": (
+        "z2m: Publish 'set' 'smart_temperature_control' to 'trv_a' failed: 'Error: ZCL "
+        'command 0x847127fffe1a2b3c/1 hvacThermostat.write({"6000":{"value":0,'
+        "\"type\":16}}, {}) failed (Status 'UNSUPPORTED_ATTRIBUTE')'"
+    ),
+}
+
+
+def test_parse_rejection_reads_unsupported_and_unknown_keys():
+    assert parse_rejection(UNSUPPORTED_LOG) == ("trv_a", "smart_temperature_control")
+    no_converter = {
+        "level": "error",
+        "message": "No converter available for 'smart_temperature_control' on 'trv a/b': (false)",
+    }
+    assert parse_rejection(no_converter) == ("trv a/b", "smart_temperature_control")
+    timeout = {
+        "level": "error",
+        "message": "Publish 'set' 'system_mode' to 'trv_a' failed: 'Error: Timeout'",
+    }
+    assert parse_rejection(timeout) is None  # may work next time: the reconciler retries
+    assert parse_rejection({"level": "info", "message": "MQTT publish"}) is None
+    assert parse_rejection("not an object") is None
+
+
+def test_store_records_a_rejected_setting_on_the_device():
+    store = DeviceStore("zigbee2mqtt", {"trv_a"})
+    store.handle("zigbee2mqtt/bridge/logging", json.dumps(UNSUPPORTED_LOG), 1.0)
+    assert store.get("trv_a").unsupported == {"smart_temperature_control"}
+    store.handle("zigbee2mqtt/bridge/logging", b"garbage", 2.0)
+    assert store.get("trv_a").unsupported == {"smart_temperature_control"}
+
+
+def test_an_unsupported_setting_is_not_sent_again_and_blocks_nothing():
+    store = DeviceStore("zigbee2mqtt", {"trv_a"})
+    w = TrvWriter("trv_a", remote_sensor=True)
+    w.plan(action(), store.get("trv_a"), 0.0)
+    store.handle("zigbee2mqtt/bridge/logging", json.dumps(UNSUPPORTED_LOG), 1.0)
+    echo = store.get("trv_a")
+    assert w.plan(action(opening=40), echo, 60.0)[0].payload == {"valve_opening_degree": 40}
+    # The TRV rejoins: everything else is sent again, that setting is not.
+    w.forget()
+    (write,) = w.plan(action(), echo, 120.0)
+    assert "smart_temperature_control" not in write.payload
+    assert write.payload["valve_closing_degree"] == 100
+    assert write.payload["occupied_heating_setpoint"] == 20.5
+    # Turning off adaptive PID on a TRV that has none loses nothing: not a failure.
+    assert w.failed == set()
+
+
+def test_a_governed_setting_the_device_does_not_expose_is_skipped():
+    w = TrvWriter("trv_a", remote_sensor=True)
+    exposes = frozenset(TRV_STATE) - {"smart_temperature_control"}
+    (write,) = w.plan(action(), None, 0.0, exposes=exposes)
+    assert "smart_temperature_control" not in write.payload
+    assert write.payload["valve_closing_degree"] == 100
+    # Unknown exposes (no bridge/devices yet): sent as before.
+    w2 = TrvWriter("trv_a", remote_sensor=True)
+    assert "smart_temperature_control" in w2.plan(action(), None, 0.0, exposes=None)[0].payload
+
+
+def test_an_essential_setting_the_trv_rejects_is_reported():
+    store = DeviceStore("zigbee2mqtt", {"trv_a"})
+    w = TrvWriter("trv_a", remote_sensor=True)
+    w.plan(action(), store.get("trv_a"), 0.0)
+    log = dict(UNSUPPORTED_LOG)
+    log["message"] = log["message"].replace("smart_temperature_control", "valve_opening_degree")
+    store.handle("zigbee2mqtt/bridge/logging", json.dumps(log), 1.0)
+    writes = w.plan(action(opening=30, setpoint=21.0), store.get("trv_a"), 60.0)
+    assert writes[0].payload == {"occupied_heating_setpoint": 21.0}
+    assert w.failed == {"valve_opening_degree"}  # shown as rejected, and alerted
