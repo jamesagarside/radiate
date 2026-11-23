@@ -413,6 +413,9 @@ class LiveDriver:
                 {"topic": topic, "payload": payload}
                 for _, topic, payload in list(self.intended)[-5:]
             ],
+            # False until a `shelly` section is configured: the boiler is not
+            # switched, so the UI says so rather than "Boiler idle".
+            "boiler_linked": self.boiler is not None,
         }
         if self.boiler is not None:
             t.update(self.boiler.telemetry())

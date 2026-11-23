@@ -5,13 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Radiate</title>
+  <link rel="preload" href="static/fonts/doto-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="static/app.css">
+  <link rel="stylesheet" href="static/house.css">
 </head>
 <body>
   <header class="top">
     <div class="brand">
-      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V8m4.67 12V5m4.66 15V5M19 20V8M3 20h18" /></svg>
-      <span>Radiate</span>
+      <svg class="brand-mark" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="4" width="4" height="17" fill="var(--t12)"/><rect x="7" y="4" width="4" height="17" fill="var(--t17)"/><rect x="13" y="4" width="4" height="17" fill="var(--t19)"/><rect x="19" y="4" width="2" height="17" fill="var(--t22)"/><rect x="0" y="1" width="22" height="2" fill="var(--text)"/></svg>
+      <span>radiate</span>
     </div>
     <p class="status" id="status" aria-live="polite">Connecting…</p>
     <div class="right">
@@ -62,6 +64,12 @@
   </section>
 
   <main>
+    <div class="hm-wrap">
+      <section class="card hm-model" id="hm-model" aria-label="House model"></section>
+      <section class="card hm-status" id="hm-status" aria-label="The house now"></section>
+    </div>
+    <section class="card hm-plan" id="hm-plan" aria-label="Today's plan" hidden></section>
+
     <section class="card boiler" aria-labelledby="boiler-h">
       <div class="boiler-head">
         <h2 id="boiler-h">Boiler</h2>

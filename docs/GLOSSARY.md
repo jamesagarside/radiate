@@ -648,6 +648,26 @@ Code: `RoomLearning`, API `learning[].status`, UI "Ready", "Learning", "Not judg
 How far the uncertainty of a room's loss rate has shrunk from its prior, from 0 to 1, as confidence does for the heating gain.
 Code: `loss_confidence` in `radiate.core.suggestions`.
 
+## House model
+
+**House model**:
+The drawing of the house at the top of the web UI's House page: each floor's rooms as blocks, floors stacked, each room coloured by its temperature. It shows the house; it never feeds the core.
+Code: `createHouse` and `isoMarkup` in `web/house.js`, UI "Your house".
+_Avoid_: "house model" for `HouseConfig`, the house as the configuration describes it, or for a room model. Section 2 of the spec is headed "House model" in that older sense (see Ambiguities).
+
+**House layout**:
+Where each room sits in the house model: a list of floors and, per placed room, a floor and a rectangle in metres. The owner draws it in the room editor. Control never reads it.
+Code: `radiate.server.layout`, `Runtime.layout`, key `layout` in the state database, API `GET` and `PUT /api/v1/layout`, UI "Arrange rooms".
+_Avoid_: floor plan for the saved data; the floor plan is the editor's view of one floor.
+
+**Guessed layout**:
+The house layout Radiate draws until one is saved: rooms whose names suggest an upper floor (bedroom, bathroom, landing and so on) on "First floor", the rest on "Ground floor".
+Code: `guessLayout` in `web/house.js`, UI "Rooms are placed by a guess from their names."
+
+**Boiler linked**:
+Whether Radiate can switch the boiler: true when the configuration has a `shelly` section. Without it, the UI says the boiler switch isn't linked and never calls the boiler idle.
+Code: `telemetry.boiler_linked` in `state`, set by `LiveDriver`.
+
 ## Engine and runtime
 
 **Core**:
@@ -716,7 +736,7 @@ The server object that owns configuration, engine state and a driver, runs ticks
 Code: `Runtime` in `radiate.server.runtime`.
 
 **State database**:
-The SQLite file that holds engine state, the house ID, the mode, overrides, away state, the Elastic export queue and the tick history.
+The SQLite file that holds engine state, the house ID, the mode, overrides, away state, the house layout, the Elastic export queue and the tick history.
 Code: `radiate.server.store.Store`, file `<data_dir>/radiate.db`.
 _Avoid_: "store" on its own, which means the hot-water store.
 
@@ -744,3 +764,4 @@ Names in code and UI text, for whoever next touches that code:
 1. **Store means two things.** The hot-water store, and `radiate.server.store.Store` (the SQLite state database). Suggest renaming the class or module, for example `StateDb`.
 2. **Heat sink and `boiler.dump_room`.** Prose and UI say heat sink; the reason code is still `boiler.dump_room`. Reason codes reach Elastic, so a rename is an API change.
 3. **"Stuck valve" covers leaking valves.** The HA binary sensor (`valve_untrusted`, named "Stuck valve") and API `valve.untrusted` are on for a stuck or a leaking valve. Suggest a name such as "Valve problem".
+4. **"House model" means two things.** The drawing at the top of the House page, and section 2 of the spec, "House model", which describes the house's objects (rooms, boiler, store). Suggest renaming the spec section, for example "House objects".

@@ -362,6 +362,9 @@ class DeviceHealth:
         """ "Lounge TRV", "Outdoor sensor", "Router plug_hall", "Boiler relay"."""
         kind = KIND_LABEL.get(self.kind, self.kind)
         if self.room_name:
+            # "Dining room sensor", not "Dining room room sensor".
+            if kind.startswith("room ") and self.room_name.lower().endswith(" room"):
+                kind = kind.removeprefix("room ")
             return f"{self.room_name} {kind}"
         if self.kind == "router":
             return f"Router {self.id}"

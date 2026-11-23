@@ -12,6 +12,7 @@ import { createSetup } from "./setup.js";
 import { weekView } from "./week.js";
 import { createDevices } from "./devices.js";
 import { createSuggestions } from "./suggestions.js";
+import { createHouse } from "./house.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -184,6 +185,8 @@ const LEARNING = {
 function ensureCard(r) {
   if (cards.has(r.id)) return cards.get(r.id);
   const node = $("room-tpl").content.firstElementChild.cloneNode(true);
+  node.id = `room-${r.id}`;
+  node.tabIndex = -1;
   node.querySelector(".name").textContent = r.name;
   node.dataset.passive = String(r.role === "passive");
   node.dataset.unheated = String(r.role === "unheated");
@@ -548,6 +551,27 @@ function renderPeople(away) {
 // 10 minutes. Each state moves the now marker. An older server without the route
 // answers 404 and the section stays hidden.
 const WEEK_REFRESH_MS = 10 * 60 * 1000;
+// The house model, the whole-house plate and today's plan (house.js).
+const houseView = createHouse({
+  modelEl: $("hm-model"),
+  statusEl: $("hm-status"),
+  planEl: $("hm-plan"),
+  transport,
+  onRoom: (id) => {
+    const card = $(`room-${id}`);
+    if (!card) return;
+    card.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    card.focus({ preventScroll: true });
+  },
+  onWeek: () => {
+    $("week").scrollIntoView({ block: "start" });
+    $("week-h").setAttribute("tabindex", "-1");
+    $("week-h").focus({ preventScroll: true });
+  },
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => houseView.redraw());
+if (document.fonts?.ready) document.fonts.ready.then(() => houseView.redraw());
+
 const week = weekView({ list: $("week-list"), legendEl: $("week-legend"), frostEl: $("week-frost"), hintEl: $("week-hint") });
 const weekSync = { key: null, minute: null, at: 0, loading: false, again: false, gone: false, shown: false };
 let weekEditing = false;
@@ -601,6 +625,7 @@ async function loadWeek() {
     const view = await transport.get("schedules");
     $("week").hidden = !view.rooms.length;
     week.update(view);
+    houseView.week(view);
     weekSync.shown = true;
     if (last) week.tick(last.minute_of_day);
   } catch (err) {
@@ -682,6 +707,7 @@ function render(s) {
   for (const r of s.rooms) renderRoom(r);
   renderAlerts(s.alerts);
   renderDeviceCount(s.alert_details);
+  houseView.update(s, house);
   syncWeek(s);
 
   lastAt = new Date();
@@ -699,6 +725,12 @@ function statusLine(s, minBurn) {
   const sinks = active.filter((r) => !r.calling && r.topup && r.extend !== true).map((r) => r.name);
   const waiting = active.filter(pooled).map((r) => r.name);
   const water = s.store?.relay ? " Hot water on." : "";
+  // Without a boiler relay configured Radiate cannot know or switch the boiler, so
+  // never claim it is idle. Older servers don't send `boiler_linked`.
+  if (s.telemetry && !s.telemetry.simulated && s.telemetry.boiler_linked === false) {
+    if (!calling.length) return "No room needs heat. The boiler switch isn't linked yet.";
+    return `${names(calling)} ${calling.length === 1 ? "wants" : "want"} heat. The boiler switch isn't linked yet, so the boiler follows its own timer.`;
+  }
   const on = `Burner on for ${mins(b.burn_elapsed_s)}`;
   const extend = (list) => `topping up ${names(list)} to save a second burn soon`;
   switch (b.state) {
@@ -1035,6 +1067,7 @@ const DEVICE_ALERTS = /^(device\.|driver\.trv_offline$|driver\.shelly$)/;
 
 function renderDeviceCount(details) {
   const n = (details ?? []).filter((a) => DEVICE_ALERTS.test(a.code)).length;
+  houseView.devices(n);
   const count = $("devices-count");
   count.hidden = !n;
   count.textContent = String(n);
