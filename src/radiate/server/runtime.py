@@ -14,7 +14,7 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -110,6 +110,9 @@ class Driver(Protocol):
 
 OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
 OVERRIDE_MAX_MIN = 7 * 24 * 60
+# The manual fire flag lasts this long, and until local midnight at the latest (spec 7,
+# fail warm): a forgotten flag must not leave a room unheated for days.
+FIRE_FLAG_DEFAULT_S = 6 * 3600.0
 
 
 @dataclass
@@ -142,7 +145,9 @@ class Runtime:
     demand_mode: DemandMode | None = None
     overrides: dict[str, float] = field(default_factory=dict)  # setpoints the driver applies
     override_meta: dict[str, Override] = field(default_factory=dict)  # when each one ends
-    fire: set[str] = field(default_factory=set)
+    fire: set[str] = field(default_factory=set)  # manual fire flags the driver applies
+    fire_until: dict[str, float] = field(default_factory=dict)  # when each one ends
+    fire_flag_max_s: float = FIRE_FLAG_DEFAULT_S  # house.fire_flag_hours
     store_boost_until: float = 0.0
     last_actions: Actions | None = None
     last_snapshot: Snapshot | None = None
@@ -431,6 +436,40 @@ class Runtime:
             self.override_meta.pop(rid, None)
         if expired:
             self._save_runtime(now)
+
+    def set_fire(self, room_id: str, lit: bool) -> float | None:
+        """Set or clear the manual fire flag. A flag set lasts `fire_flag_max_s`, and
+        ends at local midnight at the latest. Returns when it ends (driver clock), or
+        None when cleared. Not saved: a restart clears it, which fails warm."""
+        if not lit:
+            self.fire.discard(room_id)
+            self.fire_until.pop(room_id, None)
+            return None
+        now, wall = self.driver.clock(), self._wall()
+        local = datetime.fromtimestamp(wall, ZoneInfo(self.timezone))
+        midnight = datetime.combine(local.date() + timedelta(days=1), datetime.min.time())
+        to_midnight = midnight.replace(tzinfo=local.tzinfo).timestamp() - wall
+        self.fire.add(room_id)
+        self.fire_until[room_id] = now + max(60.0, min(self.fire_flag_max_s, to_midnight))
+        return self.fire_until[room_id]
+
+    def _expire_fire(self, now: float) -> None:
+        for rid, until in list(self.fire_until.items()):
+            if now >= until:
+                self.set_fire(rid, False)
+                rc = self.cfg.room(rid)
+                self._log(
+                    now,
+                    Reason(
+                        "room.fire_switch_expired",
+                        f"{rc.name}: fire flag cleared after its time ran out",
+                        rid,
+                    ),
+                )
+
+    def fire_expires_in_min(self, room_id: str, now: float) -> int | None:
+        until = self.fire_until.get(room_id)
+        return None if until is None else max(0, round((until - now) / 60))
 
     def override_view(self, room_id: str, now: float) -> dict | None:
         if room_id not in self.overrides:
@@ -1065,6 +1104,7 @@ class Runtime:
     async def step(self) -> Actions:
         now = self.driver.clock()
         self._expire_overrides(now)
+        self._expire_fire(now)
         self._update_away()
         mode = self.effective_mode()
         # Everyone away holding frost: overrides still win, so with one the core runs
@@ -1228,6 +1268,7 @@ class Runtime:
                 "override": self.override_view(rc.id, now),
                 # The manual fire flag set through the API, as opposed to `fire` (detected).
                 "fire_switch": rc.id in self.fire,
+                "fire_switch_expires_in_min": self.fire_expires_in_min(rc.id, now),
             }
             rs = st.rooms.get(rc.id)
             if rs is not None:

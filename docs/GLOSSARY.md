@@ -359,7 +359,7 @@ Code: gate `sensor_stale`, `RoomState.fallback_until`, `LearningConfig.learn_on_
 A detected event that heats or cools a room for reasons other than its radiator. Each one closes a learning gate while it lasts.
 Code: `DisturbanceState`, `radiate.core.disturbance`.
 
-- **Fire**: an episodic heat source is active in the room. Radiate closes its valve, takes it out of boiler demand and stops learning. Raised by the fire switch, a rise with the radiator off for 30 minutes, or a large sustained residual. Code: `DisturbanceState.fire`, API `POST /api/v1/rooms/{id}/fire`.
+- **Fire**: an episodic heat source is active in the room. Radiate closes its valve, takes it out of boiler demand and stops learning. Raised by the fire switch, a rise with the radiator off for 30 minutes, or a large sustained residual. The fire switch (manual fire flag) expires after `house.fire_flag_hours`, 6 by default, and at local midnight at the latest. Code: `DisturbanceState.fire`, `Runtime.set_fire`, `Runtime.fire_until`, config key `house.fire_flag_hours`, reason `room.fire_switch_expired`, API `POST /api/v1/rooms/{id}/fire`.
 - **Fire hold-off**: the 4 hours after a fire clears, while masonry still radiates heat. Learning stays paused. Code: `fire_holdoff_until`.
 - **Window**: a window sensor reports open, or the room drops 0.6 K within 5 minutes. Code: `window_until`.
 - **Shower**: bathroom humidity 8 points or more above its 2-hour median, with a 45-minute hold-off. Code: `shower_until`.

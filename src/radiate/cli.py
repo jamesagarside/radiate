@@ -150,6 +150,7 @@ async def _start_live(site, session):
         household=site.household,
         timezone=site.timezone,
         schedule_use=site.schedule_use,
+        fire_flag_max_s=site.fire_flag_s,
     )
     runtime.setup = HouseholdSetup(site, SavedFile(site.data_dir))
     for problem in runtime.restore():

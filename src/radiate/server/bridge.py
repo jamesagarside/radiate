@@ -221,12 +221,11 @@ def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
 
 def set_fire(rt: Runtime, room_id: str, body: Any) -> dict:
     rc = room(rt, room_id)
-    if require_object(body).get("lit"):
-        rt.fire.add(rc.id)
+    lit = bool(require_object(body).get("lit"))
+    rt.set_fire(rc.id, lit)
+    if lit:
         rt.note_home_evidence("fire_switch")  # someone lit it (fail warm)
-    else:
-        rt.fire.discard(rc.id)
-    return {"ok": True}
+    return {"ok": True, "expires_in_min": rt.fire_expires_in_min(rc.id, rt.driver.clock())}
 
 
 def boost_store(rt: Runtime, body: Any) -> dict:
