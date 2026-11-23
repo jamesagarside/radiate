@@ -148,6 +148,7 @@ class LiveDriver:
             household=site.household,
             household_schedules=dict(site.household_schedules),
             household_live=dict(site.household_live),
+            household_fallback=dict(site.household_fallback),
         )
 
     def set_household_schedules(
@@ -157,12 +158,11 @@ class LiveDriver:
     ) -> None:
         """Use these weeks for the household's rooms from now on (away changed).
 
-        `schedules` are the valve's weeks: the schedule mirror and the Shelly fallback
-        read them through `site.schedule_for`. `live` are the weeks Radiate follows:
+        `schedules` are the valve's weeks for the people at home now. The schedule
+        mirror and the Shelly fallback do not follow them: they keep the weeks for
+        everyone at home (`site.fallback_schedule_for`), so they fail warm. `live` are the weeks Radiate follows:
         snapshots and overrides ending at the next change read them through
         `site.live_schedule_for`. Without `live`, Radiate follows the valve's weeks.
-        The mirror writes a changed week to the TRV on the next apply, or only logs it
-        in dry run, like every other write.
         """
         known = {rid: week for rid, week in schedules.items() if rid in self.site.devices}
         live_known = {
@@ -319,11 +319,16 @@ class LiveDriver:
                 await self.boiler.command(
                     False, actions.store_relay, int(self._wall()), heartbeat=False
                 )
-            heat = fallback_heating_windows(
-                [self.site.schedule_for(r.id) for r in self.cfg.rooms if r.controllable],
-                weekday,
-            )
-            await self.boiler.push_fallback(heat, self.cfg.store.windows)
+            await self.boiler.push_fallback(self.fallback_windows(weekday), self.cfg.store.windows)
+
+    def fallback_windows(self, weekday: int) -> list[list[int]]:
+        """The Shelly watchdog's heating windows for `weekday`: from every room's week
+        with everyone at home, and never empty (spec 7, fail warm)."""
+        return fallback_heating_windows(
+            [self.site.fallback_schedule_for(r.id) for r in self.cfg.rooms if r.controllable],
+            weekday,
+            frost_c=self.cfg.boiler.frost_c,
+        )
 
     def _mirror(self, room_id: str) -> dict[str, str]:
         """The room's schedule in the frame its TRV compares setpoints with."""

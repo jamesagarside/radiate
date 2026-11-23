@@ -129,8 +129,8 @@ Minutes. Code: `Timing.preheat_min`, `RoomLink.preheat_min`, config keys `househ
 _Avoid_: preheat on its own for this; optimum start is the learned feature.
 
 **Valve schedule, live schedule**:
-The two weeks a household room compiles to. The valve schedule starts each warm period by the fixed preheat and fits the TRVZB's six changes a day; the schedule mirror and the Shelly fallback use it. The live schedule is what Radiate follows while it runs: each warm period starts when the room is needed, and optimum start decides how early to heat. With `live_preheat: fixed` the two are the same.
-Code: `CompiledHousehold.schedules` and `CompiledHousehold.live`, `SiteConfig.schedule_for` and `SiteConfig.live_schedule_for`, `LivePreheat`, config key `household.timing.live_preheat`.
+The two weeks a household room compiles to. The valve schedule starts each warm period by the fixed preheat and fits the TRVZB's six changes a day; the schedule mirror and the Shelly fallback use it, as compiled for everyone at home (the fallback week). The live schedule is what Radiate follows while it runs: each warm period starts when the room is needed, and optimum start decides how early to heat. With `live_preheat: fixed` the two are the same.
+Code: `CompiledHousehold.schedules` and `CompiledHousehold.live`, `SiteConfig.schedule_for`, `SiteConfig.live_schedule_for` and `SiteConfig.fallback_schedule_for` (the fallback week), `LivePreheat`, config key `household.timing.live_preheat`.
 
 **Dropped period**:
 A warm period left out of a room's valve schedule to fit the TRVZB's limit. Radiate still heats it while running.
@@ -267,7 +267,7 @@ The part of the TRV writer that resends a setting when the TRV's reported value 
 Code: `TrvWriter.plan`, `TrvWriter.failed`, `RECONCILE_GRACE_S`, `MAX_ATTEMPTS`, alert `driver.write_failed`, `RoomInput.trv_rejected`, learning gate `valve_rejected`, API `rooms[].valve.rejected`.
 
 **Schedule mirror**:
-Radiate writes each room's weekly schedule into its TRVZB and runs the valve in `auto` mode, so the valve follows the schedule if Radiate stops. For a household room it writes the valve schedule, which includes the fixed preheat.
+Radiate writes each room's weekly schedule into its TRVZB and runs the valve in `auto` mode, so the valve follows the schedule if Radiate stops. For a household room it writes the valve schedule for everyone at home, which includes the fixed preheat, whoever is away (fail warm).
 Code: `TrvOptions.schedule_mirror`, `WeekSchedule.trvzb_payload`, config key `trv.schedule_mirror`.
 
 ## Room model and learning

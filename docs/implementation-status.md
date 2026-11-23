@@ -148,6 +148,7 @@ Top remaining gaps, most important first:
 | Overheating with the valve closed | partial | `core/disturbance.py` | Gates learning (`unexplained_heat`); no alert, no valve check |
 | Frost | done | `core/decide.py` | |
 | Clock jump or DST | done | `server/runtime.py`, `drivers/live.py` | Monotonic timers; schedules in local time (`next_change` is out by an hour across a DST change) |
+| Fail warm: fallbacks built for everyone at home | done | `config/site.py` `fallback_schedule_for`, `drivers/shelly.py` `fallback_heating_windows`, `drivers/live.py` | The schedule mirror and the watchdog's windows ignore away; the windows are never empty. The watchdog still does nothing without a clock (spec open question 11) |
 | Corrupt learned state | partial | `core/persist.py`, `core/bootstrap.py` | A saved state that can't be read is relearned from the tick history; a single corrupt room is reset to priors and logged, without a replay or a UI alert |
 
 ## 8. Interfaces

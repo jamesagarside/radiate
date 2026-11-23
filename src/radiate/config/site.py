@@ -152,6 +152,10 @@ class SiteConfig:
     # the week live control follows (see radiate.config.household).
     household_schedules: dict[str, WeekSchedule] = field(default_factory=dict)
     household_live: dict[str, WeekSchedule] = field(default_factory=dict)
+    # The household's valve weeks for everyone at home. The fallbacks (the TRV schedule
+    # mirror and the Shelly watchdog's windows) use these and never the weeks compiled
+    # for people away: they heat the house when Radiate cannot, so they fail warm.
+    household_fallback: dict[str, WeekSchedule] = field(default_factory=dict)
     # The schedule each controllable room follows when no household covers it: its own
     # `schedule`, or `default` when that exists. None: the house file gives it none.
     room_schedules: dict[str, str | None] = field(default_factory=dict)
@@ -184,9 +188,22 @@ class SiteConfig:
             return self.household_live[room_id]
         return self.schedule_for(room_id)
 
+    def fallback_schedule_for(self, room_id: str) -> WeekSchedule:
+        """The room's week for the fallbacks: as the valve holds it with everyone home.
+
+        The TRV schedule mirror and the Shelly watchdog's windows run the house when
+        Radiate is not running, so they never inherit an away (spec 7, fail warm).
+        """
+        if room_id in self.household_fallback:
+            return self.household_fallback[room_id]
+        return self.schedule_for(room_id)
+
     def mirror_payload(self, room_id: str) -> dict[str, str]:
-        """The room's week as written to its TRVZB, in the frame the TRV compares with."""
-        week = self.schedule_for(room_id)
+        """The room's week as written to its TRVZB, in the frame the TRV compares with.
+
+        Built from the week for everyone at home (`fallback_schedule_for`).
+        """
+        week = self.fallback_schedule_for(room_id)
         room = self.house.room(room_id)
         if room.role is RoomRole.INTERNAL_SENSOR_ONLY:
             # The TRV reads about room - bias; spec 4.6 and decide._trv_setpoint.
@@ -1230,6 +1247,7 @@ def apply_household(site: SiteConfig, household: Household | None, source: str) 
         household=household,
         household_schedules=schedules,
         household_live=live,
+        household_fallback=dict(schedules),
         household_source=source if household is not None else None,
         household_notes=tuple(notes),
         notes=base + tuple(notes),

@@ -432,7 +432,7 @@ In the web UI, you can make an adjustment in the Schedules section instead. Drag
 
 #### Away
 
-When a person is away, Radiate rebuilds the household's schedules without their part of the routine. If the home worker travels, their office drops to the unused temperature and the bedroom stays warm for the early riser. Rooms with a hand-written `schedule` don't change. The schedule mirror writes the rebuilt weeks to the TRVs (in dry run, it logs them).
+When a person is away, Radiate rebuilds the household's schedules without their part of the routine. If the home worker travels, their office drops to the unused temperature and the bedroom stays warm for the early riser. Rooms with a hand-written `schedule` don't change. Radiate follows the rebuilt weeks while it runs. The schedule mirror and the Shelly fallback don't: they keep the weeks for everyone at home, so if Radiate stops, the TRVs and the boiler heat as if someone is home.
 
 A person counts as away in two ways:
 

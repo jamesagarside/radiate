@@ -42,6 +42,9 @@ _REPO_SCRIPT = Path(__file__).resolve().parents[3] / "shelly" / "radiate-watchdo
 WATCHDOG_PATH = _PKG_SCRIPT if _PKG_SCRIPT.exists() else _REPO_SCRIPT
 FALLBACK_LEAD_MIN = 60
 MAX_WINDOWS = 4
+FROST_C = 7.0  # a room held this low all day wants no fallback heat
+# The watchdog script's own `HEATING` windows, used when the schedules give none.
+DEFAULT_HEATING_WINDOWS = [[330, 510], [960, 1350]]
 
 
 class ShellyError(RuntimeError):
@@ -97,22 +100,37 @@ def chunks(code: str, size: int = SCRIPT_CHUNK) -> list[str]:
 
 
 def fallback_heating_windows(
-    schedules: list[WeekSchedule], weekday: int, lead_min: int = FALLBACK_LEAD_MIN
+    schedules: list[WeekSchedule],
+    weekday: int,
+    lead_min: int = FALLBACK_LEAD_MIN,
+    frost_c: float = FROST_C,
 ) -> list[list[int]]:
     """Daily windows for the watchdog's heating channel, from the room schedules.
 
     A window is any time some room wants more than its lowest setpoint of the day,
-    started `lead_min` early because the fallback cannot do optimum start. Merged and
-    capped at 4 windows so it fits a KVS value.
+    started `lead_min` early because the fallback cannot do optimum start. A room held
+    at one setpoint above `frost_c` all day wants heat all day. Merged and capped at 4
+    windows so it fits a KVS value.
+
+    Never empty (fail warm, spec 7): with no window from the schedules, the watchdog's
+    own default windows are returned, since the watchdog takes an empty list as
+    "never heat". The caller passes the weeks for everyone at home, never the away
+    weeks.
     """
     spans: list[list[int]] = []
     for week in schedules:
         day = week.days[weekday % 7]
         low = min(sp for _, sp in day.transitions)
+        if all(sp == low for _, sp in day.transitions):
+            if low > frost_c:
+                spans.append([0, 1440])
+            continue
         bounds = [*day.transitions, (1440, low)]
         for (start, sp), (end, _) in zip(bounds, bounds[1:], strict=False):
             if sp > low:
                 spans.append([max(0, start - lead_min), end])
+    if not spans:
+        return [list(w) for w in DEFAULT_HEATING_WINDOWS]
     spans.sort()
     merged: list[list[int]] = []
     for s in spans:

@@ -6,6 +6,7 @@ from aiohttp.test_utils import TestServer
 
 from radiate.config import ShellyConfig, parse_week
 from radiate.drivers.shelly import (
+    DEFAULT_HEATING_WINDOWS,
     HEARTBEAT_KEY,
     ShellyBoiler,
     ShellyError,
@@ -66,6 +67,26 @@ def test_fallback_windows_from_schedules():
     a = parse_week("00:00/16 06:30/20 08:30/16 17:00/20 22:30/16")
     b = parse_week("00:00/16 07:00/21 09:00/16")
     assert fallback_heating_windows([a, b], 0) == [[330, 540], [960, 1350]]
+
+
+def test_fallback_windows_heat_all_day_for_a_flat_warm_day():
+    # A room held at one warm setpoint all day has no "above its own minimum" period,
+    # but it still wants heat: the fallback heats all day rather than never.
+    flat = parse_week("00:00/19")
+    assert fallback_heating_windows([flat], 0) == [[0, 1440]]
+
+
+def test_fallback_windows_are_never_empty():
+    # Every room flat at frost (or no rooms): the watchdog's built-in windows, never an
+    # empty list, which the watchdog would take as "never heat".
+    frost = parse_week("00:00/7")
+    assert fallback_heating_windows([frost], 0) == DEFAULT_HEATING_WINDOWS
+    assert fallback_heating_windows([], 0) == DEFAULT_HEATING_WINDOWS
+
+
+def test_default_windows_match_the_watchdog_script():
+    assert "let HEATING = [[330, 510], [960, 1350]];" in watchdog_code()
+    assert DEFAULT_HEATING_WINDOWS == [[330, 510], [960, 1350]]
 
 
 def test_fallback_windows_capped_at_four():

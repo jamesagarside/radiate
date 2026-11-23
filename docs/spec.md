@@ -342,7 +342,7 @@ A small Shelly Gen4 script runs on the relay itself:
 - Heartbeat returns: control goes back to Radiate. The boiler guard first adopts the relay as Radiate finds it (**hand-back**). A burn Radiate did not start gets a full minimum burn from when Radiate first sees it, because the Shelly does not report when the relay changed. A relay seen switching off, or not seen for 5 min or more (Radiate down, Shelly unreachable, a first start), restarts minimum off from then. While in safe mode Radiate follows the watchdog's burns without stopping them, so it knows their start when it takes over.
 - A hard auto-off of 120 min on channel 1 means the relay can never latch on indefinitely.
 
-The script is published in the repository and installed by the user, or with `radiate shelly install-watchdog --config radiate.yaml --yes` over the Shelly local API. Radiate keeps the fallback windows in KVS keys `radiate_heat` (derived from the room schedules, started an hour early) and `radiate_store`.
+The script is published in the repository and installed by the user, or with `radiate shelly install-watchdog --config radiate.yaml --yes` over the Shelly local API. Radiate keeps the fallback windows in KVS keys `radiate_heat` (derived from the room schedules, started an hour early) and `radiate_store`. The heating windows come from each room's week for everyone at home, never from the weeks compiled for people away, and are never empty: a room held at one setpoint above frost all day heats all day, and with no window at all Radiate writes the script's own defaults (section 7, fail warm).
 
 ### 5.8 Room use in demand
 
@@ -529,6 +529,12 @@ Order inside `decide`:
 - Other inputs that can lower heating on failure (an audit is listing them) get a row here, each with its fail warm reading, before they change behaviour.
 
 Radiate does not write anything special to the valves in safe mode: it cannot reach them. The lockshield cap is written whenever a room is not being allocated (section 4.4), so every radiator already carries a balanced opening limit, its schedule setpoint and closing degree 100, and stays balanced and thermostatic without Radiate.
+
+**Fail warm: fallbacks, devices and sensors.** Built. Each row is an input or fallback that could lower the heating, with its fail warm reading.
+
+| Case | Behaviour |
+|---|---|
+| Fallbacks while someone is away | The TRV schedule mirror and the Shelly watchdog's heating windows are built from each room's week for everyone at home (`SiteConfig.fallback_schedule_for`), never from the weeks compiled for people away, so they heat as if someone is home if Radiate stops. Radiate itself still follows the away weeks while it runs, and re-asserts its own setpoint after the TRV's schedule moves it at a transition. The heating windows are never empty: a room held all day at one setpoint above frost heats all day, and with no window from any room Radiate writes the watchdog's own defaults, 05:30 to 08:30 and 16:00 to 22:30 |
 
 ---
 
@@ -725,11 +731,17 @@ Hardware, raised by the efficiency work:
 
 10. Which radiators in the reference house have no valve? Section 2.2 lists the stairs radiator as the only bypass and a TRVZB in the bathroom; the owner has since described the bathroom radiator as an always-open bypass with no valve. If both are unvalved, the bathroom becomes `passive` and the bypass equivalent (`HouseConfig.bypass_equivalent`, 0.4) should rise, which also means fewer heat sinks (5.4).
 
+Fail warm, raised by the fail warm audit:
+
+11. **Open question: the watchdog without a clock.** The Shelly watchdog script does nothing while the Shelly has no wall-clock time (`sys.unixtime` missing, for example after a power cut with the internet still down), because its heartbeat check and its windows both need the time. If Radiate is down too, nothing heats. **Recommended:** with no clock, measure heartbeat silence against `sys.uptime` and run a conservative duty cycle (for example 20 minutes on every 90, keeping minimum burn and minimum off) until the time is known. This changes what the script does to the real boiler, so it needs the owner's agreement and a test on the bench Shelly first. **Not yet implemented**: the script is unchanged.
+
 The three behaviour questions raised in version 0.2 (learning memory, pooled demand, learning on a stale room sensor) are decided; see section 13.
 
 ---
 
 ## 13. Changes in this revision
+
+Built in November 2026, from the fail warm audit (7, fail warm: fallbacks, devices and sensors): the schedule mirror and the Shelly fallback windows use the weeks for everyone at home and the windows are never empty (5.7); open question 11 on the watchdog without a clock (12).
 
 Built in November 2026: fail warm presence (7, [ADR-0005](adr/0005-fail-warm-presence.md)), after a dead phone left a one-person household held at frost, with the presence report's `evidence_at`, `source_type` and `battery`, `POST /api/v1/people/{id}/home` and the new `people` fields (8.1). Planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), proposed): room use in the `eco` demand mode, with solo limits, the damp floor and use-aware burn extension and heat sinks (5.3, 5.8); savings against a timer-and-valves baseline from degree-hours and a fitted house signature, with comfort beside it (5.9); `GET /api/v1/savings` and additive `state` fields (8.1); Home Assistant sensors (8.2); Elastic fields (9); the Savings view (10); the simulator comparison (11); open questions 6 to 9 and hardware question 10 (12). The implementation plan is [efficiency-mvp](plans/efficiency-mvp.md). Since built: room use and the baseline in the snapshot, the savings core, `GET /api/v1/savings` with the closed days kept, the Elastic fields and the Savings view (slices 1, 3, 4 and 5).
 
