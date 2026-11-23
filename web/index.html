@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="static/app.css">
   <link rel="stylesheet" href="static/house.css">
   <link rel="stylesheet" href="static/guide.css">
+  <link rel="stylesheet" href="static/savings.css">
 </head>
 <body>
   <header class="top">
@@ -36,6 +37,7 @@
     <a href="#" class="view-tab" data-view="house" aria-current="page">House</a>
     <a href="#devices" class="view-tab" data-view="devices" hidden>Devices<span class="view-count" id="devices-count" hidden></span></a>
     <a href="#suggestions" class="view-tab" data-view="suggestions" hidden>Suggestions<span class="view-count" id="suggestions-count" hidden></span></a>
+    <a href="#savings" class="view-tab" data-view="savings" hidden>Savings</a>
     <a href="#guide" class="view-tab" data-view="guide" hidden>Guide</a>
   </nav>
 
@@ -79,6 +81,7 @@
       <section class="card hm-status" id="hm-status" aria-label="The house now"></section>
     </div>
     <section class="card hm-plan" id="hm-plan" aria-label="Today's plan" hidden></section>
+    <p class="sv-house-line" id="savings-line" hidden><a class="help-link" href="#savings" id="savings-line-link"></a></p>
 
     <section class="card boiler" aria-labelledby="boiler-h">
       <div class="boiler-head">
@@ -207,6 +210,76 @@
     </section>
   </section>
 
+  <section class="savings-view" id="savings" aria-labelledby="savings-h" hidden>
+    <div class="devices-head">
+      <h2 id="savings-h" tabindex="-1">Savings</h2>
+      <p class="sv-headline" id="savings-headline" aria-live="polite">Loading savings…</p>
+      <p class="help-line">An estimate from measured temperatures and the oil Radiate measured, with comfort beside it. <a class="help-link" href="#guide/savings">How savings are worked out</a></p>
+    </div>
+
+    <section class="card sv-missing" id="savings-missing" aria-label="What savings need" hidden>
+      <p id="savings-missing-text"></p>
+      <button type="button" class="btn btn-primary" id="savings-setup" hidden>Set up your household</button>
+    </section>
+
+    <div class="sv-body" id="savings-body" hidden>
+      <section class="card sv-plate" aria-labelledby="savings-chart-h">
+        <div class="sv-progress" id="savings-progress" hidden>
+          <span class="meter sv-meter" aria-hidden="true"><span class="meter-fill" id="savings-meter"></span></span>
+          <p id="savings-learning"></p>
+        </div>
+        <div class="sv-about">
+          <p id="savings-baseline"></p>
+          <p class="muted" id="savings-basis"></p>
+        </div>
+        <dl class="stats sv-stats" id="savings-stats"></dl>
+        <div class="sv-toolbar">
+          <h3 class="sv-chart-h" id="savings-chart-h">Oil used against the baseline</h3>
+          <div class="seg" role="radiogroup" aria-label="Show by" id="savings-modes" hidden>
+            <button type="button" role="radio" data-mode="days" aria-checked="true">Days</button>
+            <button type="button" role="radio" data-mode="weeks" aria-checked="false">Weeks</button>
+          </div>
+          <button type="button" class="btn" id="savings-table-toggle" aria-pressed="false" aria-controls="savings-table-wrap">Show as table</button>
+        </div>
+        <p class="sv-legend" aria-hidden="true">
+          <span><svg width="12" height="12" viewBox="0 0 12 12"><rect class="sv-act" x="2" y="0" width="8" height="12"/></svg>Oil used</span>
+          <span id="savings-legend-base"><svg width="12" height="12" viewBox="0 0 12 12"><rect class="sv-base" x="0.75" y="0.75" width="10.5" height="10.5"/></svg>Baseline, estimated</span>
+          <span><svg width="12" height="12" viewBox="0 0 12 12"><rect class="sv-empty" x="0" y="0" width="12" height="12"/></svg>Not counted</span>
+        </p>
+        <div class="sv-chart-wrap" id="savings-chart-wrap">
+          <div class="sv-chart" id="savings-chart" role="group"></div>
+          <p class="sv-readout" id="savings-readout"></p>
+        </div>
+        <p class="muted" id="savings-chart-empty" hidden>No full day yet. The first bar appears after midnight.</p>
+        <div class="sv-skipped" id="savings-skipped-section" hidden>
+          <h4>Days not counted</h4>
+          <ul id="savings-skipped"></ul>
+        </div>
+        <div class="sv-table-wrap" id="savings-table-wrap" hidden>
+          <table class="sv-table">
+            <caption>Each day, oldest first. Litres for the baseline and the saving are estimates; a negative saving used more than the baseline.</caption>
+            <thead><tr><th scope="col">Day</th><th scope="col">Counted</th><th scope="col">Oil used (L)</th><th scope="col">Baseline (L)</th><th scope="col">Saved (L)</th><th scope="col">Outdoor</th><th scope="col">Rooms in use warm</th><th scope="col">Short (degree-hours)</th></tr></thead>
+            <tbody id="savings-table-body"></tbody>
+          </table>
+          <p class="muted" id="savings-table-empty" hidden>No full day yet.</p>
+        </div>
+      </section>
+
+      <div class="sv-side">
+        <section class="card sv-plate" id="savings-running" aria-labelledby="savings-running-h" hidden>
+          <h3 class="sv-chart-h" id="savings-running-h">Saved so far</h3>
+          <div class="sv-line-chart" id="savings-line-chart"></div>
+          <p class="sv-running-text" id="savings-running-text"></p>
+        </section>
+        <section class="card sv-plate" id="savings-rooms-section" aria-labelledby="savings-rooms-h" hidden>
+          <h3 class="sv-chart-h" id="savings-rooms-h">Estimated share, last 30 days</h3>
+          <p class="muted sv-note">How the saving splits between rooms, in litres. An attribution from each room's temperatures, not a measurement.</p>
+          <ul class="sv-rooms" id="savings-rooms"></ul>
+        </section>
+      </div>
+    </div>
+  </section>
+
   <section class="guide-view" id="guide" aria-labelledby="guide-h" hidden>
     <div class="devices-head">
       <h2 id="guide-h" tabindex="-1">Guide</h2>
@@ -229,6 +302,7 @@
           <li><a href="#guide/not-heating">Why a room isn't heating</a></li>
           <li><a href="#guide/devices">Devices</a></li>
           <li><a href="#guide/suggestions">Suggestions</a></li>
+          <li><a href="#guide/savings">Savings</a></li>
           <li><a href="#guide/alerts">Alerts</a></li>
           <li><a href="#guide/problems">When something goes wrong</a></li>
           <li><a href="#guide/home-assistant">Home Assistant</a></li>
@@ -437,6 +511,21 @@
           <p>Suggestions are advice from what Radiate has learned: a room that loses heat quickly, a radiator that may be too small or is slow to warm, a valve that lets heat through when it's shut, or a weak Zigbee link. Radiate never acts on them itself.</p>
           <p>Each one says what it's based on and how sure Radiate is. Act on this comes first, then Worth considering, then For information.</p>
           <p>A room is judged once it has 48 hours of learning and Radiate is at least 60% sure of it, and rooms are compared once 3 are ready. Until then the Learning list shows how far each room has got. Rooms measured only by their valve, and rooms with a range cooker, aren't judged.</p>
+        </section>
+
+        <section class="g-sec" id="g-savings" aria-labelledby="g-savings-h">
+          <h3 class="section-h" id="g-savings-h" tabindex="-1">Savings</h3>
+          <p>The Savings tab estimates how much oil Radiate saved, and shows how warm the rooms in use were beside it, so a saving that cost comfort is plain to see.</p>
+          <p>Savings are measured against one baseline: a heating timer on from the first person up to the last to bed every day, with each room's valve set to its usual temperature. That is roughly what the house would do with a plain timer and thermostatic valves. Radiate builds it from your household's times, so it needs a household setup.</p>
+          <p>Radiate doesn't run the baseline. Each day it measures how warm each room was against the temperature outside, works out how warm the baseline would have kept it, and turns the difference into litres using how much oil this house burns for each degree of warmth. Warmth from an open fire, a range cooker or the sun counts the same on both sides, so it isn't taken as a saving.</p>
+          <dl class="g-terms g-words">
+            <div><dt>Still learning</dt><dd>Figures start after 14 full days have counted, and once oil use follows the weather closely enough. Until then the tab shows the oil used each day so far.</dd></div>
+            <div><dt>Not counted</dt><dd>A day Radiate didn't see in full, or with the outdoor sensor or a room's sensor missing for a few hours. It shows as an empty slot with the reason, never as zero.</dd></div>
+            <div><dt>More than the baseline</dt><dd>Some days Radiate uses more oil than the baseline, for example warming a room before the timer would have. Those days count against the saving; they aren't hidden.</dd></div>
+            <div><dt>Estimated share</dt><dd>How the saving splits between rooms. It's worked out from each room's temperatures, so treat it as a guide rather than a measurement.</dd></div>
+          </dl>
+          <p>Litres come from the time the boiler was called for heat, times the burner's nozzle rating. The boiler's own thermostat switches the burner off for spells within that time, so the litres read high: they are an upper bound until the burner itself is measured. The percentage saved still holds, as both sides read high by the same factor.</p>
+          <p>Every figure says "about" because it is an estimate. Radiate doesn't project a year from a few weeks, and it needs an outdoor sensor and the boiler's nozzle rating to estimate at all.</p>
         </section>
 
         <section class="g-sec" id="g-alerts" aria-labelledby="g-alerts-h">
