@@ -55,6 +55,8 @@ rooms:
     sensor: temp_bedroom_1
     schedule: comfort_20
     actuate: true             # pilot valve: test one TRV first (spec 4.5)
+    # use: in_use             # optional: in_use, occasional or unused, or
+    #                         # {weekdays: ..., weekend: ...}; see docs/configuration.md
   - id: bedroom_2
     name: Bedroom 2
     trv: trv_bedroom_2

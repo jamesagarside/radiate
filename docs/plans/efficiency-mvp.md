@@ -100,6 +100,8 @@ Home evidence comes from `set_setpoint`, `boost_store` and `set_fire` in the bri
 
 **Goal.** Each tick, the core receives each controllable room's room use and savings baseline setpoint in the snapshot. Nothing in the core reads them yet, so behaviour, the simulator and replay are unchanged.
 
+**Built.** As below, plus room use for rooms on hand-written schedules: an optional `rooms[].use` key in the house file (the household's use level words), `SiteConfig.schedule_use`, `Runtime.schedule_use`, and `schedule_periods` and `schedule_room_use` in `config/use.py`. Such a room's warm periods are the spans of its day above that day's lowest setpoint; it has no savings baseline. `CompiledHousehold.warm_levels` holds `UNUSED` on an unused day without adjustments, which has no warm periods. The replay test is `tests/server/test_replay.py`.
+
 **Files.** `src/radiate/core/types.py`, `src/radiate/core/__init__.py` (export `RoomUse`, `DAMP_FLOOR_C`), `src/radiate/config/use.py` (new), `src/radiate/config/household.py`, and in `src/radiate/server/runtime.py` a new `_apply_use` called from `step` right after `_apply_return`. Tests: `tests/config/test_room_use.py`, `tests/server/test_room_use_runtime.py`, `tests/core/test_history_room_use.py` (all new).
 
 **Interfaces it creates** (later slices depend on these exactly):
