@@ -201,7 +201,7 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
             <button type="button" class="btn" data-act="arrange">Arrange rooms</button>
           </div>
         </div>
-        <p class="hm-hint hm-guess" hidden>Rooms are placed by a guess from their names. Arrange them to match your house.</p>
+        <p class="hm-hint">Each block is a room in its temperature colour. A blinking bar is a radiator taking heat. <span class="hm-guess" hidden>Rooms are placed by a guess from their names. Arrange them to match your house.</span> <a class="help-link" href="#guide/model">How to read the model</a></p>
         <svg class="hm-iso" role="group" aria-labelledby="hm-model-h"></svg>
         <div class="hm-pick" aria-live="polite"></div>`;
       modelEl.querySelector("[data-act=arrange]").addEventListener("click", () => { editing = true; edFloor = layout.floors.length > 1 ? 0 : 0; drawModel(); drawStatus(); });
@@ -457,10 +457,24 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     fitView(svg);
   }
 
+  // The plate's figures are redrawn on every state; its help line is made once, so a
+  // keyboard user's focus on the link survives the next tick.
+  function statusBody() {
+    let live = statusEl.querySelector(".hm-live");
+    if (!live) {
+      statusEl.innerHTML = `<div class="hm-live"></div>
+        <p class="hm-hint hm-help">The big number is rooms that want heat, out of the rooms Radiate controls. <a class="help-link" href="#guide/now">What the house now shows</a></p>`;
+      live = statusEl.querySelector(".hm-live");
+    }
+    statusEl.querySelector(".hm-help").hidden = editing;
+    return live;
+  }
+
   function drawStatus() {
     if (!state) return;
+    const body = statusBody();
     if (editing) {
-      statusEl.innerHTML = `<h2>Live model</h2>
+      body.innerHTML = `<h2>Live model</h2>
         <svg class="hm-iso hm-preview" role="img" aria-label="Preview of the house model"></svg>
         <p class="hm-hint">${plural(layout.floors.length, "floor", "floors")}, ${placed().length} of ${plural(rooms.size, "room", "rooms")} placed. Radiate uses the layout only to draw your house. It never changes how rooms are heated.</p>`;
       drawPreview();
@@ -507,7 +521,7 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     const conf = models.length ? Math.round((models.reduce((a, c) => a + c, 0) / models.length) * 100) : null;
     const learning = cell("Learning", conf == null ? "–" : `${conf}%`, conf == null ? "waiting for the first burns" : conf < 50 ? "how sure Radiate is of each room, on average" : "average confidence in each room", false);
 
-    statusEl.innerHTML = `
+    body.innerHTML = `
       <h2>The house now</h2>
       <div class="hm-hero">
         <div class="hm-big">${calling.length}<small>/${controlled.length}</small></div>
@@ -573,9 +587,15 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
       const text = room.days[day]?.text ?? "";
       return `<span class="hm-pname">${esc(room.name)}</span><div class="hm-strip" role="img" aria-label="${esc(`${room.name} today: ${text}`)}">${segs}<i class="hm-now" style="left:${(now / 1440) * 100}%"></i></div>`;
     }).join("");
-    planEl.innerHTML = `<div class="hm-head"><h2>Today's plan</h2><button type="button" class="link" data-act="week">Week schedules</button></div>
-      <div class="hm-tl">${rows}<span></span><div class="hm-hrs" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div></div>`;
-    planEl.querySelector("[data-act=week]").addEventListener("click", () => onWeek?.());
+    // The heading, its links and the help line are made once, so focus on them survives
+    // a redraw; only the strips change.
+    if (!planEl.querySelector(".hm-tl")) {
+      planEl.innerHTML = `<div class="hm-head"><h2>Today's plan</h2><button type="button" class="link" data-act="week">Week schedules</button></div>
+        <p class="hm-hint">Each strip is a room's day, coloured by the temperature it aims for. The upright line is now. <a class="help-link" href="#guide/schedules">Change the weekly times</a></p>
+        <div class="hm-tl"></div>`;
+      planEl.querySelector("[data-act=week]").addEventListener("click", () => onWeek?.());
+    }
+    planEl.querySelector(".hm-tl").innerHTML = `${rows}<span></span><div class="hm-hrs" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
   }
 
   // ---------- inputs from app.js ----------

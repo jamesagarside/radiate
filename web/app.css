@@ -729,4 +729,7 @@ body[data-link="stale"] .status { color: var(--warn); }
   .demand-note { order: 2; grid-column: 1 / -1; margin-top: -4px; text-align: left; }
   .status { grid-column: 1 / -1; min-width: 0; }
   .seg button { padding-inline: 10px; }
+  /* Four view tabs fit at 360 px; the row wraps rather than scroll sideways. */
+  .views { gap: 0; flex-wrap: wrap; }
+  .view-tab { padding-inline: 8px; }
 }

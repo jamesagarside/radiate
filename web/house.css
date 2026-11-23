@@ -6,6 +6,8 @@
 .hm-model, .hm-status, .hm-plan { padding: 16px 18px; min-width: 0; }
 .hm-model { display: grid; gap: 10px; grid-template-rows: auto auto 1fr auto; min-height: 520px; align-content: start; }
 .hm-status { display: grid; gap: 18px; align-content: start; }
+/* The redrawn part of the plate; the help line under it is made once. */
+.hm-live { display: grid; gap: 18px; align-content: start; min-width: 0; }
 .hm-plan { display: grid; gap: 10px; }
 .hm-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .hm-head-right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

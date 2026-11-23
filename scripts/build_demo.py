@@ -39,6 +39,8 @@ STATIC_FILES = (
     "suggestions.js",
     "house.js",
     "house.css",
+    "guide.js",
+    "guide.css",
     "demo.js",
     "demo.css",
     "demo-worker.js",

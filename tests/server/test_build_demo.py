@@ -34,6 +34,8 @@ def test_expected_files(site):
         "static/suggestions.js",
         "static/house.js",
         "static/house.css",
+        "static/guide.js",
+        "static/guide.css",
         *(f"static/fonts/{p.name}" for p in (ROOT / "web" / "fonts").iterdir()),
         "static/demo.css",
         "static/demo.js",

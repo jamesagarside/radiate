@@ -13,6 +13,7 @@ import { weekView } from "./week.js";
 import { createDevices } from "./devices.js";
 import { createSuggestions } from "./suggestions.js";
 import { createHouse } from "./house.js";
+import { createGuide, guideNote } from "./guide.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -1097,15 +1098,23 @@ function renderSuggestionCount(n) {
   else tab.removeAttribute("aria-label");
 }
 
+// Guide view (guide.js): how to read and work Radiate, at #guide, with each section
+// at #guide/<name>. Static text, so it is always offered.
+const guide = createGuide({ root: $("guide") });
+guideNote({ note: $("guide-note"), tab: document.querySelector('.view-tab[data-view="guide"]') });
+
 // Each view besides the house: its element, whether the server offers it, and its module.
 const VIEWS = {
   devices: { offered: () => devicesOffered === true, module: devices },
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
+  guide: { offered: () => true, module: guide },
 };
 
+// The view is the part of the hash before any slash; the rest names a part of the
+// view (only the guide's sections use it). An unknown view is the house.
 function route(fromUser) {
   if (document.body.dataset.setup === "open") return;
-  const name = location.hash.slice(1);
+  const [name, part] = location.hash.slice(1).split("/");
   const current = VIEWS[name]?.offered() ? name : "house";
   for (const tab of document.querySelectorAll(".view-tab")) {
     if (tab.dataset.view === current) tab.setAttribute("aria-current", "page");
@@ -1118,6 +1127,11 @@ function route(fromUser) {
     else v.module.hide();
   }
   document.body.dataset.view = current;
+  // A link to a guide section, also when the page opens on one.
+  if (current === "guide" && guide.reveal(part)) return;
+  // Opening on #devices or #guide, the browser has jumped to the view's element,
+  // which leaves its heading under the sticky header. Start at the top instead.
+  if (!fromUser && current !== "house") window.scrollTo(0, 0);
   if (fromUser) {
     window.scrollTo(0, 0);
     // Keyboard and screen reader users land on the new view's heading.
@@ -1125,6 +1139,16 @@ function route(fromUser) {
   }
 }
 window.addEventListener("hashchange", () => route(true));
+// A link to the hash already showing fires no hashchange, so a second press on a guide
+// section link would do nothing. Route it again.
+document.addEventListener("click", (e) => {
+  const a = e.target.closest?.('a[href^="#"]');
+  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  if (a.hash === location.hash && a.hash.startsWith("#guide")) {
+    e.preventDefault();
+    route(true);
+  }
+});
 
 // The tabs show once the server offers at least one view besides the house.
 function renderTabs() {
