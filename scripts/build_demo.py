@@ -9,6 +9,7 @@ GitHub Pages under a sub-path, because every URL in it is relative.
 Output:
     index.html            the web UI, switched to the in-browser transport
     static/*.js, *.css    web/ assets, including demo.js and demo-worker.js
+static/fonts/         the UI's fonts and their licences
     static/radiate.zip    the Python modules the worker imports, and their imports
     .nojekyll             stop GitHub Pages running Jekyll over the site
 """
@@ -36,6 +37,8 @@ STATIC_FILES = (
     "setup.js",
     "devices.js",
     "suggestions.js",
+    "house.js",
+    "house.css",
     "demo.js",
     "demo.css",
     "demo-worker.js",
@@ -140,6 +143,7 @@ def build(out: Path = DEFAULT_OUT) -> Path:
     static.mkdir(parents=True)
     for name in STATIC_FILES:
         shutil.copyfile(WEB / name, static / name)
+    shutil.copytree(WEB / "fonts", static / "fonts")
     (out / "index.html").write_text(demo_index((WEB / "index.html").read_text()))
     write_zip(module_closure(worker_entry_modules()), static / ZIP_NAME)
     (out / ".nojekyll").write_text("")
