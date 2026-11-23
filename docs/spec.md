@@ -344,7 +344,7 @@ The script is published in the repository and installed by the user, or with `ra
 
 ### 5.8 Room use in demand
 
-**Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)). Decided in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed); built by the [efficiency plan](plans/efficiency-mvp.md). Changes the `eco` demand mode only; `comfort` keeps the rule in 5.3.
+Room use in the snapshot is built: the runtime works it out each tick and the tick history records it, but nothing in the core acts on it yet. The roles in `eco` below are **Not yet implemented** ([status](implementation-status.md#planned-efficiency-by-room-use)). Decided in [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed); built by the [efficiency plan](plans/efficiency-mvp.md). Changes the `eco` demand mode only; `comfort` keeps the rule in 5.3.
 
 The household already says how each room is used. In `eco`, that decides each room's part in demand, so a room nobody is using does not start the boiler for half a degree, and the heat from a burn goes to rooms people are in.
 
@@ -355,9 +355,11 @@ The household already says how each room is used. In `eco`, that decides each ro
 | `in_use` | inside a warm period on a day the room's use level is in use, inside a warm period a room adjustment added, or while the room has a setpoint override |
 | `occasional` | inside a warm period on a day the room's use level is occasional |
 | `setback` | any other time: a room that is unused that day, overnight, between warm periods, and while its people are away |
-| none | the room has a hand-written schedule, or there is no household |
+| none | the room has a hand-written schedule without a use level (so every room, without a household or use levels) |
 
-Warm periods are the live schedule's (`CompiledHousehold.periods`), so heating ahead of a period by optimum start is preheating, not room use. A room with no room use behaves exactly as in 5.3. Snapshots recorded before room use existed have none, so they replay unchanged.
+Warm periods are the live schedule's (`CompiledHousehold.periods`, at the level in `CompiledHousehold.warm_levels`), so heating ahead of a period by optimum start is preheating, not room use. A room with no room use behaves exactly as in 5.3. Snapshots recorded before room use existed have none, so they replay unchanged.
+
+**Hand-written rooms.** A room on a hand-written schedule can give its use level in the house file with the household's words: `use: in_use`, `occasional` or `unused`, or `{weekdays: ..., weekend: ...}` (`rooms[].use`, `SiteConfig.schedule_use`). Its warm periods are the spans of its schedule's day where the setpoint is above that day's lowest setpoint, and room use then follows the table above: its level inside a warm period, `setback` outside them and all day on an unused day, `in_use` with an override. The weekend level applies on Saturday and Sunday, the days the schedule's own `weekend` key covers. A day with one setpoint throughout has no warm periods, so the room is `setback` all that day. Without the key, the room has no room use, as before. A hand-written room has no savings baseline (5.9), with or without the key. A room the household covers can't have the key.
 
 **Roles in `eco`:**
 
@@ -401,7 +403,7 @@ Radiate estimates the oil it saved against one stated baseline, from measured ro
 - Valve set to the room's temperature for that day's use level (its own `temperature` if it has one, its unused temperature on an unused day).
 - Timer off at any other time, so the baseline puts no heat in.
 
-The runtime passes it in the snapshot: `RoomInput.baseline_c` is the baseline setpoint now, or `None` while the baseline timer is off, and `Snapshot.baseline` is true when the house has a household. Without a household there is no baseline and no savings.
+The runtime passes it in the snapshot (built; `compile_baseline` in `radiate.config.use`): `RoomInput.baseline_c` is the baseline setpoint now, or `None` while the baseline timer is off, and `Snapshot.baseline` is true when the house has a household. Without a household there is no baseline and no savings. Rooms on hand-written schedules have no baseline.
 
 **Each tick**, per controllable room with a reading, while the outdoor reading is real (not the 5 °C default), with `dt` in hours, capped at 300 s, and the interval since the last tick belonging to the day it started in (as in the ledger):
 

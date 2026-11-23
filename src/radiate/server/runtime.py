@@ -36,13 +36,15 @@ from radiate.config.household import (
     CompiledHousehold,
     EveryoneAway,
     Household,
+    UseLevel,
     compile_household,
     household_view,
 )
+from radiate.config.use import Baseline, compile_baseline, room_use, schedule_room_use
 from radiate.core import Actions, EngineState, HouseConfig, Mode, Reason, Snapshot, decide
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.persist import dump_state, first_start_state, load_state
-from radiate.core.types import BoilerState, DemandMode, RoomRole
+from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.server import layout
 
 LOG = logging.getLogger(__name__)
@@ -142,9 +144,13 @@ class Runtime:
     ha_persons_at: float | None = None
     setup: object | None = None  # radiate.server.setup.HouseholdSetup; None: not offered
     layout: dict | None = None  # where rooms sit, for the web UI's model (server.layout)
+    # The use level of each room on a hand-written schedule that gives one, as
+    # (weekdays, weekend): `SiteConfig.schedule_use`. Household rooms ignore it.
+    schedule_use: dict[str, tuple[UseLevel, UseLevel]] = field(default_factory=dict)
     _compiled: dict[frozenset[str], CompiledHousehold] = field(default_factory=dict)
     _stale: frozenset[str] = frozenset()  # people whose presence has gone stale
     _rebuild: bool = False  # the household changed: push its weeks even if away did not
+    _baseline: Baseline | None = None  # the household's savings baseline, compiled once
     _return_logged: float | None = None
     _saved_at: float | None = None
     _away_log: list[Reason] = field(default_factory=list)  # for the exporter, next tick
@@ -516,6 +522,7 @@ class Runtime:
         """
         self.household = household
         self._compiled.clear()
+        self._baseline = None
         keep = set(self.people)
         self.presence = {pid: p for pid, p in self.presence.items() if pid in keep}
         self._stale = frozenset(pid for pid in self._stale if pid in keep)
@@ -736,6 +743,50 @@ class Runtime:
             inp.next_setpoint, inp.next_setpoint_in_s = due, in_s
             inp.preheat_max_s = horizon_s
 
+    def _apply_use(self, snap: Snapshot) -> None:
+        """Room use and the savings baseline for every household room, in house time.
+
+        A hand-written room with a use level (`schedule_use`) gets room use from the
+        week the driver follows for it, and no baseline. A room with a setpoint override
+        is IN_USE. Without a household: no baseline, and `snap.baseline` stays False.
+        Nothing in the core acts on either yet (spec 5.8, 5.9).
+        """
+        compiled = self._compile(self.away) if self.household is not None else None
+        if self.household is not None and self._baseline is None:
+            self._baseline = compile_baseline(self.household)
+        baseline = self._baseline if self.household is not None else None
+        snap.baseline = baseline is not None
+        if compiled is None and not self.schedule_use:
+            return
+        weekday, minute = self._weekday(), snap.minute_of_day
+        weeks: dict | None = None
+        for rc in self.cfg.rooms:
+            inp = snap.rooms.get(rc.id)
+            if not rc.controllable or inp is None:
+                continue
+            use: RoomUse | None = None
+            if compiled is not None and rc.id in compiled.periods:
+                use = room_use(compiled, rc.id, weekday, minute)
+                if baseline is not None:
+                    inp.baseline_c = baseline.setpoint_at(rc.id, weekday, minute)
+            elif rc.id in self.schedule_use:
+                if weeks is None:
+                    get = getattr(self.driver, "schedules", None)
+                    weeks = dict(get()) if callable(get) else {}
+                named = weeks.get(rc.id)
+                if named is not None:
+                    use = schedule_room_use(named[1], self.schedule_use[rc.id], weekday, minute)
+            if use is not None and rc.id in self.overrides:
+                use = RoomUse.IN_USE
+            inp.use = use
+
+    def _weekday(self) -> int:
+        """The house's local weekday, Monday = 0, as the driver reads its schedules."""
+        get = getattr(self.driver, "wall_weekday", None)
+        if callable(get):
+            return int(get())
+        return datetime.fromtimestamp(self._wall(), ZoneInfo(self.timezone)).weekday()
+
     async def step(self) -> Actions:
         now = self.driver.clock()
         self._expire_overrides(now)
@@ -744,6 +795,7 @@ class Runtime:
             self.effective_mode(), self.overrides, now < self.store_boost_until, self.fire
         )
         self._apply_return(snap)
+        self._apply_use(snap)
         # Always explicit, so the tick history records the mode each tick was decided in.
         snap.demand_mode = self.effective_demand_mode
         actions = decide(self.cfg, snap, self.state)

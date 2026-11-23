@@ -513,6 +513,29 @@ A top-level key, default `true`. Set `balancing: false` to open every heating va
 | `humidity` | `true` to use the sensor's humidity for shower detection. In an `unheated` room humidity is recorded by default; set `false` to leave it out |
 | `actuate` | `true` to let Radiate write to this room's TRV (`RoomConfig.actuation_enabled` in code). Without any `actuate` keys, only the pilot valve is actuated |
 | `trv_bias_k` | Offset from the TRV's internal reading to room temperature, default -1.5. Used in an `internal_sensor_only` room, and in a `normal` room while its sensor is stale |
+| `use` | Optional. How a room on a hand-written schedule is used: `in_use`, `occasional` or `unused`, or `{weekdays: ..., weekend: ...}` when it differs at weekends. The same words as `household.rooms.<id>.use`. See [Use level of a hand-written room](#use-level-of-a-hand-written-room). Not allowed in a `passive` or `unheated` room, or in a room the household covers |
+
+#### Use level of a hand-written room
+
+A household gives Radiate each room's use level. A room on a hand-written schedule can give it with `use`, in the same words, so Radiate knows how it is used too ([room use, spec 5.8](spec.md#58-room-use-in-demand)):
+
+```yaml
+rooms:
+  - {id: office, name: Office, trv: trv_office, sensor: temp_office, schedule: office, use: in_use}
+  - {id: lounge, name: Lounge, trv: trv_lounge, sensor: temp_lounge, schedule: lounge, use: unused}
+  - id: spare
+    name: Spare bedroom
+    trv: trv_spare
+    sensor: temp_spare
+    schedule: spare
+    use: {weekdays: unused, weekend: occasional}
+```
+
+The room's warm periods are the parts of each day where its schedule is above that day's lowest temperature. Inside them the room is in use or occasional, by its level; outside them, and all day when its level is `unused`, it is set back. With `daily: "00:00/14 06:30/19 08:00/16 21:30/19 23:00/14"`, a bedroom is warm from 06:30 to 23:00 and set back overnight. A day at one temperature all day has no warm periods, so give a used room a lower overnight temperature. `weekend` means Saturday and Sunday, as in `schedules`. A setpoint override counts as in use.
+
+Without `use` the room has no room use, as before. A room on a hand-written schedule has no savings baseline either way.
+
+Today Radiate only records room use, in each tick's snapshot. A later release uses it in `eco` to let set-back rooms wait longer before they start the boiler.
 
 #### Unheated rooms
 

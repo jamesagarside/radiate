@@ -96,8 +96,8 @@ When a person gets up, is out, works from home, and goes to bed, on weekdays or 
 Code: `Routine` (`up_min`, `bed_min`, `out`, `work`), config keys `household.people.<id>.weekdays` and `.weekend`.
 
 **Use level**:
-How much a room is used: in use, occasional or unused. Each level has one house-wide temperature, 19, 16 and 14 °C by default. A room's level can differ at weekends. With the warm periods, it gives the room use that `eco` will act on (planned, see room use).
-Code: `UseLevel`, `Temperatures`, config keys `household.rooms.<id>.use` and `household.temperatures`.
+How much a room is used: in use, occasional or unused. Each level has one house-wide temperature, 19, 16 and 14 °C by default. A room's level can differ at weekends. With the warm periods, it gives the room use that `eco` will act on (planned, see room use). A room on a hand-written schedule can give its level in the house file, in the same words.
+Code: `UseLevel`, `Temperatures`, `SiteConfig.schedule_use`, config keys `household.rooms.<id>.use`, `rooms[].use` and `household.temperatures`.
 
 **Night temperature**:
 The temperature every room in a household drops to overnight, from the last person going to bed until shortly before the first gets up. 14 °C by default. A room can set its own.
@@ -453,8 +453,8 @@ In the `eco` demand mode, the most a calling room waits below its target for oth
 Code: `BoilerConfig.eco_limit_k`, config key `boiler.eco_limit_k`.
 
 **Room use**:
-Planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.8](spec.md#58-room-use-in-demand)), not built. How a controllable room is used right now, worked out by the runtime from the household each tick: `in_use` (inside a warm period on a day its use level is in use, in a warm period a room adjustment added, or with an override), `occasional` (inside a warm period on an occasional day) or `setback` (any other time). None for a room with a hand-written schedule or no household, which keeps today's behaviour. In `eco` it decides the room's part in demand.
-Code: `RoomUse`, `RoomInput.use`, `room_use` in `radiate.config.use`, `Runtime._apply_use`, API `rooms[].use` in `state`.
+How a controllable room is used right now, worked out by the runtime each tick and recorded in the snapshot ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.8](spec.md#58-room-use-in-demand)): `in_use` (inside a warm period on a day its use level is in use, in a warm period a room adjustment added, or with an override), `occasional` (inside a warm period on an occasional day) or `setback` (any other time). From the household, or for a room on a hand-written schedule from its `use` key, where its warm periods are the spans above the day's lowest setpoint. None for a hand-written room without `use`, which keeps today's behaviour. Planned, not built: in `eco` it decides the room's part in demand.
+Code: `RoomUse`, `RoomInput.use`, `room_use`, `schedule_room_use` and `schedule_periods` in `radiate.config.use`, `CompiledHousehold.warm_levels`, `Runtime._apply_use`; planned API `rooms[].use` in `state`.
 _Avoid_: use level for this. The use level is the household's setting for a room and a day type; room use is what applies this minute.
 
 **Setback**:
@@ -594,7 +594,7 @@ Code: `radiate.core.savings` (`SavingsMeter`, `report`), API `GET /api/v1/saving
 _Avoid_: "up to" figures, and "savings" for a simulated or projected figure.
 
 **Savings baseline**:
-What savings are measured against: a heating timer on from the first person up to the last to bed every day, with each room's valve at its usual temperature for its use level. Compiled from the household with nobody away and no room adjustments. Shown on screen in one sentence.
+What savings are measured against: a heating timer on from the first person up to the last to bed every day, with each room's valve at its usual temperature for its use level. Compiled from the household with nobody away and no room adjustments, and passed in every snapshot (built). Rooms on hand-written schedules have none. Shown on screen in one sentence.
 Code: `compile_baseline` in `radiate.config.use`, `RoomInput.baseline_c`, `Snapshot.baseline`, API `baseline` in `GET /api/v1/savings`.
 
 **Degree-hours**:

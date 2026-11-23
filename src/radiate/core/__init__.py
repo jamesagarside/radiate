@@ -2,6 +2,7 @@
 
 from .decide import EngineState, decide
 from .types import (
+    DAMP_FLOOR_C,
     Actions,
     BoilerConfig,
     BoilerState,
@@ -13,12 +14,14 @@ from .types import (
     RoomConfig,
     RoomInput,
     RoomRole,
+    RoomUse,
     Snapshot,
     StoreConfig,
     ValveAction,
 )
 
 __all__ = [
+    "DAMP_FLOOR_C",
     "Actions",
     "BoilerConfig",
     "BoilerState",
@@ -31,6 +34,7 @@ __all__ = [
     "RoomConfig",
     "RoomInput",
     "RoomRole",
+    "RoomUse",
     "Snapshot",
     "StoreConfig",
     "ValveAction",
