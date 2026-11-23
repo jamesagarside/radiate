@@ -26,6 +26,8 @@ from .health import (
     ShortCycle,
     ValveCheck,
 )
+from .savings import MAX_TICK_S as SAVINGS_TICK_S
+from .savings import RoomSample, SavingsMeter
 from .types import (
     Actions,
     BoilerState,
@@ -143,6 +145,8 @@ class EngineState:
     # unobserved. Used once, on the next tick, by the boiler guard's hand-back.
     relay_unseen_s: float = 0.0
     pooled_demand_s: float = 0.0  # this tick's pooled demand (spec 5.3)
+    # Degree-hours, lift and comfort for the day so far (spec 5.9). Read-only for control.
+    savings: SavingsMeter = field(default_factory=SavingsMeter)
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -620,6 +624,16 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         minute=snap.minute_of_day,
         nozzle_lph=bcfg.nozzle_lph,
     )
+    # Savings (spec 5.9): the interval since the last tick belongs to the day it started
+    # in, as in the ledger, so the meter takes it before the day closes. Never feeds back.
+    st.savings.update(
+        min(dt, SAVINGS_TICK_S),
+        outdoor_c=snap.outdoor,
+        baseline=getattr(snap, "baseline", False),
+        rooms=_savings_samples(cfg, snap, st),
+    )
+    if day_summary is not None:
+        day_summary["savings"] = st.savings.close()
     if guard.state is not prev_state:
         reasons.append(
             _boiler_reason(
@@ -915,3 +929,25 @@ def _boiler_reason(
     if new is BoilerState.REST:
         return Reason("boiler.rest", "Rooms satisfied: burner off, minimum off time running")
     return Reason("boiler.idle", "Boiler idle")
+
+
+def _savings_samples(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> dict[str, RoomSample]:
+    """One savings sample per controllable room. `use` and `baseline_c` come from the
+    household through the snapshot (spec 5.8, 5.9); read with defaults so snapshots
+    without them, such as recorded history, give no baseline."""
+    out = {}
+    for rc in cfg.rooms:
+        if not rc.controllable:
+            continue
+        rs = st.rooms[rc.id]
+        inp = snap.rooms.get(rc.id, RoomInput())
+        out[rc.id] = RoomSample(
+            temperature_c=rs.temperature,
+            setpoint_c=inp.setpoint,
+            use=getattr(inp, "use", None),
+            baseline_c=getattr(inp, "baseline_c", None),
+            drive=rs.drive,
+            a_kph=rs.est.a,
+            b_per_h=rs.est.b,
+        )
+    return out
