@@ -111,8 +111,8 @@ HARD_FROST_TRV_K = 2.0
 # Gates that rely on the model's own residual. A sample they hold back still feeds change
 # detection, so a model that is wrong cannot lock itself (spec 4.3).
 RESIDUAL_GATES = frozenset({"unexplained_heat", "cooker_spike"})
-# With burner metering, the circuit counts as hot while the burner has fired within this
-# long: the boiler's own thermostat cycles the burner inside a call (spec 4.1).
+# With burner metering, a call for heat brings heat once the burner has fired in it, or
+# within this long before it began (the boiler is still hot) (spec 4.1).
 BURNER_HOT_S = 15 * 60
 
 
@@ -209,6 +209,7 @@ class EngineState:
     # Degree-hours, lift and comfort for the day so far (spec 5.9). Read-only for control.
     savings: SavingsMeter = field(default_factory=SavingsMeter)
     burner_at: float | None = None  # the heating burner was last seen firing (metered)
+    relay_on_since: float | None = None  # the heating relay has been on since
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -337,13 +338,21 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             and st.store_on_since is not None
             and now - st.store_on_since < cfg.store.recovery_s
         )
-    # Metered: the circuit is hot once the burner has fired, and stays hot through the
-    # boiler thermostat's short off periods. A relay on with the burner never firing
-    # (the boiler's own timer or thermostat holding it off) brings no heat (spec 4.1).
+    # Metered: the circuit is hot once the burner has fired in this call for heat (or
+    # shortly before it, so the boiler is still hot), and stays hot through the boiler
+    # thermostat's own off periods until the relay goes off. A call with the burner
+    # never firing, such as the boiler's own timer holding it off, brings no heat.
     if snap.heating_burner:
         st.burner_at = now
+    if snap.heating_relay:
+        if st.relay_on_since is None:
+            st.relay_on_since = now
+    else:
+        st.relay_on_since = None
     hot = snap.heating_burner is None or (
-        st.burner_at is not None and now - st.burner_at <= BURNER_HOT_S
+        st.burner_at is not None
+        and st.relay_on_since is not None
+        and st.burner_at >= st.relay_on_since - BURNER_HOT_S
     )
     relay_flow = snap.heating_relay and not recovering  # the boiler is called for heat
     flowing = relay_flow and hot  # heat availability: the radiators get hot water

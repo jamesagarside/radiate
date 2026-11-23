@@ -55,10 +55,11 @@ CHANGE_LEVEL_WINDOW = 1440  # updates: about a day of learning
 CHANGE_LEVEL_SHARE = 0.5  # mean residual, as a share of its root mean square
 CHANGE_WARMUP = 2 * UPDATES_PER_DAY  # updates from priors before the first check
 # A model whose gain is already this certain has stopped moving on its own, so it is
-# judged before the warm-up ends: on the gain only, and only when it is grossly wrong
-# (a bias of this share of the gain). A model still settling is often a third out.
+# judged before the warm-up ends: on the gain only, and only when it is grossly wrong,
+# with a bias of twice the gain (the room warms at least three times as fast as the
+# model says). A model still settling from its priors is often out by its whole gain.
 CHANGE_CONFIDENT = 0.8
-CHANGE_GAIN_SHARE_EARLY = 1.0
+CHANGE_GAIN_SHARE_EARLY = 2.0
 RELEARN_INFLATION = 0.3  # covariance added on a change, as a share of the prior's
 # After a re-learn, the gates that rely on the model's residual stand down for this many
 # heating updates (drive at least DOUBT_MIN_DRIVE): about an hour of heating.

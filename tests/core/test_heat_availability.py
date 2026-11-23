@@ -88,11 +88,25 @@ def test_boiler_thermostat_cycling_keeps_heat_available():
     st = EngineState.new(CFG)
     run(st, 30, steady, heating_burner=True)
     before = st.rooms["bed"].drive
-    run(st, 8, steady, start=30, heating_burner=False)
+    run(st, 25, steady, start=30, heating_burner=False)
     assert st.rooms["bed"].drive >= before
-    # Off for longer than the circuit stays hot: availability ends.
-    run(st, 30, steady, start=38, heating_burner=False)
-    assert st.rooms["bed"].drive < before
+    # The call ends: availability ends with it.
+    run(st, 30, steady, start=55, relay=False, heating_burner=False)
+    assert st.rooms["bed"].drive < 0.2 * before  # the radiator cools, tau 15 min
+
+
+def test_a_call_soon_after_a_burn_starts_hot():
+    # The burner fired 10 min before the relay came back on: the boiler is still hot,
+    # so heat is available before the burner fires again.
+    st = EngineState.new(CFG)
+    run(st, 20, steady, heating_burner=True)
+    run(st, 10, steady, start=20, relay=False, heating_burner=False)
+    run(st, 30, steady, start=30, heating_burner=False)
+    assert st.rooms["bed"].drive > 0.1
+    # Long after the last burn, a call whose burner never fires brings no heat.
+    run(st, 60, steady, start=60, relay=False, heating_burner=False)
+    run(st, 30, steady, start=120, heating_burner=False)
+    assert st.rooms["bed"].drive < 0.01
 
 
 def warming(m):
