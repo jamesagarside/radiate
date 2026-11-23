@@ -30,6 +30,7 @@ from .savings import MAX_TICK_S as SAVINGS_TICK_S
 from .savings import RoomSample, SavingsMeter
 from .types import (
     Actions,
+    BoilerConfig,
     BoilerState,
     DemandMode,
     HeatSource,
@@ -39,6 +40,7 @@ from .types import (
     RoomConfig,
     RoomInput,
     RoomRole,
+    RoomUse,
     Snapshot,
     ValveAction,
 )
@@ -70,6 +72,9 @@ LOCKSHIELD_DECAY = 0.9995  # per firing sample: half-life of about 23 hours of f
 REJECTED_HOLD_S = 3600.0  # learning stays paused this long after a TRV rejected a setting
 POOL_BURNS = 1.5  # demand worth a burn: this many minimum burns (spec 5.3)
 ECO_LEAD_HOLD = 0.75  # share of that pooled demand that keeps a valve lead going
+SOLO_EXTRA_K = 1.0  # occasional and setback rooms wait this much longer than the eco limit
+# Heat sink order by room use (spec 5.8): rooms in use first, setback rooms last resort.
+_SINK_RANK = {None: 0, RoomUse.IN_USE: 0, RoomUse.OCCASIONAL: 1, RoomUse.SETBACK: 2}
 # Disturbances that can warm a TRV with its valve shut, so the leak check looks away.
 # Not `unexplained_heat`: the check compares the TRV with the room, which sun or guests
 # warm together, and a strong leak itself raises `unexplained_heat`.
@@ -145,6 +150,11 @@ class RoomState:
     sensor_last: float | None = None
     sensor_changed_at: float | None = None
     trv_range: tuple[float, float] | None = None
+    use: RoomUse | None = None  # this tick's room use, from the snapshot (spec 5.8)
+    # Solo latch (spec 5.8): in eco, the room passed its solo threshold while calling, so
+    # it may start a burn alone and keep it running; cleared when it stops calling. A
+    # room without room use has no latch: this is just "below its threshold now".
+    solo: bool = False
 
     @property
     def arrival_lag_s(self) -> float:
@@ -230,6 +240,19 @@ def _target(cfg: HouseConfig, snap: Snapshot, inp: RoomInput) -> float:
     return cfg.boiler.frost_c
 
 
+def solo_threshold_c(target: float, use: RoomUse | None, bcfg: BoilerConfig) -> float:
+    """Eco: below this a calling room starts a burn on its own (spec 5.8).
+
+    No room use: target - eco limit, as before. Otherwise
+    max(target - limit, min(target, damp_floor_c)), where the limit is the eco limit,
+    plus SOLO_EXTRA_K for OCCASIONAL and SETBACK.
+    """
+    if use is None:
+        return target - bcfg.eco_limit_k
+    limit = bcfg.eco_limit_k + (0.0 if use is RoomUse.IN_USE else SOLO_EXTRA_K)
+    return max(target - limit, min(target, bcfg.damp_floor_c))
+
+
 def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     now = snap.now
     dt = 60.0 if st.last_now is None else max(1.0, now - st.last_now)
@@ -237,6 +260,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     reasons: list[Reason] = []
     alerts: list[Reason] = []
     bcfg = cfg.boiler
+    demand_mode = snap.demand_mode or bcfg.demand_mode
+    eco = demand_mode is DemandMode.ECO
 
     # Hot-water store and heat availability at the radiators.
     if snap.store_relay:
@@ -292,6 +317,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         if rc.id in implausible:
             # Treated as missing (spec 7): the TRV fallback, no external input.
             inp = dataclasses.replace(inp, temperature=None, sensor_missing_s=None)
+        rs.use = inp.use
         any_trv = any_trv or inp.trv_available
         # Valve trusted (spec 4.6): a setting the TRV would not take pauses learning
         # while it lasts and for an hour after.
@@ -619,29 +645,32 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     )
     preheat = any(st.rooms[rc.id].preheating for rc in calling)
     predicted_burn_s = alloc.t_star_h * 3600 if calling else 0.0
-    st.pooled_demand_s = _pooled_demand_s(st, calling)
-    demand_mode = snap.demand_mode or bcfg.demand_mode
+    _update_solo(cfg, st, eco, reasons)
+    st.pooled_demand_s = _pooled_demand_s(st, calling, eco)
     worth_a_burn = POOL_BURNS * bcfg.min_burn_s
-    if demand_mode is DemandMode.COMFORT:
+    if not eco:
         # Any calling room past the comfort limit, or a long enough predicted burn.
         demand = max_gap > bcfg.comfort_limit_k or predicted_burn_s >= worth_a_burn
     else:
         # Eco: rooms fire the boiler together. A room on its own waits until it is
-        # past the wider eco limit, or until other rooms join it. Once the valves are
-        # opening, a reading 0.1 K higher does not call the start off.
+        # past its solo threshold (spec 5.8), or until other rooms join it. Once the
+        # valves are opening, a reading 0.1 K higher does not call the start off.
         pooled = worth_a_burn * (ECO_LEAD_HOLD if guard.state is BoilerState.LEAD else 1.0)
-        demand = st.pooled_demand_s >= pooled or max_gap > bcfg.eco_limit_k
+        demand = st.pooled_demand_s >= pooled or any(st.rooms[rc.id].solo for rc in calling)
     want_fire = heating_allowed and bool(calling) and (demand or frost or preheat)
     if hard_frost:
         want_fire = True
-    if (
-        not want_fire
-        and calling
-        and heating_allowed
-        and demand_mode is DemandMode.ECO
-        and guard.state is BoilerState.IDLE
-    ):
+    if not want_fire and calling and heating_allowed and eco and guard.state is BoilerState.IDLE:
         for rc in calling:
+            if st.rooms[rc.id].use is RoomUse.SETBACK:
+                reasons.append(
+                    Reason(
+                        "demand.setback",
+                        f"{rc.name}: not in use now, takes heat only when the boiler is already on",
+                        rc.id,
+                    )
+                )
+                continue
             reasons.append(
                 Reason(
                     "demand.pooled",
@@ -658,6 +687,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             horizon_h = (bcfg.min_off_s + 15 * 60) / 3600
             for rc in _topup_candidates(cfg, snap, st):
                 rs = st.rooms[rc.id]
+                if eco and rs.use is RoomUse.SETBACK:
+                    continue  # burn extension tops up rooms in use only (spec 5.8)
                 drop = max(0.0, (rs.est.b * (rs.temperature - out) - rs.est.d) * horizon_h)
                 if rs.temperature - drop < rs.target - cfg.hysteresis_k:
                     rs.topup = rs.extend = True
@@ -678,7 +709,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             or any(st.rooms[r].extend for r in st.rooms)
             or guard.burn_elapsed(now) < bcfg.min_burn_s
         ):
-            _ensure_sink(cfg, snap, st, reasons)
+            _ensure_sink(cfg, snap, st, reasons, eco)
 
     active = [
         rc
@@ -693,7 +724,12 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     )
 
     # Heat-sink rooms never keep the burner on; only real calls and burn extensions do.
-    keeping = [rc for rc in active if st.rooms[rc.id].calling or st.rooms[rc.id].extend]
+    # In eco a setback room keeps only a burn it needs itself (spec 5.8).
+    keeping = [
+        rc
+        for rc in active
+        if (st.rooms[rc.id].calling and _keeps_burn(st.rooms[rc.id], eco)) or st.rooms[rc.id].extend
+    ]
     want_stop = not keeping or not heating_allowed
     force_stop = not any_trv
     if force_stop:
@@ -839,13 +875,56 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     )
 
 
-def _pooled_demand_s(st: EngineState, calling: list[RoomConfig]) -> float:
+def _update_solo(cfg: HouseConfig, st: EngineState, eco: bool, reasons: list[Reason]) -> None:
+    """Each calling room's solo latch (spec 5.8). Eco only; cleared when not calling.
+
+    A room with room use latches when it passes its solo threshold and keeps the latch
+    until it stops calling. A room without room use has no latch: it is solo while it
+    is below its threshold, the eco limit of spec 5.3.
+    """
+    bcfg = cfg.boiler
+    for rc in cfg.rooms:
+        rs = st.rooms.get(rc.id)
+        if rs is None:
+            continue
+        if not eco or not rs.calling or rs.temperature is None:
+            rs.solo = False
+            continue
+        below = rs.temperature < solo_threshold_c(rs.target, rs.use, bcfg)
+        if rs.use is None:
+            rs.solo = below
+        elif below and not rs.solo:
+            rs.solo = True
+            if rs.use is RoomUse.SETBACK:
+                reasons.append(
+                    Reason(
+                        "demand.floor",
+                        f"{rc.name}: down to {rs.temperature:.1f} °C, "
+                        f"heating to {rs.target:.1f} °C",
+                        rc.id,
+                        values={"temperature_c": rs.temperature, "target_c": rs.target},
+                    )
+                )
+
+
+def _keeps_burn(rs: RoomState, eco: bool) -> bool:
+    """Can this calling room keep the burner on? In eco a setback room keeps only a
+    burn it needs itself: past its solo threshold, or heating ahead of its warm period."""
+    if not eco or rs.use is not RoomUse.SETBACK:
+        return True
+    return rs.solo or rs.preheating
+
+
+def _pooled_demand_s(st: EngineState, calling: list[RoomConfig], eco: bool = False) -> float:
     """Pooled demand (spec 5.3): the full radiator output the calling rooms need
     between them, as seconds, each room's gap divided by its heating gain. A room that
-    warms quickly needs little of the burner per kelvin, so it counts for less."""
+    warms quickly needs little of the burner per kelvin, so it counts for less. In eco
+    a setback room does not count (spec 5.8)."""
     total_h = 0.0
     for rc in calling:
         rs = st.rooms[rc.id]
+        if eco and rs.use is RoomUse.SETBACK:
+            continue
         if rs.temperature is not None:
             total_h += max(0.0, rs.target - rs.temperature) / max(rs.est.a, 1e-6)
     return total_h * 3600
@@ -1020,7 +1099,9 @@ def _topup_target(target: float, temp: float | None) -> float:
     return max(target + TOPUP_K, min(t + 0.5, target + 1.0))
 
 
-def _topup_candidates(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> list[RoomConfig]:
+def _topup_candidates(
+    cfg: HouseConfig, snap: Snapshot, st: EngineState, by_use: bool = False
+) -> list[RoomConfig]:
     out = []
     for rc in cfg.rooms:
         if not rc.controllable:
@@ -1036,13 +1117,22 @@ def _topup_candidates(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> list
         ):
             continue
         out.append(rc)
-    # Coldest relative to setpoint first.
-    out.sort(key=lambda rc: st.rooms[rc.id].temperature - st.rooms[rc.id].target)
+
+    # Coldest relative to setpoint first; with `by_use`, rooms in use first (spec 5.8).
+    # Without room use every rank is 0, so the order is the same as without `by_use`.
+    def key(rc: RoomConfig) -> tuple[int, float]:
+        rs = st.rooms[rc.id]
+        return (_SINK_RANK[rs.use] if by_use else 0, rs.temperature - rs.target)
+
+    out.sort(key=key)
     return out
 
 
-def _ensure_sink(cfg: HouseConfig, snap: Snapshot, st: EngineState, reasons: list[Reason]) -> None:
-    """Open-path guarantee (spec 5.4): enough open radiators for the burner's heat."""
+def _ensure_sink(
+    cfg: HouseConfig, snap: Snapshot, st: EngineState, reasons: list[Reason], eco: bool = False
+) -> None:
+    """Open-path guarantee (spec 5.4): enough open radiators for the burner's heat.
+    In eco, rooms in use first, then occasional, then setback (spec 5.8)."""
 
     def sink() -> float:
         total = cfg.bypass_equivalent
@@ -1055,7 +1145,7 @@ def _ensure_sink(cfg: HouseConfig, snap: Snapshot, st: EngineState, reasons: lis
 
     if sink() >= cfg.sink_min:
         return
-    for rc in _topup_candidates(cfg, snap, st):
+    for rc in _topup_candidates(cfg, snap, st, by_use=eco):
         rs = st.rooms[rc.id]
         rs.topup = True
         rs.topup_base = rs.temperature

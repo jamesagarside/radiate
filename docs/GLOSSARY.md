@@ -96,7 +96,7 @@ When a person gets up, is out, works from home, and goes to bed, on weekdays or 
 Code: `Routine` (`up_min`, `bed_min`, `out`, `work`), config keys `household.people.<id>.weekdays` and `.weekend`.
 
 **Use level**:
-How much a room is used: in use, occasional or unused. Each level has one house-wide temperature, 19, 16 and 14 °C by default. A room's level can differ at weekends. With the warm periods, it gives the room use that `eco` will act on (planned, see room use). A room on a hand-written schedule can give its level in the house file, in the same words.
+How much a room is used: in use, occasional or unused. Each level has one house-wide temperature, 19, 16 and 14 °C by default. A room's level can differ at weekends. With the warm periods, it gives the room use that `eco` acts on (see room use). A room on a hand-written schedule can give its level in the house file, in the same words.
 Code: `UseLevel`, `Temperatures`, `SiteConfig.schedule_use`, config keys `household.rooms.<id>.use`, `rooms[].use` and `household.temperatures`.
 
 **Night temperature**:
@@ -447,7 +447,7 @@ Code: `want_fire` in `decide`.
 **Demand mode**:
 How calling rooms fire the boiler. Set by `boiler.demand_mode` and changeable at runtime through the API. Two values:
 
-- `eco` (default): rooms fire the boiler together. The pooled demand must reach 1.5 minimum burns, or one room must be more than the eco limit below its target. A small room on its own waits until it is colder or other rooms join it. Planned: room use will set each room's part (solo limit, pooled demand, keeping the burner on, top-ups).
+- `eco` (default): rooms fire the boiler together. The pooled demand must reach 1.5 minimum burns, or one room must be more than the eco limit below its target. A small room on its own waits until it is colder or other rooms join it. Room use sets each room's part (solo limit, pooled demand, keeping the burner on, top-ups, heat sinks; spec 5.8).
 - `comfort`: any calling room more than the comfort limit below its target fires the boiler, as does a predicted burn of 1.5 minimum burns.
 
 Code: `DemandMode`, `BoilerConfig.demand_mode`, `Snapshot.demand_mode`, `Runtime.demand_mode`, API `POST /api/v1/settings`, `settings.demand_mode` in `state`.
@@ -466,25 +466,25 @@ In the `eco` demand mode, the most a calling room waits below its target for oth
 Code: `BoilerConfig.eco_limit_k`, config key `boiler.eco_limit_k`.
 
 **Room use**:
-How a controllable room is used right now, worked out by the runtime each tick and recorded in the snapshot ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.8](spec.md#58-room-use-in-demand)): `in_use` (inside a warm period on a day its use level is in use, in a warm period a room adjustment added, or with an override), `occasional` (inside a warm period on an occasional day) or `setback` (any other time). From the household, or for a room on a hand-written schedule from its `use` key, where its warm periods are the spans above the day's lowest setpoint. None for a hand-written room without `use`, which keeps today's behaviour. Planned, not built: in `eco` it decides the room's part in demand.
+How a controllable room is used right now, worked out by the runtime each tick and recorded in the snapshot ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.8](spec.md#58-room-use-in-demand)): `in_use` (inside a warm period on a day its use level is in use, in a warm period a room adjustment added, or with an override), `occasional` (inside a warm period on an occasional day) or `setback` (any other time). From the household, or for a room on a hand-written schedule from its `use` key, where its warm periods are the spans above the day's lowest setpoint. None for a hand-written room without `use`, which keeps the rules of spec 5.3. In `eco` it decides the room's part in demand; `comfort` ignores it. API `rooms[].use`.
 Code: `RoomUse`, `RoomInput.use`, `room_use`, `schedule_room_use` and `schedule_periods` in `radiate.config.use`, `CompiledHousehold.warm_levels`, `Runtime._apply_use`; planned API `rooms[].use` in `state`.
 _Avoid_: use level for this. The use level is the household's setting for a room and a day type; room use is what applies this minute.
 
 **Setback**:
-Planned, not built. The room use of a room outside its warm periods: unused that day, overnight, between warm periods, or with its people away. A setback room never counts towards pooled demand, never takes a burn extension, is the last choice for a heat sink, and starts a burn on its own only at its solo threshold.
+The room use of a room outside its warm periods: unused that day, overnight, between warm periods, or with its people away. A setback room never counts towards pooled demand, never takes a burn extension, is the last choice for a heat sink, and starts a burn on its own only at its solo threshold.
 Code: `RoomUse.SETBACK`, reason `demand.setback`.
 _Avoid_: unused for this, which is a use level.
 
 **Solo limit, solo threshold**:
-Planned, not built. In `eco`, how far below its target a calling room waits before it starts a burn on its own: the eco limit for a room in use (or with no room use), the eco limit plus 1 K for an occasional or setback room. The solo threshold is the temperature that gives; for a room with room use it is never below the damp floor, or the room's own target if lower: `max(target − limit, min(target, damp_floor_c))`.
+In `eco`, how far below its target a calling room waits before it starts a burn on its own: the eco limit for a room in use (or with no room use), the eco limit plus 1 K for an occasional or setback room. The solo threshold is the temperature that gives; for a room with room use it is never below the damp floor, or the room's own target if lower: `max(target − limit, min(target, damp_floor_c))`.
 Code: `solo_threshold_c` and `SOLO_EXTRA_K` in `radiate.core.decide`.
 
 **Solo latch**:
-Planned, not built. Set when a calling room passes its solo threshold and so may start a burn alone; cleared when it stops calling. A setback room keeps the burner running only while its solo latch is set.
+Set when a calling room with room use passes its solo threshold and so may start a burn alone; cleared when it stops calling. A setback room keeps the burner running only while its solo latch is set (or while it is preheating). A room without room use has no latch: it is solo only while below its threshold, as in spec 5.3.
 Code: `RoomState.solo`, API `rooms[].solo`, reason `demand.floor`.
 
 **Damp floor**:
-Planned as a control limit, not built. The temperature no saving rule lets a room wait below: 12 °C, the level below which walls and window frames can get damp. Today it is only a warning in the household setup. Frost protection sits below it and is unchanged.
+The temperature no saving rule lets a room wait below: 12 °C, the level below which walls and window frames can get damp. In `eco` a room with room use starts a burn on its own at the latest when it falls below it (or below its own target, if lower); the household setup also warns about temperatures below it. Frost protection sits below it and is unchanged.
 °C. Code: `DAMP_FLOOR_C` and `BoilerConfig.damp_floor_c` in `radiate.core.types`; `DAMP_BELOW_C` in `radiate.config.household` takes its value from it.
 
 **Predicted burn**:

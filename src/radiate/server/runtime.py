@@ -1283,6 +1283,11 @@ class Runtime:
                     # without it is a heat sink, opened only so the heat has somewhere to go.
                     extend=rs.extend,
                     preheating=rs.preheating,
+                    # Room use this tick (spec 5.8): `in_use`, `occasional`, `setback`
+                    # or null. `solo`: in eco, passed its solo threshold, so it may start
+                    # and keep a burn on its own.
+                    use=rs.use.value if rs.use is not None else None,
+                    solo=rs.solo,
                     fire=rs.dist.fire,
                     learning=rs.learning_gate,
                     model={
