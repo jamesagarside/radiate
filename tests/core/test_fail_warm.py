@@ -198,3 +198,96 @@ def test_a_sensor_silent_since_start_waits_before_the_trv_fallback():
     # Past the stale limit with still nothing: the TRV reading, as for a stale sensor.
     run(st, 5, 2, {**WARM, "bed": 18.0}, missing(20))
     assert st.rooms["bed"].temperature == 18.5 - 1.5
+
+
+# --- E: room sensor plausibility --------------------------------------------------------
+
+
+def _bed_sensor(value: float) -> Callable[[Snapshot], None]:
+    def edit(s: Snapshot) -> None:
+        s.rooms["bed"].temperature = value
+        s.rooms["bed"].trv_temperature = 19.5
+
+    return edit
+
+
+def test_a_reading_out_of_range_is_ignored_with_an_alert():
+    for value in (-3.0, 45.0):
+        st = EngineState.new(CFG)
+        acts, _ = run(st, 0, 3, WARM, _bed_sensor(value))
+        # Treated as missing: the TRV reading plus its bias, as for a stale sensor.
+        assert st.rooms["bed"].temperature == 19.5 - 1.5
+        assert "sensor.implausible" in codes(acts[-1], "bed")
+        assert acts[-1].valves["bed"].external_temperature is None  # not sent to the TRV
+
+
+def _frozen_bed(trv_swing: float) -> Callable[[Snapshot], None]:
+    def edit(s: Snapshot) -> None:
+        odd = (s.now // 1800) % 2
+        s.rooms["bed"].temperature = 19.0
+        s.rooms["bed"].trv_temperature = 19.5 + (trv_swing if odd else 0.0)
+        s.rooms["lounge"].temperature = 20.4 if odd else 20.6
+
+    return edit
+
+
+def test_a_sensor_frozen_while_its_radiator_and_others_move_is_ignored():
+    st = EngineState.new(CFG)
+    acts, _ = run(st, 0, 11 * 60, WARM, _frozen_bed(3.0))
+    assert "sensor.implausible" not in codes(acts[-1])
+    acts, _ = run(st, 11 * 60, 90, WARM, _frozen_bed(3.0))
+    assert "sensor.implausible" in codes(acts[-1], "bed")
+    assert st.rooms["bed"].temperature in (19.5 - 1.5, 22.5 - 1.5)  # the TRV, less bias
+    # It moves again: trusted again.
+    acts, _ = run(st, 12 * 60 + 30, 2, WARM, _bed_sensor(19.1))
+    assert "sensor.implausible" not in codes(acts[-1])
+    assert st.rooms["bed"].temperature == 19.1
+
+
+def test_a_steady_room_is_not_frozen():
+    # Nothing in the house moves, or only the other rooms do: a room at its equilibrium
+    # (a seized valve, say) reads steady by its TRV too.
+    st = EngineState.new(CFG)
+    acts, _ = run(st, 0, 13 * 60, WARM)
+    assert "sensor.implausible" not in codes(acts[-1])
+    st = EngineState.new(CFG)
+    acts, _ = run(st, 0, 13 * 60, WARM, _frozen_bed(0.5))
+    assert "sensor.implausible" not in codes(acts[-1])
+
+
+def test_hard_frost_from_one_sensor_needs_a_second_source():
+    # A sensor stuck at 3 °C with its TRV reading 19.5 °C: frost protection still
+    # heats the room, but the hard frost rule (no minimum off) needs agreement.
+    st = EngineState.new(CFG)
+    acts, _ = run(st, 0, 3, WARM, _bed_sensor(3.0))
+    assert "sensor.frost_unconfirmed" in codes(acts[-1], "bed")
+    assert st.rooms["bed"].temperature == 3.0 and st.rooms["bed"].calling
+
+
+def test_hard_frost_confirmed_by_the_trv_or_another_room():
+    st = EngineState.new(CFG)
+
+    def trv_agrees(s: Snapshot) -> None:
+        s.rooms["bed"].temperature = 3.0
+        s.rooms["bed"].trv_temperature = 5.5
+
+    acts, _ = run(st, 0, 3, WARM, trv_agrees)
+    assert "sensor.frost_unconfirmed" not in codes(acts[-1])
+
+    st = EngineState.new(CFG)
+    acts, _ = run(st, 0, 3, {**WARM, "lounge": 6.5}, _bed_sensor(3.0))
+    assert "sensor.frost_unconfirmed" not in codes(acts[-1])
+
+
+def test_unconfirmed_hard_frost_keeps_minimum_off():
+    # Hard frost skips minimum off; an unconfirmed one must not.
+    from radiate.core.types import BoilerState
+
+    st = EngineState.new(CFG)
+    acts, relay = run(st, 0, 30, WARM, _bed_sensor(3.0))
+    assert acts[-1].heating_relay
+    # The room warms past its target: the burn ends and minimum off starts.
+    acts, relay = run(st, 30, 2, {**WARM, "bed": 21.0}, relay=relay)
+    assert acts[-1].boiler_state is BoilerState.REST
+    acts, relay = run(st, 32, 3, WARM, _bed_sensor(3.0), relay)
+    assert acts[-1].boiler_state is BoilerState.REST and not acts[-1].heating_relay

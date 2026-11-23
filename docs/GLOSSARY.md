@@ -583,6 +583,10 @@ Code: `BoilerConfig.frost_c`, `BoilerConfig.hard_frost_c`.
 The boiler start forced by a room below the frost threshold.
 Code: `frost`, `hard_frost` in `decide`.
 
+**Implausible reading**:
+A room sensor reading Radiate treats as missing: below 0 °C or above 40 °C, or unchanged for 12 hours (2 below frost) while the room's TRV reading moved by 2 K and other rooms changed. The room falls back to its TRV, as for a stale sensor. Hard frost from a room sensor also needs its TRV or another room to agree.
+Code: `_implausible_sensors`, `SENSOR_MIN_C`, `SENSOR_MAX_C`, `SENSOR_FROZEN_S`, `HARD_FROST_TRV_K`, alerts `sensor.implausible` and `sensor.frost_unconfirmed`.
+
 **Mode**:
 The house-wide heating mode: `auto` (follow schedules), `frost` (hold every room at the frost threshold), or `off` (no heating, frost protection still active). The mode a person chose is `Runtime.mode`; while everyone is away, the core runs in the effective mode, `frost` in place of `auto`.
 Code: `Mode`, `Runtime.mode`, `Runtime.effective_mode`, API `POST /api/v1/mode`, HA service `radiate.set_mode`, HA select `mode` (shows the mode the person chose).

@@ -86,6 +86,19 @@ TRV_NUDGE_MAX_K = 3.0  # the TRV setpoint stays at or below target + this
 # counting until the TRV is back.
 OFFLINE_FLOW_S = 60 * 60
 OFFLINE_RISE_K = 0.3
+# Room sensor plausibility (spec 7, fail warm): a reading outside this range indoors, or
+# one that has not changed for this long while the room's own TRV reading moved by
+# SENSOR_FROZEN_TRV_K (its radiator heated) and other rooms' sensors changed, is treated
+# as missing. Below frost, a stuck reading is caught sooner. A room that is simply
+# steady, such as one at its equilibrium with a seized valve, is not: its TRV is steady.
+SENSOR_MIN_C = 0.0
+SENSOR_MAX_C = 40.0
+SENSOR_FROZEN_S = 12 * 3600
+SENSOR_FROZEN_COLD_S = 2 * 3600
+SENSOR_FROZEN_TRV_K = 2.0
+# Hard frost from a room sensor needs a second source: its TRV this close (it sits by
+# the radiator, so reads warmer), or another room below the frost threshold.
+HARD_FROST_TRV_K = 2.0
 
 
 @dataclass(slots=True)
@@ -127,6 +140,11 @@ class RoomState:
     # and whether the room failed to warm, which leaves it out until the TRV is back.
     offline_call: tuple[float, float] | None = None
     offline_stalled: bool = False
+    # Room sensor plausibility: its last value, when it last changed, and the range of
+    # the TRV's reading since.
+    sensor_last: float | None = None
+    sensor_changed_at: float | None = None
+    trv_range: tuple[float, float] | None = None
 
     @property
     def arrival_lag_s(self) -> float:
@@ -250,6 +268,10 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     any_open = False  # some TRV is open and asking for heat
     below: dict[str, bool] = {}  # rooms short of their setpoint by the comfort limit
 
+    implausible = _implausible_sensors(cfg, snap, st, alerts)
+    frost_rooms: set[str] = set()
+    unconfirmed: list[RoomConfig] = []  # hard frost from one sensor, not yet confirmed
+
     # --- 1-4: per-room sensing, disturbances, learning, demand -------------------------
     for rc in cfg.rooms:
         if not rc.controllable:
@@ -267,6 +289,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             continue
         rs = st.rooms[rc.id]
         inp = snap.rooms.get(rc.id, RoomInput())
+        if rc.id in implausible:
+            # Treated as missing (spec 7): the TRV fallback, no external input.
+            inp = dataclasses.replace(inp, temperature=None, sensor_missing_s=None)
         any_trv = any_trv or inp.trv_available
         # Valve trusted (spec 4.6): a setting the TRV would not take pauses learning
         # while it lasts and for an hour after.
@@ -309,8 +334,19 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 rs.readings = [p for p in rs.readings if now - p[0] <= SLOPE_WINDOW_S]
             if temp < bcfg.frost_c:
                 frost = True
+                frost_rooms.add(rc.id)
             if temp < bcfg.hard_frost_c:
-                hard_frost = True
+                # A room sensor alone can be stuck low: hard frost (no minimum off) needs
+                # its TRV to agree, or another room below frost (checked after the loop).
+                trv_low = (
+                    inp.trv_temperature is not None
+                    and inp.trv_age_s <= TRV_STALE_S
+                    and inp.trv_temperature < bcfg.hard_frost_c + HARD_FROST_TRV_K
+                )
+                if _room_sensor_fresh(rc, inp) and not trv_low:
+                    unconfirmed.append(rc)
+                else:
+                    hard_frost = True
         rs.slope = local_slope(rs.readings) if temp is not None and not restored else None
         if inp.trv_available and inp.trv_temperature is not None and inp.trv_age_s <= TRV_STALE_S:
             # Radiator warmth seen by the TRV: its reading above the room's, if known.
@@ -509,6 +545,20 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 rs.calling = False
             if rs.topup and temp >= _topup_target(target, rs.topup_base or temp):
                 rs.topup = rs.extend = False
+
+    if unconfirmed and not hard_frost:
+        if any(frost_rooms - {rc.id} for rc in unconfirmed):
+            hard_frost = True
+        else:
+            for rc in unconfirmed:
+                alerts.append(
+                    Reason(
+                        "sensor.frost_unconfirmed",
+                        f"{rc.name}: room sensor reads below {bcfg.hard_frost_c:.0f} °C "
+                        "but nothing else agrees: frost protection only, no hard frost",
+                        rc.id,
+                    )
+                )
 
     # Out of oil or burner lockout (spec 7): alert, keep calling, stop learning.
     st.no_heat.update(
@@ -720,6 +770,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             continue
         rs = st.rooms[rc.id]
         inp = snap.rooms.get(rc.id, RoomInput())
+        if rc.id in implausible:
+            inp = dataclasses.replace(inp, temperature=None, sensor_missing_s=None)
         target = rs.target
         want_heat = rs.calling or rs.topup
         if rs.dist.fire:
@@ -849,6 +901,68 @@ def _trv_setpoint(
         # TRV's own hysteresis band, where the TRV would stay shut. Clear the band.
         setpoint = max(setpoint, _trv_step(reading + SINK_LEAD_K, up=True))
     return setpoint
+
+
+def _implausible_sensors(
+    cfg: HouseConfig, snap: Snapshot, st: EngineState, alerts: list[Reason]
+) -> set[str]:
+    """Normal rooms whose room sensor reading is not plausible (spec 7, fail warm).
+
+    Out of the indoor range, or unchanged for `SENSOR_FROZEN_S` (`SENSOR_FROZEN_COLD_S`
+    below frost) while the room's own TRV reading moved by `SENSOR_FROZEN_TRV_K` and at
+    least half of the other rooms' sensors changed. The reading is treated as missing,
+    so the room falls back to its TRV.
+    """
+    now = snap.now
+    fresh: dict[str, float] = {}
+    for rc in cfg.rooms:
+        if not rc.controllable:
+            continue
+        inp = snap.rooms.get(rc.id, RoomInput())
+        if not _room_sensor_fresh(rc, inp):
+            continue
+        rs = st.rooms[rc.id]
+        if rs.sensor_last != inp.temperature or rs.sensor_changed_at is None:
+            rs.sensor_last, rs.sensor_changed_at, rs.trv_range = inp.temperature, now, None
+        trv = inp.trv_temperature
+        if trv is not None and inp.trv_age_s <= TRV_STALE_S:
+            lo, hi = rs.trv_range or (trv, trv)
+            rs.trv_range = (min(lo, trv), max(hi, trv))
+        fresh[rc.id] = inp.temperature
+    out: set[str] = set()
+    for rid, value in fresh.items():
+        rc = cfg.room(rid)
+        if not SENSOR_MIN_C <= value <= SENSOR_MAX_C:
+            out.add(rid)
+            alerts.append(
+                Reason(
+                    "sensor.implausible",
+                    f"{rc.name}: room sensor reads {value:.1f} °C, outside "
+                    f"{SENSOR_MIN_C:.0f} to {SENSOR_MAX_C:.0f} °C: ignored, using the TRV",
+                    rid,
+                )
+            )
+            continue
+        limit = SENSOR_FROZEN_COLD_S if value < cfg.boiler.frost_c else SENSOR_FROZEN_S
+        rs = st.rooms[rid]
+        since = rs.sensor_changed_at
+        if since is None or now - since < limit:
+            continue
+        if rs.trv_range is None or rs.trv_range[1] - rs.trv_range[0] < SENSOR_FROZEN_TRV_K:
+            continue  # the room is steady by its TRV too
+        others = [o for o in fresh if o != rid]
+        moved = sum(1 for o in others if now - st.rooms[o].sensor_changed_at < limit)
+        if not others or moved >= max(1, len(others) / 2):
+            out.add(rid)
+            alerts.append(
+                Reason(
+                    "sensor.implausible",
+                    f"{rc.name}: room sensor unchanged for {limit / 3600:.0f} h while its "
+                    "radiator and other rooms changed: ignored, using the TRV",
+                    rid,
+                )
+            )
+    return out
 
 
 def _room_sensor_fresh(rc: RoomConfig, inp: RoomInput) -> bool:
