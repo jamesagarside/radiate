@@ -179,6 +179,7 @@ const LEARNING = {
   cooker_spike: "learning paused: cooking",
   unexplained_heat: "learning paused: extra heat (sun or guests?)",
   store_recovery: "learning paused: hot water",
+  heat_unknown: "learning paused: no boiler reading",
   setpoint_change: "settling",
   no_data: "gathering data",
   trv_offline: "TRV offline",

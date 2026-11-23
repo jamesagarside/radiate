@@ -144,6 +144,10 @@ async def set_mode(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_mode)
 
 
+async def reset_learning(request: web.Request) -> web.Response:
+    return await _post(request, bridge.reset_learning)
+
+
 async def people(request: web.Request) -> web.Response:
     return web.json_response(_rt(request).away_view())
 
@@ -303,6 +307,7 @@ def create_app(
             web.post("/api/v1/rooms/{room_id}/fire", set_fire),
             web.post("/api/v1/store/boost", boost_store),
             web.post("/api/v1/mode", set_mode),
+            web.post("/api/v1/learning/reset", reset_learning),
             web.get("/api/v1/people", people),
             web.get("/api/v1/schedules", schedules),
             web.get("/api/v1/suggestions", suggestions),

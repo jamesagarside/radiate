@@ -65,6 +65,7 @@ from radiate.core import (
     decide,
 )
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
+from radiate.core.decide import reset_learned
 from radiate.core.persist import dump_state, first_start_state, load_state
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.server import layout
@@ -1181,6 +1182,21 @@ class Runtime:
             LOG.warning("savings: no estimate for the closed day: %s", err)
             return None
 
+    def reset_learning(self, room_ids: list[str] | None = None) -> list[str]:
+        """Put rooms' learned models, arrival lags and lockshield caps back to their
+        priors, log it and save. Every room with a model when `room_ids` is None.
+
+        No device is written: the next ticks decide from the priors. A replay of the
+        recorded ticks across a reset differs from then on, as the reset is not a tick.
+        """
+        now = self.driver.clock()
+        ids = reset_learned(self.cfg, self.state, room_ids)
+        for rid in ids:
+            name = self.cfg.room(rid).name
+            self._log(now, Reason("learning.reset", f"{name}: learning reset to priors", rid))
+        self.save()
+        return ids
+
     def _log(self, now: float, r: Reason) -> None:
         self.decisions.append(DecisionRecord(now, r.code, r.message, r.room_id))
 
@@ -1350,10 +1366,16 @@ class Runtime:
                 }
                 if sc.extra_off_s > 0 and sc.until is not None
                 else None,
+                # The burner firing for heating, from the relay's power metering (None:
+                # not metered). `relay` is Radiate's command; this is the boiler.
+                "burner": snap.heating_burner if snap else None,
+                # False: the relay could not be read this tick (no Shelly, unreachable).
+                "relay_read": snap.relay_observed if snap else False,
             },
             "store": {
                 "relay": acts.store_relay if acts else False,
                 "boost": now < self.store_boost_until,
+                "burner": snap.store_burner if snap else None,
             },
             "rooms": rooms,
             # Burner hours, starts, burns, litres and the balance score per local day.

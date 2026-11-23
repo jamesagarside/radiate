@@ -251,6 +251,23 @@ def set_mode(rt: Runtime, body: Any) -> dict:
     return {"ok": True}
 
 
+def reset_learning(rt: Runtime, body: Any) -> dict:
+    """Put rooms' learned models back to their priors (spec 4.3).
+
+    `{"rooms": ["bedroom_1", "dining"]}`, or `{}` for every room with a model. For
+    models learned under conditions that did not hold, such as a dry run without
+    burner metering before Radiate learned to ignore one.
+    """
+    rooms = require_object(body).get("rooms")
+    if rooms is not None:
+        if not isinstance(rooms, list) or not rooms or not all(isinstance(r, str) for r in rooms):
+            raise RequestError(400, "rooms must be a non-empty list of room ids")
+        unknown = [r for r in rooms if r not in rt.state.rooms]
+        if unknown:
+            raise RequestError(400, f"no learned model for: {', '.join(unknown)}")
+    return {"reset": rt.reset_learning(rooms)}
+
+
 def setup(rt: Runtime) -> HouseholdSetup:
     if not isinstance(rt.setup, HouseholdSetup):
         raise RequestError(404, "household setup is not available")
@@ -370,6 +387,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return scan_network(rt, body)
         if parts == ["mode"]:
             return set_mode(rt, body)
+        if parts == ["learning", "reset"]:
+            return reset_learning(rt, body)
         if parts == ["settings"]:
             return set_settings(rt, body)
         if parts == ["store", "boost"]:

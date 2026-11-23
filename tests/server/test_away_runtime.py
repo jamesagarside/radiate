@@ -14,6 +14,7 @@ from radiate.config import parse_site
 from radiate.config.household import compile_household
 from radiate.core import Mode
 from radiate.drivers.live import LiveDriver
+from radiate.drivers.shelly import SwitchStatus
 from radiate.server import bridge
 from radiate.server.app import create_app
 from radiate.server.runtime import Runtime
@@ -57,12 +58,38 @@ async def _publish(topic, payload):
     return True
 
 
+class RelayOff:
+    """A boiler relay read as off, its burner metered and not firing, so the rooms can
+    learn their losses in dry run (without knowing when the radiators get heat Radiate
+    does not learn, spec 4.6 `heat_unknown`)."""
+
+    reachable = True
+    heating = store = SwitchStatus(output=False, apower=0.0)
+    heating_burner = store_burner = False
+    errors = 0
+    intended: list = []
+
+    async def refresh(self):
+        pass
+
+    async def command(self, *args, **kw):
+        pass
+
+    async def push_fallback(self, *args):
+        pass
+
+    def telemetry(self):
+        return {}
+
+
 def make(store: Store | None = None, clocks: Clocks | None = None, **site_over):
     data = site_data()
     data["household"].update(site_over)
     site = parse_site(data, env=ENV)
     clocks = clocks or Clocks()
-    drv = LiveDriver(site, _publish, clock=lambda: clocks.mono, wall=lambda: clocks.wall)
+    drv = LiveDriver(
+        site, _publish, RelayOff(), clock=lambda: clocks.mono, wall=lambda: clocks.wall
+    )
     rt = Runtime(
         site.house,
         drv,
