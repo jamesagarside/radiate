@@ -29,6 +29,7 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 - [ADR-0005](adr/0005-fail-warm-presence.md) (proposed): fail warm, so uncertain presence counts as home and presence alone never holds the house at frost.
 - [ADR-0006](adr/0006-user-login.md) (proposed): user login with local passwords, OIDC and optional SAML, server-side sessions, admin, household and read-only roles, alongside the unchanged API token and ingress.
 - [ADR-0007](adr/0007-learned-state-across-upgrades.md) (proposed): learned state survives upgrades through tested migrations and provenance, and a release resets only the learning it can name as wrong.
+- [ADR-0008](adr/0008-security-audit-log.md) (proposed): a security audit log in `radiate.db`, the process log and the export, which names who and from where, the one exception to "no personal data", and never holds a secret.
 - [ADR template](adr/template.md): copy it for a new decision.
 
 ## Proposals

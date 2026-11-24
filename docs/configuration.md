@@ -258,6 +258,7 @@ User login for the web UI ([ADR-0006](adr/0006-user-login.md)). Without this sec
 | `local` | `true` | Allow username and password login. Add people with `radiate users add` |
 | `session_days` | 30 | A session ends this many days after sign-in, 1 to 400 |
 | `idle_days` | 7 | A session ends after this many days without use, 1 to `session_days` |
+| `audit_days` | 90 | How long the [security log](deployment.md#security-log) keeps an event, 1 to 3650. It applies whether or not `enabled` is on, as refused API requests are logged too |
 | `secure_cookie` | `auto` | `auto` marks the session cookie `Secure` when the request came over HTTPS (directly, or from a trusted proxy that says so). `always` or `never` override it; use `never` only on a LAN for testing |
 | `public_url` | none | The address people use, such as `https://heating.example.org`. Required for single sign-on, which builds its redirect addresses from it. Must be `https` unless the host is `localhost` |
 | `trusted_proxies` | none | IP addresses or networks of your reverse proxies. Only requests from these have their `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` headers believed |
@@ -639,6 +640,8 @@ export:
 | `compression` | `none` | Or `gzip` |
 | `signals` | `[metrics, logs]` | Readings as metrics, decisions and alerts as logs |
 | `dataset` | `radiate` | Sent as `data_stream.dataset`, which Elastic routes by. Empty to leave it out |
+| `daily_metrics` | `true` | Send each closed day's summary and savings (`radiate.daily.*`) once a day. Needs `metrics` in `signals`. The running totals go every minute either way |
+| `daily_timestamp` | `end_of_day` | When daily figures are timed. `end_of_day`: the day's last second in the house's time zone, so a one-day date histogram puts each figure on the day it covers. `day_close`: when Radiate closed the day, a minute or so after midnight, for a backend that drops points older than when they arrive. See the [telemetry schema](telemetry.md#once-a-day) |
 
 ### balancing
 

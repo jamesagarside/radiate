@@ -26,7 +26,9 @@ To change the schema:
 
 ## Personal data
 
-Radiate never sends the name of a person or a place. Rooms are sent by ID and name, people only as counts, and the house by a random ID. A settings change sends which settings changed, never their values, as a value can be a secret. A refused API request is counted, without the client's address.
+Radiate never sends the name of a person or a place. Rooms are sent by ID and name, people only as counts, and the house by a random ID. A settings change sends which settings changed, never their values, as a value can be a secret.
+
+The one exception is the security audit events, `radiate.security.*` ([ADR-0008](adr/0008-security-audit-log.md)). A security record that doesn't say who and from where is no use, so these carry `user.name` (the Radiate username, or the user a single sign-on provider named; for a refused sign-in, the name that was tried) and `source.address` (the client's IP address, from `X-Forwarded-For` only through `auth.trusted_proxies`). No other event carries either. No event ever carries a password, an API token, a session ID, a CSRF token or any other secret: each record keeps only the attributes its event lists below, and the tests check every record, the stored audit log and the process log for them. The same events are kept in Radiate's own security log whether or not the export is on.
 
 ## Resource
 
@@ -47,14 +49,16 @@ The instrumentation scope is `radiate`, with Radiate's version.
 
 ## Log records
 
-Each log record is one event. Its kind is in the log record's event name field (OpenTelemetry's `event_name`), and repeated in the `event.name` attribute for backends that don't read that field yet. `event.action` holds the reason code, such as `boiler.lead`, as in the Elastic export's decision stream, so you can filter one kind of decision without parsing the message. The body is the message as the web UI shows it.
+Each log record is one event. Its kind is in the log record's event name field (OpenTelemetry's `event_name`), and nowhere else: there is no `event.name` attribute. `event.action` holds the reason code, such as `boiler.lead`, as in the Elastic export's decision stream, so you can filter one kind of decision without parsing the message. The body is the message as the web UI shows it.
 
 | Severity text | Severity number | Used for |
 |---|---|---|
 | `INFO` | 9 | What Radiate decided or what changed |
-| `WARN` | 13 | Alerts, learning that was dropped, refused requests and lost data |
+| `WARN` | 13 | Alerts, learning that was dropped, refused sign-ins and requests, lockouts and lost data |
 
-A record's time is when it happened. A mode or settings change made through the API happens between ticks and is sent with the next tick, with its own time. Room events carry `radiate.room.id`, and `radiate.room.name` when the room is in the house file.
+A record's time is when it happened. A mode or settings change made through the API, and every security event, happens between ticks and is sent with the next tick, with its own time. A user change made with `radiate users` is sent by the running server's next tick.
+
+Security events (`radiate.security.*`) follow ECS: `event.category` is `authentication`, `web`, `iam` or `configuration`, `event.type` says what within it (`start`, `end`, `info`, `access`, `change`, `creation`, `deletion`), and `event.outcome` is `success` or `failure`, so an Elastic Security rule or a SIEM reads them without mapping. Refusals of one kind from one address within a minute are folded: the first is sent at once, and one more record carries `radiate.security.count`, how many followed it. Room events carry `radiate.room.id`, and `radiate.room.name` when the room is in the house file.
 
 <!-- generated: events -->
 | Event | Severity | `event.action` | Description |
@@ -405,7 +409,10 @@ Also every tick: the day's totals so far, as cumulative monotonic sums. Each poi
 
 ### Once a day
 
-When the local day closes, Radiate sends the day's summary ([spec section 5.6](spec.md)) and its savings ([spec section 5.9](spec.md#59-savings)) as gauges, one point for each. A point's time is the last second of the day it covers, in the house's time zone, and its start time is the day's first second. A day Radiate did not see in full is marked by `radiate.day.partial`. The savings metrics are sent only when Radiate can estimate them for that day; the litres saved and the share wait until the savings fit is ready.
+When the local day closes, Radiate sends the day's summary ([spec section 5.6](spec.md)) and its savings ([spec section 5.9](spec.md#59-savings)) as gauges, one point for each. A point's time is the last second of the day it covers, in the house's time zone, and its start time is the day's first second. Two settings change this:
+
+- `export.otlp.daily_timestamp: day_close` times each point when Radiate closed the day instead, a minute or so after local midnight, with the same start time. Use it for a backend that refuses or drops points whose time is older than the moment they arrive; a one-day date histogram then puts each figure on the day after the one it covers, so the default, `end_of_day`, suits Elastic.
+- `export.otlp.daily_metrics: false` leaves the daily figures out altogether. The running totals still go every minute. A day Radiate did not see in full is marked by `radiate.day.partial`. The savings metrics are sent only when Radiate can estimate them for that day; the litres saved and the share wait until the savings fit is ready.
 
 <!-- generated: metrics-daily -->
 | Metric | Instrument | Unit | Attributes | Description |
@@ -457,6 +464,12 @@ Elastic's managed OTLP endpoint writes metrics to a time series data stream (TSD
 
 ### 1.0
 
+Amended in place before release: 1.0 was merged but never deployed or turned on anywhere, so these changes went into 1.0 itself rather than a 2.0. From here on, a published snapshot is never overwritten, as the policy above says.
+
+- The `event.name` attribute is gone. The event name is in the log record's event name field (OpenTelemetry's `event_name`) only, as current OpenTelemetry semantic conventions have it.
+- `radiate.auth.denied`, a count of refused requests each tick, is gone. The security audit events, `radiate.security.*`, report each refusal with its reason, who and from where ([ADR-0008](adr/0008-security-audit-log.md)).
+- Added: the eleven `radiate.security.*` events and their ECS and OpenTelemetry attributes.
+
 The first versioned schema. Before it, the export sent no `radiate.schema.version`. These are breaking changes from what earlier builds sent:
 
 | Before | 1.0 | Why |
@@ -466,6 +479,6 @@ The first versioned schema. Before it, the export sent no `radiate.schema.versio
 | `radiate.boiler.burner` | `radiate.boiler.burner.on` | Makes room for `radiate.boiler.burner.time` |
 | `radiate.store.relay` | `radiate.store.relay.on` | Matches the boiler's relay |
 | Every log record at `INFO` | Alerts, learning invalidations, refused requests and lost data at `WARN` | Severity follows the event |
-| No event name | An event name on every log record, and the `event.name` attribute | Tells the kinds of record apart |
+| No event name | An event name on every log record | Tells the kinds of record apart |
 
-Added in 1.0: the running totals and daily metrics, the `radiate.alert.cleared`, `radiate.boiler.burn`, `radiate.mode.changed`, `radiate.settings.changed`, `radiate.auth.denied` and `radiate.export.dropped` events, room names and reason values on log records, and `radiate.schema.version`.
+Added in 1.0: the running totals and daily metrics, the `radiate.alert.cleared`, `radiate.boiler.burn`, `radiate.mode.changed`, `radiate.settings.changed` and `radiate.export.dropped` events, the security events, room names and reason values on log records, and `radiate.schema.version`.

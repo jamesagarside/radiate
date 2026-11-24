@@ -196,7 +196,7 @@ It asks for the password twice. In Docker, run it inside the container with `doc
 | `radiate users set-role NAME --role household` | Change a role. Their sessions end |
 | `radiate users remove NAME` | Remove someone. Their sessions end |
 
-The commands write to `radiate.db` directly, so they work while the server runs and take effect on the next request. If a single sign-on provider is down, add a local admin this way.
+The commands write to `radiate.db` directly, so they work while the server runs and take effect on the next request. If a single sign-on provider is down, add a local admin this way. Each change goes in the [security log](#security-log), and a running server sends it to the OpenTelemetry export at its next tick.
 
 ### Failed logins
 
@@ -209,6 +209,25 @@ Login is only safe over HTTPS. Radiate doesn't terminate TLS itself, so put a re
 - Set `auth.public_url` to the address people use.
 - List the proxy's address in `auth.trusted_proxies`. Radiate then believes the proxy's `X-Forwarded-For` (for rate limiting by the real client address), `X-Forwarded-Proto` (to mark the cookie `Secure`) and `X-Forwarded-Host`. From any other address, these headers are ignored, so nobody can fake them by reaching port 8099 directly.
 - Pass WebSocket upgrades through for `/api/v1/stream`.
+
+### Security log
+
+Radiate keeps a security log ([ADR-0008](adr/0008-security-audit-log.md)) whether or not login or the export is on: every sign-in and sign-out, every refused sign-in with its reason (`bad_password`, `unknown_user`, `rate_limited`, and for single sign-on `bad_state`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `not_permitted` and others), sessions that expired or were ended by a password, role or account change, refused requests (no credentials, a wrong API token, an unknown session, a role too low, a missing CSRF token, another site's page), lockouts starting and ending, `radiate users` changes, who changed the settings, the household, the layout or learning, and at every start whether login is on, which methods, and whether an API token is set.
+
+Each event says who (the username) and from which address. Behind a reverse proxy, list it in `auth.trusted_proxies` so the address is the client's and not the proxy's; this works with login off too. No event holds a password, token, session ID, CSRF token or any other secret, and a settings change names the settings, never their values.
+
+It goes to three places:
+
+- The `audit_log` table in `radiate.db`, kept for `auth.audit_days` (90 by default) and at most 100,000 events. Admins see it in the web UI as the **Security log** at the foot of the Raw data tab, with filters for refused or allowed and for one user, and through `GET /api/v1/audit`.
+- The process log, one line per event on the `radiate.security` logger, at INFO, or WARNING for a refusal. Each line is `key=value` pairs with the message last, values quoted as JSON strings where needed, so a log shipper can parse it:
+
+  ```text
+  2026-11-24 09:12:03,412 WARNING radiate.security: event=radiate.security.login.failed action=login outcome=failure event.category=authentication event.type=start user.name=alex source.address=192.0.2.10 radiate.auth.method=password error.type=bad_password message="Sign-in refused for alex: wrong password"
+  ```
+
+- The [OpenTelemetry export](#opentelemetry-export), as `radiate.security.*` log records with ECS's `event.category`, `event.type` and `event.outcome`, when the export is on.
+
+Refusals of one kind from one address within a minute are folded into one event with a count, so a password-guessing run or a misconfigured client can't fill the disk. Writing the log never holds up or fails a request or the control loop; if the database can't be written, Radiate logs one warning and carries on.
 
 ### Single sign-on
 
@@ -408,7 +427,7 @@ With Elastic, create the key under **Add data** for the managed OTLP endpoint, o
 
 The export never holds up the control loop. Each tick only adds a record to a queue in the state database (7 days of readings and 20,000 log records; in memory in demo mode). A separate task sends a batch every interval, and a backlog in quick succession after an outage. While the collector can't be reached, or answers 429, 502, 503 or 504, Radiate keeps the data and backs off, doubling up to 10 minutes and honouring `Retry-After`. An authentication error (401, 403) or a wrong endpoint (404) is also kept, so fixing the key delivers the backlog. A 400 drops that batch, and a 413 halves the batch size. When a queue is full, the oldest records go first. The Raw data view's **OpenTelemetry export** plate, and `GET /api/v1/export`, show when it last sent, what is queued, how much was dropped or rejected, and the last error. The log has one warning per distinct error.
 
-Metrics are named in the `radiate.*` namespace, as there are no OpenTelemetry semantic conventions for room heating: readings as gauges every minute, the day's running totals as cumulative sums, and each closed day's summary and savings as gauges. Log records carry an event name such as `radiate.decision` or `radiate.alert`. The resource carries `service.name` (`radiate`), `service.version`, `service.instance.id` and `radiate.house.id` (both the random house ID), and `radiate.schema.version`. The [telemetry schema](telemetry.md) lists every metric, event and attribute, and how the schema changes between versions.
+Metrics are named in the `radiate.*` namespace, as there are no OpenTelemetry semantic conventions for room heating: readings as gauges every minute, the day's running totals as cumulative sums, and each closed day's summary and savings as gauges. Log records carry an event name such as `radiate.decision` or `radiate.alert`, in the log record's event name field. The security log's events go too, as `radiate.security.*`, with the username and client address. Each closed day's figures are timed at the day's last second; `export.otlp.daily_timestamp: day_close` times them when Radiate closed the day instead, and `daily_metrics: false` leaves them out. The resource carries `service.name` (`radiate`), `service.version`, `service.instance.id` and `radiate.house.id` (both the random house ID), and `radiate.schema.version`. The [telemetry schema](telemetry.md) lists every metric, event and attribute, and how the schema changes between versions.
 
 To try it without a backend, run an OpenTelemetry Collector with the `debug` exporter and point `RADIATE_OTLP_ENDPOINT` at its port 4318.
 
@@ -424,6 +443,7 @@ To try it without a backend, run an OpenTelemetry Collector with the `debug` exp
 - The heating mode, the demand mode setting, setpoint overrides, and away state: who is away until when, and the presence Home Assistant last reported.
 - The Elastic export queue, and the OpenTelemetry export's queues (`otlp_metrics_queue`, `otlp_logs_queue`).
 - With [user login](#user-login) on: the people who can sign in (`users`, with scrypt password hashes) and their sessions (`sessions`, holding only a hash of each session ID).
+- The [security log](#security-log) (`audit_log`): usernames and client addresses with what they did, for `auth.audit_days`.
 - The closed day summaries savings are worked out from (`daily_history`), one per day for 730 days, a few kilobytes each.
 - The tick history: each tick's snapshot and decisions for the last `house.history_days` days (14 by default), about 1 MB a day for a 9-room house. See [configuration](configuration.md#tick-history-and-replay).
 - The raw data index (`data_series`, `data_hour`): each series by the hour, about 0.4 MB a day for a 9-room house, pruned with the tick history. It is rebuilt from the tick history in the background if it is missing or from an older version, so it is safe to leave out of a backup.
@@ -438,7 +458,7 @@ If the database is lost or unreadable, Radiate starts from its priors and learns
 
 ### Backups
 
-- Back up your configuration file and the data folder. The backup includes the tick history, so you can replay those days elsewhere, and any household set up in the web UI. With login on it also holds password hashes, so keep backups somewhere only you can read.
+- Back up your configuration file and the data folder. The backup includes the tick history, so you can replay those days elsewhere, and any household set up in the web UI. With login on it also holds password hashes, and the security log holds usernames and client addresses, so keep backups somewhere only you can read.
 - For a consistent copy while the server runs, use `sqlite3 radiate.db ".backup radiate-backup.db"`. Otherwise stop the server and copy all three files.
 - Home Assistant backups include the App's `/data` and config folders.
 
