@@ -6,7 +6,7 @@ reference house and prints one table per scenario: the mean across seeds, with t
 lowest and highest seed in brackets, then the acceptance checks against `eco`.
 
 The savings estimator check (the estimate from `radiate.core.savings` against the
-simulated true saving) needs slice 3; `estimator_check` is the hook for it.
+simulated true saving) is deferred; `estimator_check` is the hook for it.
 """
 
 from __future__ import annotations
@@ -248,30 +248,23 @@ def _key(r: Result) -> tuple:
 
 
 def estimator_check(result: ScenarioResult, days: int) -> str:
-    """Hook for the savings estimator check (plan slice 6), which needs slice 3.
+    """Hook for the savings estimator check (plan slice 6). Not run yet.
 
-    The true saving is the timer's relay litres less eco+use's over the measured days.
-    The estimate, once `radiate.core.savings` exists, is `report()` over the eco+use
-    runs' closed days with `SavingsParams(min_days=14)`, with `b / a` and with equal
-    weights; it should come within 30 % or 0.3 litres a day of the truth, same sign.
+    The true saving is the timer's relay litres less eco+use's over the measured days,
+    which this prints. The estimate is to be `radiate.core.savings.report()` over the
+    eco+use runs' closed days (`Result.day_summaries`, each with its `savings` record)
+    with `SavingsParams(min_days=14)`, once with `b / a` and once with equal weights; it
+    should come within 30 % or 0.3 litres a day of the truth, with the same sign.
     """
     if "timer" not in result.runs or "eco+use" not in result.runs:
         return "Estimator check: needs the timer and eco+use policies."
     truth = result.mean("timer", lambda r: r.relay_litres) - result.mean(
         "eco+use", lambda r: r.relay_litres
     )
-    try:
-        from radiate.core import savings  # noqa: F401  (efficiency slice 3)
-    except ImportError:
-        return (
-            f"Estimator check: not run, `radiate.core.savings` (efficiency slice 3) is not "
-            f"merged. True saving, timer less eco+use relay litres: {truth:.1f} l over "
-            f"{days} days ({truth / days:.2f} l a day)."
-        )
-    # SLICE 3 HOOK: compare report() over the eco+use runs' day summaries with `truth`.
+    # ESTIMATOR CHECK HOOK (efficiency slice 6, deferred): compare report() with `truth`.
     return (
-        f"Estimator check: `radiate.core.savings` is present but the comparison is not "
-        f"wired up yet. True saving: {truth:.1f} l over {days} days."
+        f"Estimator check: not run yet. True saving, timer less eco+use relay litres: "
+        f"{truth:.1f} l over {days} days ({truth / days:.2f} l a day)."
     )
 
 

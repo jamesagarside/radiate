@@ -1,7 +1,7 @@
 """Room use in `eco` on the simulated reference house (efficiency plan, slice 6).
 
 Seven days, seeds 1 to 3. The full comparison is `radiate sim-efficiency` (see
-docs/simulation.md). The savings estimator check waits for slice 3
+docs/simulation.md). The savings estimator check is deferred
 (`radiate.sim.compare.estimator_check`).
 """
 
@@ -103,10 +103,11 @@ def test_owner_plan_follows_the_use_levels():
     assert plan.use_at("bedroom_3", 6, 10 * 60) is RoomUse.SETBACK  # unused at weekends
     assert plan.use_at("lounge", 0, 19 * 60) is RoomUse.SETBACK  # flat day, unused
     assert OWNER_USE["lounge"] == (UseLevel.UNUSED, UseLevel.UNUSED)
-    assert not plan.household  # hand-written rooms have no savings baseline
-    # The timer runs from the earliest warm period less 30 minutes to the latest end.
-    assert plan.baseline_at("bedroom_1", 0, 5 * 60 + 29) is None
-    assert plan.baseline_at("bedroom_1", 0, 5 * 60 + 30) == 18.0
+    # Radiate's baseline for hand-written rooms: the timer from the earliest warm period
+    # in the house (06:00) to the latest end (22:30), each room at its usual setpoint.
+    assert plan.household
+    assert plan.baseline_at("bedroom_1", 0, 5 * 60 + 59) is None
+    assert plan.baseline_at("bedroom_1", 0, 6 * 60) == 18.0
     assert plan.baseline_at("lounge", 0, 12 * 60) == 14.0
     assert plan.baseline_at("lounge", 0, 22 * 60 + 30) is None
 

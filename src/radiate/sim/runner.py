@@ -26,12 +26,12 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
-from radiate.config.household import UseLevel, compile_household
+from radiate.config.household import compile_household
 from radiate.config.schedule import WeekSchedule
 from radiate.config.use import (
     compile_baseline,
+    compile_schedule_baseline,
     room_use,
-    schedule_periods,
     schedule_room_use,
 )
 from radiate.core import (
@@ -67,7 +67,6 @@ REPORT_HEARTBEAT_S = 600.0
 WATCHDOG_SCHEDULE = ((5 * 60 + 30, 8 * 60 + 30), (16 * 60, 22 * 60 + 30))
 WATCHDOG_STORE = ((6 * 60, 7 * 60 + 30), (17 * 60, 21 * 60))
 NOZZLE_LPH = 1.64  # litres an hour while the burner fires (efficiency plan, slice 6)
-TIMER_PREHEAT_MIN = 30  # the owner-like timer starts this early, like the household's
 # The fixed schedule's timer: from the first warm period less 30 minutes to the last end.
 FIXED_TIMER = (6 * 60, 22 * 60 + 30)
 SCHEDULES = ("fixed", "household", "owner")
@@ -79,7 +78,8 @@ class SchedulePlan:
 
     `live`: what Radiate follows. `valve`: what each TRV's own schedule holds. `use_at`
     and `baseline_at` take (room id, weekday, minute of day); weekday 0 is the run's
-    first day, a Monday. `household`: the plan has a savings baseline (spec 5.9).
+    first day, a Monday. `household`: the plan has a savings baseline (spec 5.9), so
+    the snapshot carries it as the runtime's would.
     """
 
     live: dict[str, WeekSchedule]
@@ -106,40 +106,18 @@ def household_plan() -> SchedulePlan:
 def owner_plan() -> SchedulePlan:
     """The owner-like house: hand-written weeks with use levels (`rooms[].use`).
 
-    A hand-written room has no savings baseline in Radiate. For the timer controller,
-    the timer runs from the earliest warm period of the day, less 30 minutes, to the
-    latest end, with each room's valve at its warm setpoint that day (its only setpoint
-    on a day it is unused), as `compile_baseline` does for a household.
+    Its savings baseline is Radiate's for hand-written rooms (`compile_schedule_baseline`,
+    no household): the timer from the earliest warm period start in the house to the
+    latest end, each room at the highest setpoint its schedule sets that day.
     """
     weeks = owner_weeks()
-    windows: list[tuple[int, int] | None] = []
-    setpoints: dict[str, list[float]] = {rid: [] for rid in weeks}
-    for wd in range(7):
-        starts, ends = [], []
-        for rid, week in weeks.items():
-            day = week.days[wd]
-            level = OWNER_USE[rid][1 if wd >= 5 else 0]
-            sps = [sp for _, sp in day.transitions]
-            setpoints[rid].append(min(sps) if level is UseLevel.UNUSED else max(sps))
-            if level is UseLevel.UNUSED:
-                continue
-            for a, b in schedule_periods(day):
-                starts.append(a)
-                ends.append(b)
-        windows.append((max(0, min(starts) - TIMER_PREHEAT_MIN), max(ends)) if starts else None)
-
-    def baseline_at(rid: str, wd: int, m: int) -> float | None:
-        window = windows[wd % 7]
-        if rid not in weeks or window is None or not window[0] <= m < window[1]:
-            return None
-        return setpoints[rid][wd % 7]
-
+    baseline = compile_schedule_baseline(weeks, weeks)
     return SchedulePlan(
         live=weeks,
         valve=weeks,
         use_at=lambda rid, wd, m: schedule_room_use(weeks[rid], OWNER_USE[rid], wd, m),
-        baseline_at=baseline_at,
-        household=False,
+        baseline_at=baseline.setpoint_at,
+        household=True,
     )
 
 
