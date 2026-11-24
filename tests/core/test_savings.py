@@ -362,7 +362,7 @@ def test_why_not_eligible():
     assert "basis" in why_not_eligible(summary(0, 100, 120, litres=2.0), "firing")
     assert why_not_eligible(
         summary(0, 100, 120, litres=2.0, outdoor_share=1 - 4 / 24), "relay"
-    ) == ("outdoor sensor missing for 4 h")
+    ) == ("no fresh outdoor temperature for 4 h")
     assert "baseline" in why_not_eligible(
         summary(0, 100, 120, litres=2.0, baseline_share=0.5), "relay"
     )
@@ -481,6 +481,29 @@ def test_fit_uses_one_basis_only():
     body = rep(days)
     assert body["basis"] == "firing"
     assert body["status"] == "learning" and body["why"] == "5 of 14 days"
+
+
+def test_a_mixed_basis_day_counts_for_neither_basis():
+    # Burner metering (spec 5.6): a day with both metered firing and unmetered relay
+    # time has basis "mixed". It fits neither basis, so it isn't eligible, and it
+    # doesn't make the firing days before it ineligible either.
+    days = month(20)
+    for d in days[-6:]:
+        d["basis"] = "firing"
+    days[-1]["basis"] = "mixed"
+    body = rep(days)
+    assert body["basis"] == "firing" and body["litres_upper_bound"] is False
+    assert body["why"] == "5 of 14 days"
+    assert body["days"][-1]["why"] == "litres part metered, part from relay time"
+    assert all(d["eligible"] for d in body["days"][-6:-1])
+    # Only mixed days so far (metering that keeps dropping out): none is eligible, and
+    # the litres shown are flagged as possibly high.
+    for d in days:
+        d["basis"] = "mixed"
+    body = rep(days)
+    assert body["basis"] == "mixed" and body["litres_upper_bound"] is True
+    assert "may be high" in body["basis_text"]
+    assert body["progress"]["eligible_days"] == 0
 
 
 def test_report_is_deterministic():
@@ -639,6 +662,14 @@ def test_every_closed_day_in_the_simulator_has_a_savings_record():
     res = sim_run("radiate", days=2, warmup_days=0, seed=1)
     assert res.day_summaries
     assert all("savings" in s for s in res.day_summaries)
+
+
+def test_report_names_the_outdoor_source():
+    body = report([], WEIGHTS, NAMES, household=True, outdoor_sensor=True, outdoor_source="both")
+    assert body["outdoor"]["source"] == "both"
+    assert "Home Assistant" in body["outdoor"]["text"]
+    body = report([], WEIGHTS, NAMES, household=True, outdoor_sensor=False)
+    assert body["outdoor"] == {"source": None, "text": None}
 
 
 def test_record_day_constant():

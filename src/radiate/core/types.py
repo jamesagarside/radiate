@@ -88,6 +88,9 @@ class BoilerConfig:
     demand_mode: DemandMode = DemandMode.ECO  # the default; the runtime can change it
     eco_limit_k: float = 1.5  # eco: the most a calling room waits below its target
     damp_floor_c: float = DAMP_FLOOR_C  # not in the configuration file (spec 5.8)
+    # Eco with room use: a room starts a burn alone this far above the damp floor, so its
+    # air stays above the floor while the burn gets going (spec 5.8, open question 12).
+    damp_margin_k: float = 0.3
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +219,15 @@ class Snapshot:
     demand_mode: DemandMode | None = None
     # The house has a household, so a savings baseline exists (spec 5.9).
     baseline: bool = False
+    # `heating_relay` and `store_relay` were read from the relay this tick. False: the
+    # driver could not read it and stood in the last command, which in dry run was
+    # never sent. Learning and accounting then ignore the relay (spec 4.6, 5.6).
+    relay_observed: bool = True
+    # The burner firing for each channel, from the relay's power metering (spec 3,
+    # 5.6). None: not metered. With it, heat availability and accounting follow the
+    # burner rather than the relay, which the boiler's own thermostat cycles inside.
+    heating_burner: bool | None = None
+    store_burner: bool | None = None
 
 
 @dataclass(slots=True)

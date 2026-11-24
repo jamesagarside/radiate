@@ -9,6 +9,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from radiate.config.household import (
+    Household,
+    Person,
+    RoomKind,
+    RoomLink,
+    Routine,
+    Temperatures,
+    UseLevel,
+)
+from radiate.config.schedule import WeekSchedule, parse_week
 from radiate.core.types import HeatSource, HouseConfig, RoomConfig, RoomRole
 
 from .house import SimBoiler, SimHouse, SimRadiator, SimRoom, SimTrv
@@ -161,3 +171,86 @@ def house_config(actuate_all: bool = True) -> HouseConfig:
             for s in ROOMS
         )
     )
+
+
+# --- schedules with room use (efficiency plan, slice 6) ----------------------------------
+
+
+def _hhmm(text: str) -> int:
+    h, m = text.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _span(text: str) -> tuple[int, int]:
+    a, b = text.split("-")
+    return _hhmm(a), _hhmm(b)
+
+
+def reference_household() -> Household:
+    """Generic people and routines that give the reference rooms the mix of spec 5.8's
+    example: a bedroom used getting up and at bedtime, an office (Bedroom 3) used in
+    weekday working hours, the dining room and kitchen used while people are home, the
+    bathroom occasional, and the lounge, Bedroom 2 and the toilet unused. 18 °C in use,
+    16 °C occasional, 14 °C unused and overnight. No personal details."""
+    weekend = Routine(_hhmm("08:30"), _hhmm("22:30"), out=(_span("10:00-18:00"),))
+    early = Person(
+        "early_riser",
+        weekdays=Routine(_hhmm("06:30"), _hhmm("22:30"), out=(_span("07:30-18:00"),)),
+        weekend=weekend,
+    )
+    worker = Person(
+        "home_worker",
+        weekdays=Routine(_hhmm("08:00"), _hhmm("22:30"), work=(_span("08:00-18:00"),)),
+        weekend=weekend,
+    )
+    both = ("early_riser", "home_worker")
+
+    def link(room_id: str, level: UseLevel, **kw) -> RoomLink:
+        return RoomLink(room_id, level, level, **kw)
+
+    return Household(
+        people=(early, worker),
+        rooms=(
+            link("bedroom_1", UseLevel.IN_USE, kind=RoomKind.BEDROOM, people=both),
+            link("bedroom_2", UseLevel.UNUSED),
+            link("bedroom_3", UseLevel.IN_USE, kind=RoomKind.OFFICE, people=("home_worker",)),
+            link("bathroom", UseLevel.OCCASIONAL),
+            link("dining", UseLevel.IN_USE),
+            link("lounge", UseLevel.UNUSED),
+            link("kitchen", UseLevel.IN_USE),
+            link("toilet", UseLevel.UNUSED),
+        ),
+        temperatures=Temperatures(in_use_c=18.0, occasional_c=16.0, unused_c=14.0, night_c=14.0),
+    )
+
+
+# Hand-written schedules with `rooms[].use`, as close to the owner's real house as the
+# simulator allows: the office (Bedroom 3) in use on weekday working hours, Bedroom 1
+# getting up and at bedtime, the dining room and kitchen mornings and evenings, the
+# lounge, Bedroom 2 and the toilet unused, 14 °C overnight everywhere. The bathroom's
+# use is not known; it is occasional here. The stairs has no TRV.
+OWNER_SCHEDULES: dict[str, dict[str, str]] = {
+    "bedroom_1": {"daily": "00:00/14 06:00/18 08:30/14 21:30/18 22:30/14"},
+    "bedroom_2": {"daily": "00:00/14"},
+    "bedroom_3": {"weekdays": "00:00/14 08:00/18 17:30/14", "weekend": "00:00/14"},
+    "bathroom": {"daily": "00:00/14 06:00/16 08:30/14 21:00/16 22:30/14"},
+    "dining": {"daily": "00:00/14 06:30/18 09:00/14 17:00/18 22:00/14"},
+    "lounge": {"daily": "00:00/14"},
+    "kitchen": {"daily": "00:00/14 06:30/18 09:00/14 17:00/18 22:00/14"},
+    "toilet": {"daily": "00:00/14"},
+}
+OWNER_USE: dict[str, tuple[UseLevel, UseLevel]] = {
+    "bedroom_1": (UseLevel.IN_USE, UseLevel.IN_USE),
+    "bedroom_2": (UseLevel.UNUSED, UseLevel.UNUSED),
+    "bedroom_3": (UseLevel.IN_USE, UseLevel.UNUSED),
+    "bathroom": (UseLevel.OCCASIONAL, UseLevel.OCCASIONAL),
+    "dining": (UseLevel.IN_USE, UseLevel.IN_USE),
+    "lounge": (UseLevel.UNUSED, UseLevel.UNUSED),
+    "kitchen": (UseLevel.IN_USE, UseLevel.IN_USE),
+    "toilet": (UseLevel.UNUSED, UseLevel.UNUSED),
+}
+
+
+def owner_weeks() -> dict[str, WeekSchedule]:
+    """The owner-like house's hand-written weeks, by room id."""
+    return {rid: parse_week(spec) for rid, spec in OWNER_SCHEDULES.items()}

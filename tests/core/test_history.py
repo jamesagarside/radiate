@@ -61,7 +61,11 @@ def sim_entries(
             saved = json.loads(json.dumps(dump_state(st, last)))
             st, _ = load_state(cfg, saved, house.now + offset)
             entries.append(
-                Entry(START, wall0 + i * 60, segment, start_data(house.now + offset, saved, 0.0))
+                # At the restart, a tick after the last: the replay carries its state
+                # over by this wall-clock gap, as the live restart did by its clock.
+                Entry(
+                    START, wall0 + (i + 1) * 60, segment, start_data(house.now + offset, saved, 0.0)
+                )
             )
         snap = _snapshot(house, reports, int((house.now % 86400) // 60))
         snap.now += offset

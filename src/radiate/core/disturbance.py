@@ -18,6 +18,9 @@ FIRE_RISE_KPH = 0.8
 FIRE_RESIDUAL_KPH = 2.0
 FIRE_VALVE_CLOSED_S = 30 * 60  # radiator must have been off this long
 FIRE_MIN_CONFIDENCE = 0.6
+# The TRV sits beside the radiator: reading this far above the room, the radiator is
+# warm, so a rise is radiator heat, not a fire (spec 4.6).
+FIRE_RADIATOR_WARM_K = 1.0
 FIRE_HOLDOFF_S = 4 * 3600
 FIRE_CLEAR_S = 30 * 60
 SPIKE_RESIDUAL_KPH = 1.0
@@ -53,6 +56,16 @@ class DisturbanceState:
             return self.spike_kind
         return None
 
+    def forget_residual(self, now: float) -> None:
+        """The model was found wrong: what its residual flagged was the model, not
+        extra heat. Ends a `cooker_spike` or `unexplained_heat` hold now."""
+        self.spike_until = min(self.spike_until, now)
+        self.residual_high_since = None
+
+    def forget_readings(self) -> None:
+        """The temperature came from another source: no drop across the switch."""
+        self.temps = []
+
 
 def update(
     st: DisturbanceState,
@@ -68,8 +81,16 @@ def update(
     drive: float,
     closed_for_s: float = 0.0,
     confidence: float = 0.0,
+    heat_known: bool = True,
+    radiator_warm_k: float | None = None,
 ) -> list[str]:
-    """Advance detectors. Returns the names of flags that were newly raised."""
+    """Advance detectors. Returns the names of flags that were newly raised.
+
+    `heat_known`: the relay (or the burner) shows whether the radiators get heat, so a
+    low `drive` means the radiator is off. `radiator_warm_k`: the TRV's reading above
+    the room's, when both are fresh. `residual_kph` None turns the residual rules off
+    (no residual, or a model in doubt after a re-learn).
+    """
     raised: list[str] = []
 
     # Window: explicit sensor, or a sharp drop.
@@ -108,10 +129,15 @@ def update(
 
     if cfg.heat_source is HeatSource.EPISODIC:
         evidence = bool(fire_switch)
-        # Rising although the radiator has been off long enough to be cold.
+        # Radiator heat is never a fire: not while the TRV reads the radiator warm.
+        radiator_cold = radiator_warm_k is None or radiator_warm_k <= FIRE_RADIATOR_WARM_K
+        # Rising although the radiator has been off long enough to be cold. Off as
+        # Radiate knows it: in a dry run without burner metering it does not know.
         if (
             slope_kph is not None
             and slope_kph > FIRE_RISE_KPH
+            and heat_known
+            and radiator_cold
             and drive < IDLE_DRIVE
             and closed_for_s >= FIRE_VALVE_CLOSED_S
         ):
@@ -119,6 +145,7 @@ def update(
         # Rising much faster than a well-learned model explains.
         if (
             sustained
+            and radiator_cold
             and confidence >= FIRE_MIN_CONFIDENCE
             and residual_kph is not None
             and residual_kph > FIRE_RESIDUAL_KPH

@@ -1,8 +1,8 @@
 # Simulation findings
 
-November 2026. Simulator: `src/radiate/sim` (spec section 11). Reproduce with `radiate sim --days 5 --seed N` for seeds 1 to 3 (add `--demand-mode comfort` for the comfort figures), or the tests in `tests/sim`.
+November 2026. Simulator: `src/radiate/sim` (spec section 11). Reproduce with `radiate sim --days 5 --seed N` for seeds 1 to 3 (add `--demand-mode comfort` for the comfort figures), or the tests in `tests/sim`. [Room use in eco](#room-use-in-eco) has its own command, `radiate sim-efficiency`.
 
-The first table, [eco and comfort demand modes](#eco-and-comfort-demand-modes) and [learning memory and change detection](#learning-memory-and-change-detection) were run on 20 November 2026, with the two-year learning memory and the `eco` demand mode as defaults. The balancing and valve tables were run on 19 November 2026 at commit `925b7a1`, before those changes, and have not been rerun. `tests/sim` passes.
+The first table was rerun on 23 November 2026 with burner metering (see [burner metering](#burner-metering)), and again on 24 November 2026 at the top of the review stack, seeds 1 to 3, with the same figures digit for digit. [Eco and comfort demand modes](#eco-and-comfort-demand-modes) and [learning memory and change detection](#learning-memory-and-change-detection) were run on 20 November 2026, with the two-year learning memory and the `eco` demand mode as defaults. The balancing and valve tables were run on 19 November 2026 at commit `925b7a1`, before those changes, and have not been rerun. `tests/sim` passes.
 
 The simulator is a plausible model of the reference house, not a measurement of it. Treat these results as a check on the algorithm's direction, and expect the real house to differ. The first real-world check is the reference install.
 
@@ -19,23 +19,36 @@ The simulator is a plausible model of the reference house, not a measurement of 
 
 | Metric | Smart TRVs | Radiate |
 |---|---|---|
-| Comfort deficit (K·h below setpoint − 0.5 K, occupied) | 314.9 | 20.9 |
+| Comfort deficit (K·h below setpoint − 0.5 K, occupied) | 314.9 | 21.6 |
 | Worst arrival after occupancy starts (min) | 330 (never) | 120 |
-| Relay starts | 71 | 10 |
-| Mean relay burn (min) | 28 | 223 |
+| Relay starts | 71 | 11 |
+| Mean relay burn (min) | 28 | 199 |
 | Minimum burn violations | 15 | 0 |
 | Minimum off violations | 37 | 0 |
-| Physical burner starts | 117 | 98 |
-| Burner hours | 22.9 | 24.7 |
+| Physical burner starts | 117 | 99 |
+| Burner hours | 22.9 | 24.9 |
 | Relay time with no TRV open | 0 % | 0 % |
 
 Notes on reading this table:
 
 - **Comfort is the big win, mostly from optimum start.** Smart TRVs start heating at the scheduled time and the slow rooms never catch up. Radiate starts each room early, from its learned warm-up rate.
-- **Radiate burns more oil here (+8 %),** because it actually heats the house to setpoint. This is a comfort result, not a saving. Savings claims need the real house.
-- **Relay starts fall by 86 % and burns are eight times longer,** and the oil-burner guards are never violated.
-- **Physical burner starts fall by 16 %.** The oversized boiler's own thermostat still cycles the burner inside long heating calls. Cutting real burner cycling needs a burner-firing signal (spec open question 1) so Radiate can keep enough radiators open during a burn. This is the next optimisation target.
+- **Radiate burns more oil here (+9 %),** because it actually heats the house to setpoint. This is a comfort result, not a saving. Savings claims need the real house.
+- **Relay starts fall by 85 % and burns are seven times longer,** and the oil-burner guards are never violated.
+- **Physical burner starts fall by 15 %.** The oversized boiler's own thermostat still cycles the burner inside long heating calls. Radiate now sees and counts those burner starts (spec 5.6), but does not yet act on them; keeping enough radiators open during a burn to cut them is the next optimisation target (spec open question 1).
 - The smart-TRV baseline's arrival spread is not meaningful: its rooms mostly never reach setpoint within the window, so every room scores the same.
+
+## Burner metering
+
+23 November 2026. The simulator now reports the burner firing on each channel, as the reference install's Shelly power reading does (`run(metering=False)` leaves it out). Radiate's headline before and after, per seed:
+
+| Seed | Comfort deficit (K·h) | Median arrival spread (min) | Relay starts | Mean relay burn (min) | Burner starts | Burner hours |
+|---|---|---|---|---|---|---|
+| 1 | 21.1 to 16.9 | 24 to 14 | 9 to 13 | 246 to 170 | 96 to 98 | 24.7 to 25.1 |
+| 2 | 20.7 to 22.1 | 42 to 14 | 10 to 11 | 222 to 202 | 99 to 97 | 24.6 to 24.8 |
+| 3 | 21.0 to 25.7 | 10 to 23 | 11 to 10 | 202 to 224 | 100 to 101 | 25.0 to 24.8 |
+| Mean | 20.9 to 21.6 | 25 to 17 | 10 to 11 | 223 to 199 | 98 to 99 | 24.8 to 24.9 |
+
+All of the change comes from store recovery following the store burner: with heating metering alone, or with the other learning changes of the same day (the `heat_unknown` gate, watching held-back samples, the cold-radiator fire rules, restarting the reading window when the temperature source switches), the results are identical to before, digit for digit. Store recovery now ends when the store is satisfied rather than after a fixed 25 minutes, and a reheat later in a store window (after the morning showers) now counts as recovery too. That changes when heat is available and so what is learned, but only a little: in seed 3 the learned heating gains agree within 7 % (the bathroom 3.08 against 2.88 K/h, the kitchen 1.72 against 1.82; every other room within 2 %). The headline moves within the spread between seeds: one morning's arrival spread is 10 minutes in one run and 99 in the other with the same models. No seed re-learns any model, and the guards are never violated.
 
 ## Eco and comfort demand modes
 
@@ -76,6 +89,94 @@ What eco does:
 - **What it costs.** On mild days, nothing measurable: the house deficit is 1.1 K·h lower than comfort, well within the spread between seeds (19.9 to 25.7 K·h for comfort). On cold days with an undersized pump, the house deficit rises by 13 K·h (5 %) and the toilet's by 0.9 K·h, because rooms that would have fired the boiler alone now wait for others.
 
 An eco variant that also kept the predicted-burn rule (fire when the slowest calling room would need 12 minutes) cut no relay starts on mild days, so eco drops it. Eco limits of 1 K and 2 K gave 10.7 and 11.0 relay starts and house deficits of 21.0 and 24.2 K·h, so the default stays 1.5 K.
+
+## Room use in eco
+
+Spec 5.8, [efficiency plan slice 6](plans/efficiency-mvp.md#slice-6-simulator-comparison-and-estimator-check). Rerun on 24 November 2026 at the top of the review stack (room use with the 0.3 K damp margin, burner metering, change detection that waits for a misfit to persist, outdoor from Home Assistant):
+
+```
+uv run radiate sim-efficiency --days 24 --warmup 3 --seeds 1,2,3 --scenarios fixed,mild,cold,owner,owner_cold
+```
+
+The plan's command is the same with `--scenarios fixed,mild,cold`. 24 days, the first 3 for learning, 21 measured, mean of seeds 1 to 3. The full tables, with the lowest and highest seed for every figure, are printed by the command; the main figures are below.
+
+**Scenarios.**
+
+- `fixed`: the original reference schedule (20 to 21 °C mornings and evenings, 16 °C otherwise), outdoor mean 4 °C. No room use, so `eco` and `eco+use` must match exactly; they do.
+- `mild`: the reference household (`sim.reference.reference_household`): a bedroom used getting up and at bedtime, an office used in weekday working hours, the dining room and kitchen used while people are home, the bathroom occasional, Bedroom 2, the lounge and the toilet unused; 18 °C in use, 16 °C occasional, 14 °C unused and overnight. Each day's outdoor mean is 4 °C ± 3 K, drawn from the seed.
+- `cold`: the same at −2 °C ± 3 K with the small pump (`pump_qmax=0.15`), optimum start on.
+- `owner` and `owner_cold`: hand-written schedules with `rooms[].use`, as close to the owner's house as the simulator allows (`sim.reference.OWNER_SCHEDULES`): the office (Bedroom 3) in use 08:00 to 17:30 on weekdays and unused at weekends; Bedroom 1 in use 06:00 to 08:30 and 21:30 to 22:30 at 18 °C; dining room and kitchen in use 06:30 to 09:00 and 17:00 to 22:00 at 18 °C; lounge, Bedroom 2 and toilet unused at 14 °C; 14 °C overnight everywhere. The bathroom's use isn't known, so it is occasional at 16 °C mornings and evenings. The stairs has no TRV. Their savings baseline is Radiate's for hand-written rooms (spec 5.9). The simulated rooms keep their own sizes, radiators, the lounge fire and the range cooker.
+
+**Policies.** `eco` is today's default with room use off. `eco+use` is the same with room use in the snapshot. `comfort` is the comfort demand mode. `timer` is the savings baseline as a house: the relay on for the whole timer window (for the household, first person up less 30 minutes to last in bed, 06:00 to 22:30 on weekdays; for the owner-like house, the earliest warm period to the latest, 06:00 to 22:30) and each TRV on its own sensor at the room's usual temperature, frost outside the window.
+
+**Measures.** Oil from burner firing is burner hours × 1.64 l/h, the simulated truth; oil from relay time is what Radiate counts today (spec 5.6). The warm-period deficit is K·min below the setpoint while a room is in use or occasional, with no tolerance. The comfort deficit is the older measure, K·h below setpoint − 0.5 K in the same periods, rooms without a heat source. Lowest room and minutes below 12 °C use the true air temperature of the TRV rooms; Radiate acts on the sensor reading.
+
+| Scenario | Policy | Oil, firing (l) | Oil, relay (l) | Relay starts | Burner starts | Warm-period deficit (K·min) | Comfort deficit (K·h) | Lowest room (°C) | Room-minutes below 12 °C |
+|---|---|---|---|---|---|---|---|---|---|
+| fixed | eco | 291.2 | 426.8 | 76 | 680 | 21699 | 155.5 | 15.2 | 0 |
+| fixed | eco+use | 291.2 | 426.8 | 76 | 680 | 21699 | 155.5 | 15.2 | 0 |
+| mild | eco | 252.1 | 430.6 | 117 | 810 | 2446 | 10.6 | 13.0 | 0 |
+| mild | eco+use | 250.4 (−0.7 %) | 430.4 | 111 | 816 | 2361 (−3.5 %) | 8.4 | 12.0 | 0 |
+| mild | comfort | 252.7 | 428.3 | 126 | 813 | 2188 | 9.0 | 13.3 | 0 |
+| mild | timer | 235.0 | 548.6 | 21 | 891 | 54264 | 658.6 | 8.4 | 27471 |
+| cold | eco | 352.4 | 636.5 | 118 | 1211 | 10298 | 96.1 | 13.0 | 0 |
+| cold | eco+use | 345.2 (−2.0 %) | 586.9 | 103 | 1089 | 10639 (+3.3 %) | 93.1 | 12.0 | 21 |
+| cold | comfort | 353.4 | 641.7 | 131 | 1231 | 9913 | 92.1 | 13.3 | 0 |
+| cold | timer | 302.3 | 548.6 | 21 | 924 | 105026 | 1387.5 | 5.4 | 68263 |
+| owner | eco | 254.2 | 433.6 | 123 | 833 | 2297 | 8.1 | 13.0 | 0 |
+| owner | eco+use | 249.6 (−1.8 %) | 423.3 | 111 | 819 | 2218 (−3.4 %) | 5.3 | 12.1 | 0 |
+| owner | comfort | 255.1 | 432.0 | 130 | 826 | 2336 | 9.3 | 13.4 | 0 |
+| owner | timer | 235.8 | 568.3 | 21 | 903 | 66045 | 851.4 | 8.6 | 26022 |
+| owner_cold | eco | 353.1 | 640.4 | 130 | 1248 | 12388 | 115.6 | 13.0 | 0 |
+| owner_cold | eco+use | 345.7 (−2.1 %) | 593.0 | 102 | 1124 | 13298 (+7.3 %) | 119.2 | 11.9 | 37 |
+| owner_cold | comfort | 353.8 | 641.5 | 138 | 1247 | 12273 | 113.5 | 13.3 | 0 |
+| owner_cold | timer | 304.1 | 568.3 | 21 | 935 | 124687 | 1690.2 | 6.1 | 65935 |
+
+Guard violations were 0 in every run, and relay time with no TRV open was 0 for every Radiate policy.
+
+**Against the acceptance checks** (eco+use against eco):
+
+- **Oil: passes.** 0.7 % less burner oil on mild days and 2.0 % on cold days with the household; 1.8 % and 2.1 % with the owner-like schedules. That is 0.1 to 0.35 litres a day here. Relay litres are level on mild household days and fall by 2 to 8 % otherwise. The 0.3 K damp margin costs part of the saving (see the damp margin below); with the burn at the floor itself the figures were 1.7 to 3.1 %.
+- **Comfort in rooms in use: passes.** The warm-period deficit falls 3.5 % (mild) and 3.4 % (owner), and rises 3.3 % (cold) and 7.3 % (`owner_cold`), under the 10 % tolerance. Seed spread is wide.
+- **Relay starts: pass.** They fall 5 to 22 %; burner starts fall up to 10 %, and rise 1 % on mild household days.
+- **Damp floor: passes on mild days, not quite on cold ones.** With the margin no room's air goes below 12 °C on mild days. On cold days with the small pump it dips to 11.94 °C (household) and 11.90 °C (`owner_cold`), for 21 and 37 room-minutes over 21 days, against 1745 and 1626 at the floor itself.
+
+**What was tuned: the optimum start horizon for rooms with room use.** With the plan's rules alone, the warm-period deficit rose 18 to 34 % against eco. Most of it came at the start of warm periods (the office at 08:00, Bedroom 1 at 22:00): a room set back to near 12 °C needs more than optimum start's 3-hour horizon to reach 18 °C, so it arrived late. Rooms with room use in `eco` now look ahead up to 3.25 hours (`PREHEAT_USE_MAX_S`); rooms without room use and `comfort` keep 3 hours. Mean of seeds, eco+use against eco:
+
+| Horizon | mild: oil, deficit, relay starts | cold | owner | owner_cold |
+|---|---|---|---|---|
+| 3 h (plan) | −1.5 %, +33.7 %, 110 | −3.0 %, +22.1 %, 102 | −3.1 %, +21.0 %, 105 | −2.9 %, +18.1 %, 99 |
+| 3.25 h (chosen) | −1.7 %, +7.6 %, 115 | −2.7 %, +5.4 %, 107 | −3.1 %, +3.6 %, 113 | −2.8 %, +8.3 %, 107 |
+| 3.5 h | −1.4 %, −4.7 %, 117 | −2.6 %, +0.2 %, 94 | −2.8 %, −6.2 %, 126 | −2.6 %, −6.9 %, 110 |
+| 4 h | −1.2 %, −12.7 %, 121 | −1.9 %, −26.2 %, 109 | −2.5 %, −14.3 %, 141 | −2.0 %, −31.9 %, 110 |
+
+Eco's relay starts for comparison: 124, 130, 121 and 137. Beyond 3.25 hours the owner-like house starts more burns than eco: preheats for rooms with different warm periods start at different times instead of together. The result is sensitive to this one number, which is a sign that the real fix is arrival-tuned optimum start (spec 5.8, not yet implemented).
+
+Tried and not taken:
+
+- A preheat margin of 1.5 or 1.8 in place of 1.2 changed nothing: the 3-hour cap, not the margin, made rooms late.
+- Counting setback rooms in pooled demand raised relay starts from 48 to 135 in a 12-day run, since they could start burns they couldn't keep.
+- Leaving setback rooms out of burns for other rooms (no "taking heat") made comfort slightly worse, as the rooms sat colder.
+- 0.5 K of damp margin keeps the air above 12.1 °C and leaves almost no mild-day saving. Starting the floor burn early by the room's predicted fall over the valve lead and arrival lag didn't keep it above 12 °C either.
+
+**The damp margin.** `boiler.damp_margin_k` (0.3 K by default) starts a setback room's own burn at 12.3 °C rather than 12 °C. Seeds 1 to 3, 21 measured days, eco+use against eco:
+
+| Scenario | Margin | Oil, firing | Room-minutes below 12 °C | Lowest room (°C) | Relay starts (eco) |
+|---|---|---|---|---|---|
+| mild | 0 K | 247.9 l (−1.7 %) | 926 | 11.8 | 115 (124) |
+| mild | 0.3 K | 250.8 l (−0.5 %) | 0 | 12.05 | 120 (124) |
+| cold | 0 K | 343.2 l (−2.7 %) | 1745 | 11.7 | 107 (130) |
+| cold | 0.3 K | 344.3 l (−2.4 %) | 27 | 11.94 | 112 (130) |
+| owner | 0 K | 246.6 l (−3.1 %) | 882 | 11.7 | 113 (121) |
+| owner | 0.3 K | 250.3 l (−1.7 %) | 0 | 12.06 | 125 (121) |
+| owner_cold | 0 K | 343.4 l (−2.8 %) | 1626 | 11.7 | 107 (137) |
+| owner_cold | 0.3 K | 346.5 l (−2.0 %) | 14 | 11.97 | 110 (137) |
+
+The margin keeps the air at the floor, or within 0.06 K of it, and costs a third to two thirds of the mild-day oil saving. On mild days the household's relay litres end up 0.6 % above eco's, and the owner-like relay starts rise above eco's. Open question 12 in the spec is the owner's call.
+
+**The timer baseline.** It uses less burner oil than Radiate here, because its TRVs read their own sensor beside the radiator and shut early: its rooms in use sit far below setpoint (54 000 to 66 000 K·min against about 2 400 on mild days). It is the savings baseline's definition, not a comfort-equivalent house, so it says nothing about whether Radiate saves oil against a well-set timer. Its relay time is longer, so relay litres, which is what Radiate's savings figures will use, are 31 % (household) and 40 % (owner-like) higher than eco+use on mild days. The estimator check against it is not run yet: slice 3 merged while this was built, and `sim.compare.estimator_check` is the hook, printing the true relay-litre difference for now. With a cold house the true difference is negative.
+
+**Before it goes live.** Slice 2 changes when the boiler fires. It needs the owner's go-ahead, then a few days in dry run on the real house reading `demand.setback` and `demand.floor` in the decision log.
 
 ## Learning memory and change detection
 

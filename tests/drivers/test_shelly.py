@@ -12,9 +12,11 @@ from radiate.drivers.live import LiveDriver
 from radiate.drivers.shelly import (
     DEFAULT_HEATING_WINDOWS,
     HEARTBEAT_KEY,
+    BurnerMeter,
     ShellyBoiler,
     ShellyError,
     ShellyRpc,
+    SwitchStatus,
     challenge,
     chunks,
     digest_header,
@@ -231,3 +233,59 @@ async def test_install_and_verify_watchdog(shelly):
     # A changed script is stopped, replaced and restarted.
     status = await b.install_watchdog(code + "\n// v2\n")
     assert status.ok and ("Script.Stop", {"id": status.script_id}) in shelly.calls
+
+
+# --- burner firing from the relay's power reading --------------------------------------
+
+
+def test_burner_meter_threshold_hysteresis_and_proof():
+    m = BurnerMeter(threshold_w=100.0, hysteresis_w=20.0)
+    on = lambda w: SwitchStatus(output=True, apower=w)  # noqa: E731
+    # Relay on, pump only: nothing yet shows the burner's load passes through the relay.
+    assert m.update(on(7.0)) is None and m.update(on(60.0)) is None
+    assert m.update(on(232.0)) is True  # ignition
+    assert m.update(on(186.0)) is True
+    assert m.update(on(90.0)) is True  # inside the hysteresis band: still firing
+    assert m.update(on(57.0)) is False  # pump only: the boiler's thermostat holds it off
+    assert m.update(on(95.0)) is False
+    assert m.update(SwitchStatus(output=False, apower=0.0)) is False
+    assert m.update(SwitchStatus(output=True, apower=None)) is None  # no metering
+    assert m.update(None) is None
+
+
+def test_store_channel_burner():
+    m = BurnerMeter(threshold_w=100.0, hysteresis_w=20.0)
+    assert m.update(SwitchStatus(output=True, apower=126.3)) is True
+    assert m.update(SwitchStatus(output=True, apower=0.0)) is False  # store satisfied
+
+
+async def test_refresh_reads_the_burner_on_each_channel(shelly):
+    b = boiler(shelly)
+    shelly.switches[0] = {"output": True, "apower": 186.0}
+    shelly.switches[1] = {"output": True, "apower": 125.0}
+    await b.refresh()
+    assert b.heating_burner is True and b.store_burner is True
+    shelly.switches[0] = {"output": True, "apower": 55.0}
+    shelly.switches[1] = {"output": True, "apower": 0.0}
+    await b.refresh()
+    assert b.heating_burner is False and b.store_burner is False
+    t = b.telemetry()
+    assert t["heating_burner"] is False and t["store_burner"] is False
+    assert t["store_power_w"] == 0.0
+
+
+async def test_burner_metering_can_be_turned_off(shelly):
+    cfg = ShellyConfig(host=shelly.host, password="pw", burner_metering=False)
+    b = ShellyBoiler(cfg, ShellyRpc(shelly.host, "pw", shelly.session))
+    shelly.switches[0] = {"output": True, "apower": 186.0}
+    await b.refresh()
+    assert b.heating_burner is None and b.store_burner is None
+
+
+async def test_unreachable_shelly_has_no_burner_reading():
+    async with aiohttp.ClientSession() as session:
+        cfg = ShellyConfig(host="127.0.0.1:9")
+        b = ShellyBoiler(cfg, ShellyRpc(cfg.host, None, session, timeout_s=0.5))
+        b.heating_burner = True
+        await b.refresh()
+        assert not b.reachable and b.heating_burner is None and b.store_burner is None

@@ -160,12 +160,24 @@ def test_schedule_periods_are_spans_above_the_days_lowest_setpoint():
 
 
 def test_schedule_room_use_follows_the_level_inside_periods():
-    levels = (IN_USE, IN_USE)
+    levels = (IN_USE, UNUSED)
     assert schedule_room_use(OFFICE, levels, WED, t("10:00")) is RoomUse.IN_USE
     assert schedule_room_use(OFFICE, levels, WED, t("07:59")) is RoomUse.SETBACK
     assert schedule_room_use(OFFICE, levels, SAT, t("10:00")) is RoomUse.SETBACK
     occasional = (OCCASIONAL, OCCASIONAL)
     assert schedule_room_use(OFFICE, occasional, WED, t("10:00")) is RoomUse.OCCASIONAL
+
+
+def test_schedule_room_use_flat_day_is_warm_all_day_at_its_level():
+    # A day at one temperature has no warm periods. On an in use or occasional day the
+    # room is kept at that temperature because it is used: warm all day, not setback.
+    flat = parse_week({"daily": "00:00/18"})
+    for at in ("00:00", "03:00", "12:00", "23:59"):
+        assert schedule_room_use(flat, (IN_USE, IN_USE), WED, t(at)) is RoomUse.IN_USE
+        assert schedule_room_use(flat, (OCCASIONAL, IN_USE), WED, t(at)) is RoomUse.OCCASIONAL
+        assert schedule_room_use(flat, (UNUSED, IN_USE), WED, t(at)) is RoomUse.SETBACK
+    # The office's flat weekend at its in use level is warm all day too.
+    assert schedule_room_use(OFFICE, (IN_USE, IN_USE), SAT, t("10:00")) is RoomUse.IN_USE
 
 
 def test_schedule_room_use_unused_is_setback_all_day():

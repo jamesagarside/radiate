@@ -441,3 +441,28 @@ async def test_a_sensor_not_heard_since_start_is_reported_missing():
     assert bed.temperature is None and bed.sensor_missing_s == 300
     # A room without a sensor of its own has nothing to wait for.
     assert snap.rooms["toilet"].sensor_missing_s is None
+
+
+async def test_snapshot_without_a_relay_reading_says_so():
+    # No Shelly: the relay in the snapshot is Radiate's own last command, which in dry
+    # run was never sent. Learning and accounting must not take it as the boiler.
+    drv, _, _ = make(dry_run=True)
+    feed(drv)
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.relay_observed is False
+    assert snap.heating_burner is None and snap.store_burner is None
+
+
+async def test_snapshot_carries_the_relay_and_burner_as_read(fake_shelly):
+    s = site(dry_run=True)
+    s = dataclasses.replace(s, shelly=dataclasses.replace(s.shelly, host=fake_shelly.host))
+    boiler = ShellyBoiler(s.shelly, ShellyRpc(fake_shelly.host, "pw", fake_shelly.session))
+    drv = LiveDriver(s, Bus().publish, boiler, clock=Clock(), wall=lambda: WALL)
+    feed(drv)
+    fake_shelly.switches[0] = {"output": True, "apower": 186.0}
+    fake_shelly.switches[1] = {"output": True, "apower": 0.0}
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.relay_observed is True and snap.heating_relay is True
+    assert snap.heating_burner is True
+    assert snap.store_burner is None  # the store channel has not shown its burner yet
+    assert snap.relay_follows_commands is False
