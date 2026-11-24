@@ -343,6 +343,7 @@ def _boiler(ctx: _Ctx, raw: dict) -> BoilerConfig:
             "nozzle_lph",
             "demand_mode",
             "eco_limit_k",
+            "damp_margin_k",
         },
         p,
     )
@@ -370,6 +371,7 @@ def _boiler(ctx: _Ctx, raw: dict) -> BoilerConfig:
         nozzle_lph=ctx.number(raw, "nozzle_lph", 0.0, 0.1, 10, p) if nozzle is not None else None,
         demand_mode=demand_mode,
         eco_limit_k=eco_limit,
+        damp_margin_k=ctx.number(raw, "damp_margin_k", d.damp_margin_k, 0, 1, p),
     )
 
 

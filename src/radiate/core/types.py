@@ -88,6 +88,9 @@ class BoilerConfig:
     demand_mode: DemandMode = DemandMode.ECO  # the default; the runtime can change it
     eco_limit_k: float = 1.5  # eco: the most a calling room waits below its target
     damp_floor_c: float = DAMP_FLOOR_C  # not in the configuration file (spec 5.8)
+    # Eco with room use: a room starts a burn alone this far above the damp floor, so its
+    # air stays above the floor while the burn gets going (spec 5.8, open question 12).
+    damp_margin_k: float = 0.3
 
 
 @dataclass(frozen=True, slots=True)

@@ -248,13 +248,14 @@ def solo_threshold_c(target: float, use: RoomUse | None, bcfg: BoilerConfig) -> 
     """Eco: below this a calling room starts a burn on its own (spec 5.8).
 
     No room use: target - eco limit, as before. Otherwise
-    max(target - limit, min(target, damp_floor_c)), where the limit is the eco limit,
-    plus SOLO_EXTRA_K for OCCASIONAL and SETBACK.
+    max(target - limit, min(target, damp_floor_c + damp_margin_k)), where the limit is
+    the eco limit, plus SOLO_EXTRA_K for OCCASIONAL and SETBACK.
     """
     if use is None:
         return target - bcfg.eco_limit_k
     limit = bcfg.eco_limit_k + (0.0 if use is RoomUse.IN_USE else SOLO_EXTRA_K)
-    return max(target - limit, min(target, bcfg.damp_floor_c))
+    floor = bcfg.damp_floor_c + bcfg.damp_margin_k
+    return max(target - limit, min(target, floor))
 
 
 def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:

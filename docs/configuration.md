@@ -179,7 +179,7 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 
 ### boiler
 
-`min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none), `demand_mode` (`eco`), `eco_limit_k` (1.5). Ranges are checked against spec section 5.1.
+`min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none), `demand_mode` (`eco`), `eco_limit_k` (1.5), `damp_margin_k` (0.3). Ranges are checked against spec section 5.1.
 
 `demand_mode` decides how calling rooms fire the boiler (spec section 5.3):
 
@@ -189,6 +189,8 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 | `comfort` | Any calling room more than `comfort_limit_k` below its target fires the boiler, as does a predicted burn of 1.5 minimum burns. Rooms stay closer to their targets, with more relay starts |
 
 In both modes frost protection and optimum start still fire the boiler. `eco_limit_k` is the most a calling room waits below its target in `eco` mode: 0.5 to 3 K, and at least `comfort_limit_k`.
+
+`damp_margin_k` applies in `eco` to rooms with a use level. A room set back waits for other rooms before it starts a burn, but never below the 12 °C damp floor. It starts a burn on its own this far above the floor (12.3 °C by default), so its air stays above 12 °C while the radiator warms. 0 to 1 K; 0 starts the burn at the floor itself, which saves a little more oil and lets the air dip a few tenths below 12 °C.
 
 You can change the demand mode without a restart with the **Eco** and **Comfort** control in the web UI, the Demand mode select in Home Assistant, or the API (`POST /api/v1/settings` with `{"demand_mode": "comfort"}`). That choice is saved in `radiate.db` and overrides `demand_mode` in this file until you send `{"demand_mode": null}`. The web UI and Home Assistant send null when you pick the mode set in this file, so Radiate follows the file again.
 

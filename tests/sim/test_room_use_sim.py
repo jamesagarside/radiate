@@ -52,10 +52,12 @@ def test_no_room_far_below_the_damp_floor_or_near_frost(results):
 
 def test_room_use_burns_no_more_oil_than_eco(results):
     mild = results["mild"].runs
-    assert mean(r.relay_litres for r in mild["eco+use"]) <= mean(
+    assert mean(r.oil_litres for r in mild["eco+use"]) <= mean(r.oil_litres for r in mild["eco"])
+    # Relay time: the damp margin (0.3 K) starts setback rooms' own burns earlier, so on
+    # mild days it can run a little longer than eco's (open question 12). Not by much.
+    assert mean(r.relay_litres for r in mild["eco+use"]) <= 1.03 * mean(
         r.relay_litres for r in mild["eco"]
     )
-    assert mean(r.oil_litres for r in mild["eco+use"]) <= mean(r.oil_litres for r in mild["eco"])
 
 
 def test_comfort_in_warm_periods_holds(results):

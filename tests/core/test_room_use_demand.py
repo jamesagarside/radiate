@@ -119,8 +119,17 @@ def test_solo_threshold_by_room_use_with_the_default_temperatures():
     assert SOLO_EXTRA_K == 1.0
     assert solo_threshold_c(19.0, IN_USE, b) == pytest.approx(17.5)
     assert solo_threshold_c(16.0, OCCASIONAL, b) == pytest.approx(13.5)
-    assert solo_threshold_c(14.0, SETBACK, b) == pytest.approx(12.0)  # the damp floor
+    assert b.damp_margin_k == 0.3
+    # The damp floor plus its margin, so the air stays above the floor itself.
+    assert solo_threshold_c(14.0, SETBACK, b) == pytest.approx(12.3)
     assert solo_threshold_c(11.0, SETBACK, b) == pytest.approx(11.0)  # at or under the floor
+    assert solo_threshold_c(12.0, SETBACK, b) == pytest.approx(12.0)  # never above the target
+    assert solo_threshold_c(13.0, IN_USE, b) == pytest.approx(12.3)
+
+
+def test_solo_threshold_without_a_damp_margin_is_the_damp_floor():
+    b = BoilerConfig(damp_margin_k=0.0)
+    assert solo_threshold_c(14.0, SETBACK, b) == pytest.approx(12.0)
     assert solo_threshold_c(13.0, IN_USE, b) == pytest.approx(12.0)
 
 

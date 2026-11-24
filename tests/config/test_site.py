@@ -230,6 +230,14 @@ def test_demand_mode():
         parse_site(minimal(boiler={"comfort_limit_k": 1.2, "eco_limit_k": 1.0}))
 
 
+def test_damp_margin():
+    assert parse_site(minimal()).house.boiler.damp_margin_k == 0.3
+    boiler = parse_site(minimal(boiler={"damp_margin_k": 0})).house.boiler
+    assert boiler.damp_margin_k == 0.0
+    with pytest.raises(ConfigError, match="boiler.damp_margin_k: must be 0 to 1"):
+        parse_site(minimal(boiler={"damp_margin_k": 1.5}))
+
+
 def test_learning_memory():
     assert parse_site(minimal()).house.learning.memory_days == 730
     assert parse_site(minimal()).house.learning.learn_on_trv_fallback is False

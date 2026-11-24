@@ -144,7 +144,22 @@ Tried and not taken:
 - A preheat margin of 1.5 or 1.8 in place of 1.2 changed nothing: the 3-hour cap, not the margin, made rooms late.
 - Counting setback rooms in pooled demand raised relay starts from 48 to 135 in a 12-day run, since they could start burns they couldn't keep.
 - Leaving setback rooms out of burns for other rooms (no "taking heat") made comfort slightly worse, as the rooms sat colder.
-- **A damp floor margin** (a setback room starts a burn 0.3 K above the floor) keeps the air at or above 11.94 °C, but the mild-day oil saving falls from 1.7 % to 0.5 % and owner-like relay starts rise above eco's. 0.5 K keeps it above 12.1 °C and leaves almost no mild-day saving. Starting the floor burn early by the room's predicted fall over the valve lead and arrival lag didn't keep it above 12 °C either. Left at the spec's rule; the owner decides whether the margin is worth its cost.
+- 0.5 K of damp margin keeps the air above 12.1 °C and leaves almost no mild-day saving. Starting the floor burn early by the room's predicted fall over the valve lead and arrival lag didn't keep it above 12 °C either.
+
+**The damp margin.** `boiler.damp_margin_k` (0.3 K by default) starts a setback room's own burn at 12.3 °C rather than 12 °C. Seeds 1 to 3, 21 measured days, eco+use against eco:
+
+| Scenario | Margin | Oil, firing | Room-minutes below 12 °C | Lowest room (°C) | Relay starts (eco) |
+|---|---|---|---|---|---|
+| mild | 0 K | 247.9 l (−1.7 %) | 926 | 11.8 | 115 (124) |
+| mild | 0.3 K | 250.8 l (−0.5 %) | 0 | 12.05 | 120 (124) |
+| cold | 0 K | 343.2 l (−2.7 %) | 1745 | 11.7 | 107 (130) |
+| cold | 0.3 K | 344.3 l (−2.4 %) | 27 | 11.94 | 112 (130) |
+| owner | 0 K | 246.6 l (−3.1 %) | 882 | 11.7 | 113 (121) |
+| owner | 0.3 K | 250.3 l (−1.7 %) | 0 | 12.06 | 125 (121) |
+| owner_cold | 0 K | 343.4 l (−2.8 %) | 1626 | 11.7 | 107 (137) |
+| owner_cold | 0.3 K | 346.5 l (−2.0 %) | 14 | 11.97 | 110 (137) |
+
+The margin keeps the air at the floor, or within 0.06 K of it, and costs a third to two thirds of the mild-day oil saving. On mild days the household's relay litres end up 0.6 % above eco's, and the owner-like relay starts rise above eco's. Open question 12 in the spec is the owner's call.
 
 **The timer baseline.** It uses less burner oil than Radiate here, because its TRVs read their own sensor beside the radiator and shut early: its rooms in use sit far below setpoint (54 000 to 66 000 K·min against about 2 400 on mild days). It is the savings baseline's definition, not a comfort-equivalent house, so it says nothing about whether Radiate saves oil against a well-set timer. Its relay time is longer, so relay litres, which is what Radiate's savings figures will use, are 31 % (household) and 40 % (owner-like) higher than eco+use on mild days. The estimator check against it is not run yet: slice 3 merged while this was built, and `sim.compare.estimator_check` is the hook, printing the true relay-litre difference for now. With a cold house the true difference is negative.
 

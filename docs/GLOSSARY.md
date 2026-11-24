@@ -476,7 +476,7 @@ Code: `RoomUse.SETBACK`, reason `demand.setback`.
 _Avoid_: unused for this, which is a use level.
 
 **Solo limit, solo threshold**:
-In `eco`, how far below its target a calling room waits before it starts a burn on its own: the eco limit for a room in use (or with no room use), the eco limit plus 1 K for an occasional or setback room. The solo threshold is the temperature that gives; for a room with room use it is never below the damp floor, or the room's own target if lower: `max(target − limit, min(target, damp_floor_c))`.
+In `eco`, how far below its target a calling room waits before it starts a burn on its own: the eco limit for a room in use (or with no room use), the eco limit plus 1 K for an occasional or setback room. The solo threshold is the temperature that gives; for a room with room use it is never below the damp floor plus the damp margin, or the room's own target if lower: `max(target − limit, min(target, damp_floor_c + damp_margin_k))`.
 Code: `solo_threshold_c` and `SOLO_EXTRA_K` in `radiate.core.decide`.
 
 **Solo latch**:
@@ -486,6 +486,10 @@ Code: `RoomState.solo`, API `rooms[].solo`, reason `demand.floor`.
 **Damp floor**:
 The temperature no saving rule lets a room wait below: 12 °C, the level below which walls and window frames can get damp. In `eco` a room with room use starts a burn on its own at the latest when it falls below it (or below its own target, if lower); the household setup also warns about temperatures below it. Frost protection sits below it and is unchanged.
 °C. Code: `DAMP_FLOOR_C` and `BoilerConfig.damp_floor_c` in `radiate.core.types`; `DAMP_BELOW_C` in `radiate.config.household` takes its value from it.
+
+**Damp margin**:
+How far above the damp floor a room with room use starts a burn on its own in `eco`, so its air stays above the floor while the radiator warms. 0.3 K by default, 0 to 1 K.
+K. Code: `BoilerConfig.damp_margin_k`, config key `boiler.damp_margin_k`.
 
 **Predicted burn**:
 How long the current calling rooms need the burner, taken from the target arrival.
