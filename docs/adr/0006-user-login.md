@@ -55,7 +55,7 @@ C. Radiate gets built-in login, off by default, with three identity sources and 
 
 ### Roles
 
-Two roles. **Admin** can do everything the API allows. **Viewer** can read every view and the live stream, and is refused any change (403), except signing out. A household where a guest or a child should see why a room is cold without changing it needs exactly this, and nothing needs more yet. Local users get a role from the CLI. SSO users get one at each login from the provider's claims: the configured `admins` and `viewers` lists match the username or any value of the roles claim (for example a `groups` claim). Someone who matches neither is refused, so an identity provider shared with other services can't hand out access by accident.
+(Superseded by the amendment below, which adds a household role.) Two roles. **Admin** can do everything the API allows. **Viewer** can read every view and the live stream, and is refused any change (403), except signing out. A household where a guest or a child should see why a room is cold without changing it needs exactly this, and nothing needs more yet. Local users get a role from the CLI. SSO users get one at each login from the provider's claims: the configured `admins` and `viewers` lists match the username or any value of the roles claim (for example a `groups` claim). Someone who matches neither is refused, so an identity provider shared with other services can't hand out access by accident.
 
 ### Sessions
 
@@ -108,9 +108,39 @@ An `auth` section in the house file, validated with the rest of it. `radiate ser
 - The spec, configuration, deployment and design docs, and the implementation status, describe all of this.
 - Login still needs TLS from a reverse proxy to be safe over the internet. Radiate doesn't terminate TLS itself.
 
+## Amendment: a household role (November 2026)
+
+The owner decided there should be three roles: admin, household, and read only. This answers spec open question 13 and the first "Revisit if" below.
+
+### Roles
+
+- **admin**: everything, as before.
+- **household**: day-to-day control. Setpoint overrides and holds, the heating mode (Auto, Frost, Off), the demand mode (Eco, Comfort), hot-water boost, the fire switch, away and "I'm home", and room adjustments made in the week view. Not Settings, the household setup (people, routines, temperatures, away settings), the layout, learning reset, network scans or user management.
+- **viewer**, labelled "Read only" in the web UI: reads every view except Settings and changes nothing but signing out. The stored name stays `viewer` so existing users and sessions keep working; `radiate users --role readonly` is accepted for it.
+
+The API token and ingress stay admin. Single sign-on gains a `households` list beside `admins` and `viewers`, matched against the username and the same roles claim or attribute; the highest role matched wins, and someone in no list is still refused.
+
+### One table for every route
+
+`radiate.server.permissions.PERMISSIONS` maps each route (method and pattern) to its lowest role: `public`, `viewer`, `household` or `admin`. The middleware reads it for every `/api/` request, after the CSRF check. A test fails when a registered route has no entry, or an entry has no route, and a route missing from the table at run time needs an admin, so a new route can't default open. A refused request gets 403 `{"error": "<their role>", "needs": "<lowest role>"}`; a viewer still sees `"error": "viewer"`, as before.
+
+Decisions made along the way:
+
+- **The heating mode is household.** Auto, Frost and Off are what any thermostat on the wall offers, and away already covers holidays. Turning the heating off is reversible at once by anyone in the household.
+- **The layout is admin.** It only draws the house model, but it is a one-off picture of the house that everyone sees, not a day-to-day control, and a misplaced room misleads every reader. Arrange rooms shows "Ask an admin" to a household member.
+- **Room adjustments are household, the rest of the setup is admin.** The week view saves adjustments with the same `PUT /api/v1/household` as the setup wizard. For a household member the server parses the draft and the household in use, drops every room's adjustments from both, and saves only if what is left is the same (`HouseholdSetup.only_adjustments`); otherwise 403. `POST household/preview` saves nothing and is household. `DELETE household` is admin.
+- **`POST /api/v1/settings` is household for `demand_mode` only.** Any key added later needs an admin until it is listed in `HOUSEHOLD_SETTINGS`.
+- **Reading `settings/config` is admin.** It carries device addresses, broker and provider details and who is an admin. Household and read-only users don't see the Settings tab.
+- **Home Assistant's reports are admin.** `people/{id}/presence`, `ha/persons` and `outdoor` come from radiate-ha over the token, never from a person.
+- **Acknowledging alerts** has no route yet. When one is added it should be household.
+
+### Web UI
+
+The role from `GET /api/v1/auth/me` decides what is shown. A control the role can't use stays in place, disabled, with a short tag: "Read only" for a viewer, "Ask an admin" for a household member. Nothing is left to fail with "Not saved". The server enforces the same table, so the UI is never the only check.
+
 ## Revisit if
 
-- People need a role between viewer and admin, such as one that can change setpoints and away but not settings.
+- People need a finer split than three roles, such as a guest who may set their own room only.
 - A Settings view stores the `auth` section somewhere other than the house file.
 - Radiate starts terminating TLS itself, or the cloud edition (ADR-0002) brings its own accounts.
 - SAML's native stack becomes easy to ship in the default image, or no one uses it.

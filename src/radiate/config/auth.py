@@ -14,7 +14,25 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-ROLES = ("admin", "viewer")
+# Highest first. `viewer` is shown as "Read only" in the web UI; `readonly` is accepted
+# as another name for it where a person types a role (`radiate users --role`).
+ROLES = ("admin", "household", "viewer")
+ROLE_ALIASES = {"readonly": "viewer", "read-only": "viewer"}
+_RANK = {"viewer": 0, "household": 1, "admin": 2}
+
+
+def role_at_least(role: str, needed: str) -> bool:
+    """Whether `role` may do what `needed` may. An unknown role may do nothing."""
+    return role in _RANK and _RANK[role] >= _RANK[needed]
+
+
+def normalise_role(role: str) -> str | None:
+    """The stored name of a role a person typed, or None if it isn't one."""
+    role = role.strip().lower()
+    role = ROLE_ALIASES.get(role, role)
+    return role if role in ROLES else None
+
+
 SECURE_COOKIE = ("auto", "always", "never")
 DEFAULT_SCOPES = ("openid", "profile", "email")
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
@@ -24,18 +42,22 @@ LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 class RoleMap:
     """Who gets which role after single sign-on.
 
-    A value matches the username or any value of the roles claim or attribute. Admins
-    are checked first. Someone who matches neither list is refused.
+    A value matches the username or any value of the roles claim or attribute. The
+    highest role matched wins: admins, then households, then viewers. Someone who
+    matches no list is refused.
     """
 
     claim: str | None = None
     admins: tuple[str, ...] = ()
     viewers: tuple[str, ...] = ()
+    households: tuple[str, ...] = ()
 
     def role_for(self, username: str, values: tuple[str, ...]) -> str | None:
         have = {username, *values}
         if have & set(self.admins):
             return "admin"
+        if have & set(self.households):
+            return "household"
         if have & set(self.viewers):
             return "viewer"
         return None
@@ -113,13 +135,15 @@ def _strings(ctx: Any, raw: dict, key: str, path: str) -> tuple[str, ...]:
 
 def _roles(ctx: Any, raw: dict, path: str, claim_key: str) -> RoleMap:
     admins = _strings(ctx, raw, "admins", path)
+    households = _strings(ctx, raw, "households", path)
     viewers = _strings(ctx, raw, "viewers", path)
-    if not admins and not viewers:
-        ctx.err(f"{path}admins", "list at least one user or group in admins or viewers")
+    if not admins and not households and not viewers:
+        ctx.err(f"{path}admins", "list at least one user or group in admins, households or viewers")
     return RoleMap(
         claim=ctx.get(raw, claim_key, str, None, path) or None,
         admins=admins,
         viewers=viewers,
+        households=households,
     )
 
 
@@ -136,6 +160,7 @@ def _oidc(ctx: Any, raw: dict) -> OidcConfig | None:
             "username_claim",
             "roles_claim",
             "admins",
+            "households",
             "viewers",
             "label",
         },
@@ -179,6 +204,7 @@ def _saml(ctx: Any, raw: dict) -> SamlConfig | None:
             "username_attribute",
             "roles_attribute",
             "admins",
+            "households",
             "viewers",
             "label",
         },

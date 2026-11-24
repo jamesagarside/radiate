@@ -188,5 +188,5 @@ class SamlServiceProvider:
             )
         role = self.cfg.roles.role_for(username, roles)
         if role is None:
-            raise SamlError(f"{username} is in neither admins nor viewers")
+            raise SamlError(f"{username} is in none of admins, households or viewers")
         return SamlIdentity(username=username, role=role)

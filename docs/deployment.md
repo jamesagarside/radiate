@@ -190,9 +190,10 @@ It asks for the password twice. In Docker, run it inside the container with `doc
 | Command | What it does |
 |---|---|
 | `radiate users list` | Everyone who can sign in with a password, and their role |
-| `radiate users add NAME --role admin` | Add someone. The role defaults to `viewer` |
+| `radiate users add NAME --role admin` | Add someone. Roles are `admin`, `household` (day-to-day control, no settings) and `viewer` (read only; `readonly` also works). The role defaults to `viewer` |
+| `radiate users add NAME --role household` | Add someone who can change temperatures, away, fires and boosts but not settings |
 | `radiate users reset-password NAME` | Set a new password, for a forgotten one. Their sessions end |
-| `radiate users set-role NAME --role viewer` | Change a role. Their sessions end |
+| `radiate users set-role NAME --role household` | Change a role. Their sessions end |
 | `radiate users remove NAME` | Remove someone. Their sessions end |
 
 The commands write to `radiate.db` directly, so they work while the server runs and take effect on the next request. If a single sign-on provider is down, add a local admin this way.

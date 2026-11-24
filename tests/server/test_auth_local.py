@@ -202,7 +202,7 @@ async def test_viewer_reads_but_cannot_change(client):
         assert (await client.get(path)).status in (200, 404), path
     h = {"X-CSRF-Token": me["csrf"]}
     r = await client.post("/api/v1/mode", json={"mode": "off"}, headers=h)
-    assert r.status == 403 and await r.json() == {"error": "viewer"}
+    assert r.status == 403 and await r.json() == {"error": "viewer", "needs": "household"}
     r = await client.post("/api/v1/rooms/lounge/setpoint", json={"setpoint": 25}, headers=h)
     assert r.status == 403
     assert (await client.post("/api/v1/auth/logout", headers=h)).status == 200

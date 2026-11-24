@@ -276,7 +276,8 @@ User login for the web UI ([ADR-0006](adr/0006-user-login.md)). Without this sec
 | `username_claim` | `preferred_username` | The claim that names the person |
 | `roles_claim` | none | A claim holding groups or roles, such as `groups`. Taken from the userinfo endpoint if the ID token lacks it |
 | `admins` | none | Usernames or `roles_claim` values that make someone an admin |
-| `viewers` | none | Usernames or `roles_claim` values that make someone a viewer. Someone in neither list is refused. At least one list is required |
+| `households` | none | Usernames or `roles_claim` values that make someone a household member: day-to-day control, no settings |
+| `viewers` | none | Usernames or `roles_claim` values that make someone a viewer (shown as Read only). Someone in none of the three lists is refused. At least one list is required |
 | `label` | `Sign in with single sign-on` | The button text on the login page |
 
 `auth.saml`:
@@ -288,7 +289,7 @@ User login for the web UI ([ADR-0006](adr/0006-user-login.md)). Without this sec
 | `sp_entity_id` | `<public_url>/auth/saml/metadata` | Radiate's entity ID. Give your provider `<public_url>/auth/saml/metadata`, which serves Radiate's metadata, and the assertion consumer service `<public_url>/auth/saml/acs` |
 | `username_attribute` | the NameID | An attribute to take the username from instead |
 | `roles_attribute` | none | An attribute holding groups or roles |
-| `admins`, `viewers`, `label` | | As for OIDC. `label` defaults to `Sign in with SAML` |
+| `admins`, `households`, `viewers`, `label` | | As for OIDC. `label` defaults to `Sign in with SAML` |
 
 Your provider must sign assertions with SHA-256 or stronger. Radiate refuses unsigned assertions, SHA-1 signatures, and responses it didn't ask for.
 
@@ -303,11 +304,18 @@ auth:
     client_secret_file: /run/secrets/radiate-oidc
     roles_claim: groups
     admins: [heating-admins]
-    viewers: [family]
+    households: [family]
+    viewers: [guests]
     label: Sign in with the house account
 ```
 
-Roles: an **admin** can do everything. A **viewer** can see every view and is refused any change. Local users get their role from `radiate users add --role`; single sign-on users get theirs at each sign-in from `admins` and `viewers`.
+Roles, highest first:
+
+- **admin** can do everything: Settings, the household setup, arranging rooms, resetting learning, network scans.
+- **household** has day-to-day control: setpoints and holds, the heating mode, Eco or Comfort, hot-water boost, the fire switch, away and "I'm home", and room adjustments in the week view. Not Settings, the household setup (people, routines, temperatures), arranging rooms or resetting learning.
+- **viewer**, shown as Read only, can see every view except Settings and change nothing but signing out.
+
+Local users get their role from `radiate users add --role` (`readonly` is accepted for `viewer`); single sign-on users get theirs at each sign-in from `admins`, `households` and `viewers`, highest first. `radiate.server.permissions` lists the lowest role for every API route; the API token and Home Assistant ingress are admin.
 
 ### schedules
 
