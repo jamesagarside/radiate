@@ -147,8 +147,13 @@ export function createDemoTransport() {
   return {
     // Asked again each time: the household setup changes what it says.
     house: () => request("GET", "house"),
-    // If start-up failed the loading panel says so; leave the status line alone.
-    state: () => ready.then(() => latest, () => new Promise(() => {})),
+    // Asked of the engine, so a change shows straight away rather than at the next
+    // simulated tick. If start-up failed the loading panel says so; leave the status
+    // line alone.
+    state: () => ready.then(
+      () => request("GET", "state").catch(() => latest),
+      () => new Promise(() => {}),
+    ),
     get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body),
     call: (method, path, body) => request(method, path, body, true),

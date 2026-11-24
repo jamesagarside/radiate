@@ -43,6 +43,7 @@
       </div>
     </div>
     <p class="demand-note" id="demand-note" hidden></p>
+    <p class="demand-note" id="mode-error" data-error="true" role="alert" hidden></p>
   </header>
 
   <nav class="views" id="views" aria-label="Views" hidden>
@@ -115,6 +116,7 @@
         <span class="lock-tag" id="boost-lock" hidden></span>
         <button class="btn" id="boost" aria-describedby="boost-lock">Boost hot water</button>
       </div>
+      <p class="action-error" id="boost-error" role="alert" hidden></p>
       <div class="guard" id="guard" aria-hidden="true"><div class="guard-fill"></div></div>
       <p class="boiler-note" id="short-cycle" hidden><strong class="tag">Short-cycling</strong> <span id="short-cycle-text"></span></p>
       <div class="timeline" id="timeline" aria-label="Last 24 hours of burns and hot-water windows">
@@ -826,6 +828,7 @@
       <p class="reason"></p>
       <footer class="meta"></footer>
       <button class="btn fire" hidden>Fire lit</button>
+      <p class="action-error fire-error" role="alert" hidden></p>
     </article>
   </template>
 
@@ -841,6 +844,7 @@
         <button type="button" class="link away-clear" hidden>Back now</button>
         <span class="lock-tag" hidden></span>
       </div>
+      <p class="away-error person-error" role="alert" hidden></p>
       <form class="away-form" hidden>
         <div class="away-fields">
           <label>Away until <input type="date" name="date" required></label>

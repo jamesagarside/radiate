@@ -27,6 +27,7 @@ def test_expected_files(site):
         "index.html",
         "static/app.css",
         "static/app.js",
+        "static/pending.js",
         "static/week.js",
         "static/household.js",
         "static/setup.js",
@@ -61,6 +62,7 @@ def test_index_uses_the_demo_transport_and_relative_urls(site):
 def test_static_assets_have_no_root_relative_urls(site):
     for name in (
         "app.js",
+        "pending.js",
         "week.js",
         "household.js",
         "setup.js",
