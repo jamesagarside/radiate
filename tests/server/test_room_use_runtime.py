@@ -177,3 +177,14 @@ async def test_household_without_any_baseline_room_sets_no_baseline():
     snap = rt.last_snapshot
     assert snap.baseline is False
     assert all(inp.baseline_c is None for inp in snap.rooms.values())
+
+
+async def test_describe_shows_room_use_and_the_solo_latch():
+    rt = make(household_data(), WED_0700)
+    await rt.step()
+    rooms = {r["id"]: r for r in rt.describe()["rooms"]}
+    assert rooms["bedroom_1"]["use"] == "in_use"
+    assert rooms["bedroom_2"]["use"] == "setback"
+    assert rooms["lounge"]["use"] is None  # hand-written, no use level
+    assert rooms["bedroom_1"]["solo"] is False
+    assert "use" not in rooms["stairs"]  # passive: not controllable

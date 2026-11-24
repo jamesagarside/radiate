@@ -11,8 +11,9 @@ same way.
   away turns their rooms setback.
 - **Hand-written rooms** with a use level in the house file (`rooms[].use`,
   `schedule_room_use`): the warm periods are the spans of the day where the schedule's
-  setpoint is above that day's lowest setpoint. The weekend level applies on Saturday
-  and Sunday, the days a hand-written schedule's `weekend` key means.
+  setpoint is above that day's lowest setpoint; a day at one setpoint throughout is
+  warm all day when its level is in use or occasional. The weekend level applies on
+  Saturday and Sunday, the days a hand-written schedule's `weekend` key means.
 - Any other room has no room use (None), which keeps today's behaviour.
 
 The savings baseline is a heating timer on from the first person up to the last to
@@ -92,11 +93,16 @@ def schedule_room_use(
     """Room use for a hand-written room with a use level, as (weekdays, weekend).
 
     Its level inside the day's warm periods (`schedule_periods`), SETBACK outside them
-    and all day when the level is unused.
+    and all day when the level is unused. A day at one setpoint throughout has no warm
+    periods, so on an in use or occasional day it counts as warm all day at that level:
+    the room is kept at that temperature because it is used, not set back.
     """
     day = weekday % 7
     level = levels[1] if day in SCHEDULE_WEEKEND else levels[0]
-    if level is UseLevel.UNUSED or not _inside(schedule_periods(week.days[day]), minute):
+    if level is UseLevel.UNUSED:
+        return RoomUse.SETBACK
+    periods = schedule_periods(week.days[day])
+    if periods and not _inside(periods, minute):
         return RoomUse.SETBACK
     return _WARM_USE[level]
 

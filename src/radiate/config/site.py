@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from radiate.core.estimator import MEMORY_DAYS_MAX, MEMORY_DAYS_MIN
+from radiate.core.outdoor import DEFAULT_STALE_AFTER_S, OutdoorSource
 from radiate.core.types import (
     BoilerConfig,
     DemandMode,
@@ -36,6 +37,7 @@ from radiate.core.types import (
 )
 
 from .auth import AuthConfig, parse_auth
+from .export import ExportConfig, parse_export
 from .household import (
     ADJUST_GROUPS,
     LIMITS,
@@ -55,6 +57,7 @@ from .household import (
     UseLevel,
     compile_household,
     household_advice,
+    household_section,
 )
 from .schedule import (
     DAY_ALIASES,
@@ -110,6 +113,12 @@ class ShellyConfig:
     heating_switch: int = 0
     store_switch: int = 1
     auto_off_s: float = 120 * 60  # spec 5.7: the relay can never latch on indefinitely
+    # Burner firing from each channel's power reading (spec 3, 5.6): at or above the
+    # threshold the burner fires; it stops below threshold - hysteresis. Trusted on a
+    # channel only once it has read at or above the threshold since Radiate started.
+    burner_metering: bool = True
+    burner_threshold_w: float = 100.0
+    burner_hysteresis_w: float = 20.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +145,11 @@ class SiteConfig:
     timezone: str = "Europe/London"
     dry_run: bool = True
     outdoor_sensor: str | None = None
+    # Where the outdoor temperature comes from (radiate.core.outdoor): the Zigbee sensor
+    # (the default), Home Assistant (`POST /api/v1/outdoor`), or both, Zigbee first.
+    outdoor_source: OutdoorSource = OutdoorSource.ZIGBEE
+    # A Home Assistant outdoor reading older than this counts as missing.
+    outdoor_stale_after_s: float = DEFAULT_STALE_AFTER_S
     mqtt: MqttConfig | None = None
     shelly: ShellyConfig | None = None
     trv: TrvOptions = field(default_factory=TrvOptions)
@@ -148,12 +162,24 @@ class SiteConfig:
     # Days of recorded ticks (snapshots and actions) kept in radiate.db for replay and
     # bootstrap (spec 4.3, 6). 0 turns recording off.
     history_days: float = 14.0
+    # How long the manual fire flag lasts; it also ends at local midnight (spec 7).
+    fire_flag_s: float = 6 * 3600.0
+    # Where to send data besides the web UI: the OpenTelemetry export (spec 9.1).
+    export: ExportConfig = field(default_factory=ExportConfig)
     notes: tuple[str, ...] = ()  # non-fatal remarks for the operator
     household: Household | None = None
     # The household's rooms: the valve's week (fixed preheat, fitted to the TRVZB) and
     # the week live control follows (see radiate.config.household).
     household_schedules: dict[str, WeekSchedule] = field(default_factory=dict)
     household_live: dict[str, WeekSchedule] = field(default_factory=dict)
+    # The household's valve weeks for everyone at home. The fallbacks (the TRV schedule
+    # mirror and the Shelly watchdog's windows) use these and never the weeks compiled
+    # for people away: they heat the house when Radiate cannot, so they fail warm.
+    household_fallback: dict[str, WeekSchedule] = field(default_factory=dict)
+    # Per household room, Monday first: the use level of its warm periods in those weeks
+    # (`CompiledHousehold.warm_levels`), or unused on a day without any, so the watchdog
+    # knows whether a flat day is warm.
+    household_fallback_levels: dict[str, tuple[UseLevel, ...]] = field(default_factory=dict)
     # The schedule each controllable room follows when no household covers it: its own
     # `schedule`, or `default` when that exists. None: the house file gives it none.
     room_schedules: dict[str, str | None] = field(default_factory=dict)
@@ -168,6 +194,10 @@ class SiteConfig:
     household_notes: tuple[str, ...] = ()  # the part of `notes` about the household
     # Why a household saved from the web UI was not used, if it was not.
     saved_problems: tuple[str, ...] = ()
+    # Settings saved from the web UI's Settings view (radiate.config.settings) that are
+    # in effect, as dotted paths, and why saved settings were not used, if they were not.
+    saved_settings: tuple[str, ...] = ()
+    settings_problems: tuple[str, ...] = ()
 
     def schedule_for(self, room_id: str) -> WeekSchedule:
         """The room's week as the valve holds it: the schedule mirror and the fallback."""
@@ -186,9 +216,33 @@ class SiteConfig:
             return self.household_live[room_id]
         return self.schedule_for(room_id)
 
+    def fallback_schedule_for(self, room_id: str) -> WeekSchedule:
+        """The room's week for the fallbacks: as the valve holds it with everyone home.
+
+        The TRV schedule mirror and the Shelly watchdog's windows run the house when
+        Radiate is not running, so they never inherit an away (spec 7, fail warm).
+        """
+        if room_id in self.household_fallback:
+            return self.household_fallback[room_id]
+        return self.schedule_for(room_id)
+
+    def fallback_level(self, room_id: str, weekday: int) -> UseLevel | None:
+        """The room's use level on `weekday` in its fallback week: from the household
+        for everyone at home, else its hand-written `use`, else None."""
+        day = weekday % 7
+        if room_id in self.household_fallback_levels:
+            return self.household_fallback_levels[room_id][day]
+        levels = self.schedule_use.get(room_id)
+        if levels is None:
+            return None
+        return levels[1] if day in DAY_ALIASES["weekend"] else levels[0]
+
     def mirror_payload(self, room_id: str) -> dict[str, str]:
-        """The room's week as written to its TRVZB, in the frame the TRV compares with."""
-        week = self.schedule_for(room_id)
+        """The room's week as written to its TRVZB, in the frame the TRV compares with.
+
+        Built from the week for everyone at home (`fallback_schedule_for`).
+        """
+        week = self.fallback_schedule_for(room_id)
         room = self.house.room(room_id)
         if room.role is RoomRole.INTERNAL_SENSOR_ONLY:
             # The TRV reads about room - bias; spec 4.6 and decide._trv_setpoint.
@@ -310,6 +364,7 @@ def _boiler(ctx: _Ctx, raw: dict) -> BoilerConfig:
             "nozzle_lph",
             "demand_mode",
             "eco_limit_k",
+            "damp_margin_k",
         },
         p,
     )
@@ -337,6 +392,7 @@ def _boiler(ctx: _Ctx, raw: dict) -> BoilerConfig:
         nozzle_lph=ctx.number(raw, "nozzle_lph", 0.0, 0.1, 10, p) if nozzle is not None else None,
         demand_mode=demand_mode,
         eco_limit_k=eco_limit,
+        damp_margin_k=ctx.number(raw, "damp_margin_k", d.damp_margin_k, 0, 1, p),
     )
 
 
@@ -375,7 +431,20 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
     if not raw:
         return None
     p = "shelly."
-    ctx.unknown(raw, {"host", "password", "heating_switch", "store_switch", "auto_off_min"}, p)
+    ctx.unknown(
+        raw,
+        {
+            "host",
+            "password",
+            "heating_switch",
+            "store_switch",
+            "auto_off_min",
+            "burner_metering",
+            "burner_threshold_w",
+            "burner_hysteresis_w",
+        },
+        p,
+    )
     host = ctx.get(raw, "host", str, "", p)
     if not host:
         ctx.err(f"{p}host", "required")
@@ -383,12 +452,19 @@ def _shelly(ctx: _Ctx, raw: dict) -> ShellyConfig | None:
     store = int(ctx.number(raw, "store_switch", 1, 0, 3, p))
     if heating == store:
         ctx.err(f"{p}store_switch", "must differ from heating_switch")
+    threshold = ctx.number(raw, "burner_threshold_w", 100, 10, 3000, p)
+    hysteresis = ctx.number(raw, "burner_hysteresis_w", 20, 0, 1000, p)
+    if hysteresis >= threshold:
+        ctx.err(f"{p}burner_hysteresis_w", "must be less than burner_threshold_w")
     return ShellyConfig(
         host=host,
         password=ctx.get(raw, "password", str, None, p) or None,
         heating_switch=heating,
         store_switch=store,
         auto_off_s=ctx.number(raw, "auto_off_min", 120, 15, 240, p) * 60,
+        burner_metering=ctx.get(raw, "burner_metering", bool, True, p),
+        burner_threshold_w=threshold,
+        burner_hysteresis_w=hysteresis,
     )
 
 
@@ -1085,6 +1161,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "monitoring",
             "suggestions",
             "auth",
+            "export",
         },
         "",
     )
@@ -1097,9 +1174,12 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "timezone",
             "dry_run",
             "outdoor_sensor",
+            "outdoor_source",
+            "outdoor_stale_after_min",
             "data_dir",
             "sensor_max_silence_min",
             "history_days",
+            "fire_flag_hours",
         },
         "house.",
     )
@@ -1146,6 +1226,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     monitoring = _monitoring(ctx, ctx.section(data, "monitoring"))
     auth = parse_auth(ctx, ctx.section(data, "auth"))
     outdoor = ctx.get(house, "outdoor_sensor", str, None, "house.") or None
+    outdoor_source, outdoor_stale_min = _outdoor_source(ctx, house, outdoor, notes)
     if any(d.trv or d.sensor or d.window for d in devices.values()) or outdoor:
         if mqtt is None:
             ctx.err("mqtt", "required: rooms use Zigbee2MQTT devices")
@@ -1157,6 +1238,9 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     data_dir = ctx.get(house, "data_dir", str, "./data", "house.")
     silence_min = ctx.number(house, "sensor_max_silence_min", 60, 10, 180, "house.")
     history_days = ctx.number(house, "history_days", 14, 0, 90, "house.")
+    fire_flag_hours = ctx.number(house, "fire_flag_hours", 6, 0.5, 24, "house.")
+    export, export_problems = parse_export(data.get("export"))
+    ctx.problems.extend(export_problems)
 
     if ctx.problems:
         raise ConfigError(ctx.problems)
@@ -1167,6 +1251,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         timezone=tz,
         dry_run=dry_run,
         outdoor_sensor=outdoor,
+        outdoor_source=outdoor_source,
+        outdoor_stale_after_s=outdoor_stale_min * 60,
         mqtt=mqtt,
         shelly=shelly,
         trv=trv,
@@ -1174,13 +1260,45 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         auth=auth,
         data_dir=data_dir,
         sensor_max_silence_s=silence_min * 60,
+        fire_flag_s=fire_flag_hours * 3600,
         history_days=history_days,
+        export=export,
         notes=tuple(notes),
         room_schedules=own,
         schedule_use=schedule_use,
         file_household=household,
     )
     return apply_household(site, household, "house_file")
+
+
+OUTDOOR_STALE_MIN = (30, 1440)
+
+
+def _outdoor_source(
+    ctx: _Ctx, house: dict, sensor: str | None, notes: list[str]
+) -> tuple[OutdoorSource, float]:
+    """`house.outdoor_source` and `house.outdoor_stale_after_min`."""
+    raw = ctx.get(house, "outdoor_source", str, OutdoorSource.ZIGBEE.value, "house.")
+    try:
+        source = OutdoorSource(raw)
+    except ValueError:
+        ctx.err("house.outdoor_source", "must be zigbee, home_assistant or both")
+        source = OutdoorSource.ZIGBEE
+    lo, hi = OUTDOOR_STALE_MIN
+    stale_min = ctx.number(
+        house, "outdoor_stale_after_min", DEFAULT_STALE_AFTER_S / 60, lo, hi, "house."
+    )
+    if source is OutdoorSource.BOTH and not sensor:
+        ctx.err(
+            "house.outdoor_source",
+            "both needs house.outdoor_sensor; use home_assistant without a Zigbee sensor",
+        )
+    if source is OutdoorSource.HOME_ASSISTANT and sensor:
+        notes.append(
+            "house.outdoor_sensor is not used: house.outdoor_source is home_assistant. "
+            "Use both to prefer the Zigbee sensor."
+        )
+    return source, stale_min
 
 
 def parse_household(raw: Any, site: SiteConfig) -> Household:
@@ -1224,10 +1342,18 @@ def apply_household(site: SiteConfig, household: Household | None, source: str) 
     notes: list[str] = []
     schedules: dict[str, WeekSchedule] = {}
     live: dict[str, WeekSchedule] = {}
+    levels: dict[str, tuple[UseLevel, ...]] = {}
     if household is not None:
         notes.extend(f"{path} {text}" for path, text in household_advice(household))
         compiled = compile_household(household)
         schedules, live = compiled.schedules, compiled.live
+        levels = {
+            rid: tuple(
+                level if compiled.periods[rid][day] else UseLevel.UNUSED
+                for day, level in enumerate(days)
+            )
+            for rid, days in compiled.warm_levels.items()
+        }
         notes.extend(compiled.notes)
     return replace(
         site,
@@ -1235,11 +1361,43 @@ def apply_household(site: SiteConfig, household: Household | None, source: str) 
         household=household,
         household_schedules=schedules,
         household_live=live,
+        household_fallback=dict(schedules),
+        household_fallback_levels=dict(levels),
         household_source=source if household is not None else None,
         household_notes=tuple(notes),
         notes=base + tuple(notes),
         saved_problems=(),
     )
+
+
+SAVED_SOURCE_WARNING = (
+    "The household saved from the web UI replaces the house file's household section "
+    "as a whole, away settings included. Changes to that section in the house file have "
+    "no effect until the saved setup is deleted (DELETE /api/v1/household, or remove "
+    "household.yaml from the data directory)."
+)
+
+
+def shadowed_household_keys(site: SiteConfig) -> list[str]:
+    """Settings in the house file's `household` section that the household saved from
+    the web UI hides, because it differs there: dotted keys such as
+    `away.everyone_away`, or a whole part such as `people`. Empty unless the saved
+    household is in use and the house file has a section of its own.
+    """
+    if site.household_source != "saved" or site.file_household is None or not site.household:
+        return []
+    mine, saved = household_section(site.file_household), household_section(site.household)
+    out: list[str] = []
+    for key in sorted(set(mine) | set(saved)):
+        a, b = mine.get(key), saved.get(key)
+        if a == b:
+            continue
+        if key in ("timing", "away", "temperatures"):
+            a, b = a or {}, b or {}
+            out.extend(f"{key}.{k}" for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k))
+        else:
+            out.append(key)
+    return out
 
 
 def apply_saved(site: SiteConfig) -> SiteConfig:
@@ -1265,19 +1423,69 @@ def apply_saved(site: SiteConfig) -> SiteConfig:
     return apply_household(site, household, "saved")
 
 
-def load_site(
-    path: str | Path, env: dict[str, str] | None = None, data_dir: str | Path | None = None
-) -> SiteConfig:
-    """Read and validate a YAML config file, then apply the household saved in the data
-    directory, if any. `data_dir` replaces `house.data_dir`, as `--data-dir` does."""
+def read_house_file(path: str | Path) -> Any:
+    """The house file as parsed YAML, before any checks. Raises OSError or ConfigError."""
     import yaml
 
     text = Path(path).read_text(encoding="utf-8")
     try:
-        data = yaml.safe_load(text)
+        return yaml.safe_load(text)
     except yaml.YAMLError as err:
         raise ConfigError([f"{path}: not valid YAML: {err}"]) from None
+
+
+def parse_with_settings(
+    data: Any, flat: dict[str, Any], env: dict[str, str] | None = None
+) -> tuple[SiteConfig, dict]:
+    """The site from the house file `data` with saved settings `flat` laid over it
+    (`radiate.config.settings`), and the merged house file. Raises ConfigError listing
+    every problem, settings with nowhere to go included."""
+    from .settings import merge_settings
+
+    merged, problems = merge_settings(data, flat)
+    if problems:
+        raise ConfigError(problems)
+    site = parse_site(merged, env)
+    return replace(site, saved_settings=tuple(flat)), merged
+
+
+def apply_saved_settings(
+    data: Any, site: SiteConfig, env: dict[str, str] | None = None
+) -> SiteConfig:
+    """The site with the settings saved from the web UI, if `site.data_dir` holds any.
+
+    Saved settings that would make the configuration invalid are not used: the house
+    file's settings apply, and `settings_problems` and a note say why, so Radiate still
+    starts and the web UI can offer to fix them. `site` is the house file's own.
+    """
+    from .saved import read_settings, settings_path
+    from .settings import flatten
+
+    try:
+        nested = read_settings(site.data_dir)
+        if nested is None:
+            return site
+        flat, problems = flatten(nested)
+        if problems:
+            raise ConfigError(problems)
+        saved, _ = parse_with_settings(data, flat, env)
+    except ConfigError as err:
+        note = (
+            f"{settings_path(site.data_dir)}: the settings saved from the web UI were not "
+            f"used, so the house file's apply: {'; '.join(err.problems)}"
+        )
+        return replace(site, settings_problems=tuple(err.problems), notes=(*site.notes, note))
+    return replace(saved, data_dir=site.data_dir)
+
+
+def load_site(
+    path: str | Path, env: dict[str, str] | None = None, data_dir: str | Path | None = None
+) -> SiteConfig:
+    """Read and validate a YAML config file, then apply the settings and the household
+    saved in the data directory, if any. `data_dir` replaces `house.data_dir`, as
+    `--data-dir` does."""
+    data = read_house_file(path)
     site = parse_site(data, env)
     if data_dir is not None:
         site = replace(site, data_dir=str(data_dir))
-    return apply_saved(site)
+    return apply_saved(apply_saved_settings(data, site, env))

@@ -100,7 +100,8 @@ def test_demo_session_speaks_json():
     s.step(3)
     assert s.sim_seconds() == start + 180
     ok = json.loads(s.request("POST", "rooms/lounge/fire", json.dumps({"lit": True})))
-    assert ok == {"status": 200, "body": {"ok": True}}
+    assert ok["status"] == 200 and ok["body"]["ok"] is True
+    assert 0 < ok["body"]["expires_in_min"] <= 360  # the fire flag expires (spec 7)
     s.step()
     state = json.loads(s.request("GET", "state"))["body"]
     lounge = next(r for r in state["rooms"] if r["id"] == "lounge")

@@ -230,3 +230,42 @@ async def test_stream_trusts_ingress_from_supervisor_address():
         c.ws_connect("/api/v1/stream", headers={"X-Ingress-Path": "/x"}) as ws,
     ):
         assert "boiler" in await ws.receive_json(timeout=5)
+
+
+async def test_reset_learning_puts_rooms_back_to_their_priors(client):
+    rt = client.rt
+    for rid in ("bedroom_1", "dining"):
+        rt.state.rooms[rid].est.theta[0] = 0.15
+        rt.state.rooms[rid].lag_samples = [1140.0]
+    r = await client.post("/api/v1/learning/reset", json={"rooms": ["bedroom_1"]}, headers=H)
+    assert r.status == 200
+    assert (await r.json()) == {"reset": ["bedroom_1"]}
+    assert rt.state.rooms["bedroom_1"].est.a == 1.5
+    assert rt.state.rooms["bedroom_1"].lag_samples == []
+    assert rt.state.rooms["dining"].est.a == 0.15  # not asked for
+    assert any(d.code == "learning.reset" and d.room_id == "bedroom_1" for d in rt.decisions)
+    # Every room with a model when no rooms are named.
+    r = await client.post("/api/v1/learning/reset", json={}, headers=H)
+    assert set((await r.json())["reset"]) == set(rt.state.rooms)
+    assert rt.state.rooms["dining"].est.a == 1.5
+
+
+async def test_reset_learning_refuses_unknown_or_unlearned_rooms(client):
+    client.rt.state.rooms["bedroom_1"].est.theta[0] = 0.15
+    bad = [
+        {"rooms": ["bedroom_1", "attic"]},
+        {"rooms": ["stairs"]},
+        {"rooms": "bedroom_1"},
+        {"rooms": []},
+    ]
+    for body in bad:
+        r = await client.post("/api/v1/learning/reset", json=body, headers=H)
+        assert r.status == 400, body
+    assert client.rt.state.rooms["bedroom_1"].est.a == 0.15  # nothing was reset
+
+
+async def test_state_reports_the_burner(client):
+    state = await (await client.get("/api/v1/state", headers=H)).json()
+    assert "burner" in state["boiler"] and "burner" in state["store"]
+    today = state["accounting"]["today"]
+    assert {"relay_hours", "litres_relay", "burner"} <= set(today)

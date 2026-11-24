@@ -13,6 +13,7 @@ from aiohttp import WSMsgType, web
 
 from . import bridge
 from .auth import AUTH, IDENTITY, AuthService, Identity, add_routes
+from .data import QueryError, data_view, export_view, series_view, to_csv
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
@@ -172,6 +173,10 @@ async def set_mode(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_mode)
 
 
+async def reset_learning(request: web.Request) -> web.Response:
+    return await _post(request, bridge.reset_learning)
+
+
 async def people(request: web.Request) -> web.Response:
     return web.json_response(_rt(request).away_view())
 
@@ -186,6 +191,34 @@ async def suggestions(request: web.Request) -> web.Response:
 
 async def savings(request: web.Request) -> web.Response:
     return web.json_response(savings_view(_rt(request)))
+
+
+async def data(request: web.Request) -> web.Response:
+    """Raw data points (`radiate.server.data`); `format=csv` for a CSV file."""
+    rt = _rt(request)
+    query = {k: ",".join(request.query.getall(k)) for k in request.query}
+    try:
+        view = data_view(rt, query)
+    except QueryError as err:
+        raise web.HTTPBadRequest(text=str(err)) from err
+    if query.get("format") == "csv":
+        return web.Response(
+            text=to_csv(view),
+            content_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="radiate-data.csv"'},
+        )
+    if query.get("format") not in (None, "", "json"):
+        raise web.HTTPBadRequest(text="format must be json or csv")
+    return web.json_response(view)
+
+
+async def data_series(request: web.Request) -> web.Response:
+    rt = _rt(request)
+    return web.json_response(series_view(rt, export_view(rt)["otlp"]))
+
+
+async def export(request: web.Request) -> web.Response:
+    return web.json_response(export_view(_rt(request)))
 
 
 async def _household(request: web.Request, method: str, with_body: bool) -> web.Response:
@@ -239,12 +272,44 @@ async def set_ha_persons(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_ha_persons)
 
 
+async def set_outdoor(request: web.Request) -> web.Response:
+    return await _post(request, bridge.set_outdoor)
+
+
 async def settings(request: web.Request) -> web.Response:
     return web.json_response(_rt(request).settings())
 
 
 async def set_settings(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_settings)
+
+
+async def _config(request: web.Request, method: str, with_body: bool) -> web.Response:
+    """Every house-file setting (`bridge.config`). Errors with field paths go as JSON."""
+    rt = _rt(request)
+    try:
+        bridge.settings_editor(rt)  # 404 before the body is read
+        body = None
+        if with_body or (method == "DELETE" and request.can_read_body):
+            body = await _json(request)
+        target = request.match_info.get("target")
+        return web.json_response(bridge.config(rt, method, target, body))
+    except bridge.RequestError as err:
+        if err.body is not None:
+            return web.json_response(err.body, status=err.status)
+        raise _http_error(err) from err
+
+
+async def config(request: web.Request) -> web.Response:
+    return await _config(request, "GET", with_body=False)
+
+
+async def config_save(request: web.Request) -> web.Response:
+    return await _config(request, "PUT", with_body=True)
+
+
+async def config_revert(request: web.Request) -> web.Response:
+    return await _config(request, "DELETE", with_body=False)
 
 
 async def get_layout(request: web.Request) -> web.Response:
@@ -350,10 +415,14 @@ def create_app(
             web.post("/api/v1/rooms/{room_id}/fire", set_fire),
             web.post("/api/v1/store/boost", boost_store),
             web.post("/api/v1/mode", set_mode),
+            web.post("/api/v1/learning/reset", reset_learning),
             web.get("/api/v1/people", people),
             web.get("/api/v1/schedules", schedules),
             web.get("/api/v1/suggestions", suggestions),
             web.get("/api/v1/savings", savings),
+            web.get("/api/v1/data", data),
+            web.get("/api/v1/data/series", data_series),
+            web.get("/api/v1/export", export),
             web.get("/api/v1/household", household),
             web.post("/api/v1/household/preview", household_preview),
             web.put("/api/v1/household", household_save),
@@ -362,8 +431,13 @@ def create_app(
             web.post("/api/v1/people/{person_id}/presence", set_presence),
             web.post("/api/v1/people/{person_id}/home", say_home),
             web.post("/api/v1/ha/persons", set_ha_persons),
+            web.post("/api/v1/outdoor", set_outdoor),
             web.get("/api/v1/settings", settings),
             web.post("/api/v1/settings", set_settings),
+            web.get("/api/v1/settings/config", config),
+            web.put("/api/v1/settings/config", config_save),
+            web.delete("/api/v1/settings/config", config_revert),
+            web.delete("/api/v1/settings/config/{target}", config_revert),
             web.get("/api/v1/layout", get_layout),
             web.put("/api/v1/layout", put_layout),
             web.get("/api/v1/devices", devices),

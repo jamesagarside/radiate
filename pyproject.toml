@@ -25,6 +25,8 @@ dev = [
     "tzdata",
     "joserfc>=1.0",
     "ruff>=0.6",
+    # Tests only: checks the hand-written OTLP encoding against the official classes.
+    "opentelemetry-proto>=1.27",
 ]
 
 [project.scripts]

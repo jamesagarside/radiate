@@ -52,6 +52,21 @@ BASIS_TEXT = {
         "Oil is worked out from the time the boiler was called, so these litres are an upper bound."
     ),
     "firing": "Oil is worked out from the time the burner was firing.",
+    "mixed": (
+        "Oil is worked out from the time the burner was firing where it was metered, and "
+        "from the time the boiler was called otherwise, so these litres may be high."
+    ),
+}
+
+# Where the outdoor temperature behind the figures comes from (`house.outdoor_source`).
+OUTDOOR_TEXT = {
+    "zigbee": "Outdoor temperature from the Zigbee outdoor sensor.",
+    "home_assistant": "Outdoor temperature from Home Assistant.",
+    "both": (
+        "Outdoor temperature from the Zigbee outdoor sensor, or from Home Assistant "
+        "while the sensor is silent."
+    ),
+    "simulated": "Outdoor temperature from the simulation.",
 }
 
 
@@ -282,14 +297,17 @@ def why_not_eligible(
         return "no savings record"
     if _num(summary.get("litres")) is None:
         return "no nozzle rating"
-    if summary.get("basis", "relay") != basis:
+    day_basis = summary.get("basis", "relay")
+    if day_basis == "mixed":
+        return "litres part metered, part from relay time"
+    if day_basis != basis:
         return "a different litres basis"
     share = _num(rec.get("baseline_share")) or 0.0
     if share < params.min_share:
         return f"no household baseline for {_hours_missing(share)} h"
     share = _num(rec.get("outdoor_share")) or 0.0
     if share < params.min_share:
-        return f"outdoor sensor missing for {_hours_missing(share)} h"
+        return f"no fresh outdoor temperature for {_hours_missing(share)} h"
     for rid, r in sorted(rec["rooms"].items()):
         if not isinstance(r, Mapping):
             return "no savings record"
@@ -338,16 +356,25 @@ def report(
     *,
     household: bool,
     outdoor_sensor: bool,
+    outdoor_source: str | None = None,
+    outdoor_missing: str = "no outdoor sensor",
     params: SavingsParams = SavingsParams(),
 ) -> dict:
     """The whole GET /api/v1/savings body (spec 8.1) from closed day summaries,
-    oldest first. Dates from each summary's `day` ordinal (date.fromordinal)."""
+    oldest first. Dates from each summary's `day` ordinal (date.fromordinal).
+
+    `outdoor_source` names where the outdoor temperature comes from (`zigbee`,
+    `home_assistant`, `both` or `simulated`), for `outdoor` in the body.
+    `outdoor_missing` is the reason given without one (`outdoor_sensor` false)."""
     by_day: dict[int, Mapping[str, Any]] = {}
     for d in days:
         if isinstance(d, Mapping) and isinstance(d.get("day"), int):
             by_day[d["day"]] = d  # a repeated day: the later summary wins
     kept = [by_day[k] for k in sorted(by_day)]
-    basis = str(kept[-1].get("basis", "relay")) if kept else "relay"
+    # The fit uses one litres basis: the latest day's, passing over "mixed" days (part
+    # metered, part relay time, spec 5.6, 5.9), which are never eligible.
+    bases = [str(d.get("basis", "relay")) for d in kept]
+    basis = next((b for b in reversed(bases) if b != "mixed"), bases[-1] if bases else "relay")
     weights = dict(weights)
     latest = kept[-1].get("savings") if kept else None
     if isinstance(latest, Mapping) and isinstance(latest.get("rooms"), Mapping):
@@ -372,7 +399,7 @@ def report(
     if not household:
         status, reason = "unavailable", "no household"
     elif not outdoor_sensor:
-        status, reason = "unavailable", "no outdoor sensor"
+        status, reason = "unavailable", outdoor_missing
     elif kept and _num(kept[-1].get("litres")) is None:
         status, reason = "unavailable", "no nozzle rating"
     elif len(eligible) < params.min_days:
@@ -504,7 +531,8 @@ def report(
         "baseline": {"id": BASELINE_ID, "text": BASELINE_TEXT},
         "basis": basis,
         "basis_text": BASIS_TEXT.get(basis),
-        "litres_upper_bound": basis == "relay",
+        "litres_upper_bound": basis != "firing",
+        "outdoor": {"source": outdoor_source, "text": OUTDOOR_TEXT.get(outdoor_source or "")},
         "fit": fit,
         "totals": totals,
         "days": listed,

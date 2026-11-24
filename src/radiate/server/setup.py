@@ -30,7 +30,14 @@ from radiate.config.household import (
     options_view,
 )
 from radiate.config.schedule import WeekSchedule
-from radiate.config.site import ConfigError, SiteConfig, apply_household, parse_household
+from radiate.config.site import (
+    SAVED_SOURCE_WARNING,
+    ConfigError,
+    SiteConfig,
+    apply_household,
+    parse_household,
+    shadowed_household_keys,
+)
 
 from .runtime import Runtime
 from .schedules import _weekday, preview_view
@@ -114,6 +121,10 @@ class HouseholdSetup:
             # Where the household in use comes from: "saved" (this setup), "house_file"
             # or None (no household yet).
             "source": site.household_source,
+            # The config-source trap (spec 7): a saved setup replaces the house file's
+            # section as a whole. Additive: a warning, and the settings it hides.
+            "source_warning": SAVED_SOURCE_WARNING if site.household_source == "saved" else None,
+            "house_file_ignored": shadowed_household_keys(site),
             "house_file": site.file_household is not None,
             "saved_at": self.saved.where,
             # A saved setup that could not be used at start-up, and why.

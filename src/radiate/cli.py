@@ -1,5 +1,5 @@
-"""Command line: `radiate serve`, `sim`, `check-config`, `discover`, `schedules`, `dashboard`,
-`replay`, `bootstrap`, `shelly` and `users`."""
+"""Command line: `radiate serve`, `sim`, `sim-efficiency`, `check-config`, `discover`,
+`schedules`, `dashboard`, `replay`, `bootstrap`, `shelly` and `users`."""
 
 from __future__ import annotations
 
@@ -40,12 +40,13 @@ def _serve(args: argparse.Namespace) -> None:
 
             if args.demo_days:
                 print(f"Running the demo house for {args.demo_days} simulated days…")
-            runtime = demo_runtime(days=max(0, args.demo_days))
+            runtime = demo_runtime(days=max(0, args.demo_days), record=True)
             queue = None
             interval = 60.0 / args.speed  # one simulated minute per 1/speed real minutes
             banner = f"Radiate demo ({args.speed:g}x)"
         else:
             runtime, queue, cleanup = await _start_live(site, session)
+            runtime.settings_editor = _settings_editor(args, site)
             interval = 60.0
             banner = f"Radiate {'DRY RUN' if site.dry_run else 'LIVE'}"
         if os.environ.get("RADIATE_ELASTIC_URL"):
@@ -58,6 +59,7 @@ def _serve(args: argparse.Namespace) -> None:
                 queue=queue,
             )
             runtime.exporter.start(session)
+        _start_otlp(runtime, site, session)
         login = await _start_login(auth_cfg, runtime, args, session)
         if login is not None:
             cleanup.append(login.close)
@@ -78,6 +80,8 @@ def _serve(args: argparse.Namespace) -> None:
             await runtime.stop()
             if runtime.exporter is not None:
                 await runtime.exporter.stop()
+            if runtime.otlp is not None:
+                await runtime.otlp.stop()
             for fn in reversed(cleanup):
                 await fn()
             await runner.cleanup()
@@ -130,6 +134,94 @@ async def _start_login(auth_cfg, runtime, args, session):
     return login
 
 
+def _settings_editor(args: argparse.Namespace, site):
+    """The web UI's Settings view: the house file as read, and the settings saved over
+    it in the data directory."""
+    from radiate.config import ConfigError
+    from radiate.config.saved import read_settings
+    from radiate.config.site import read_house_file
+    from radiate.server.settings import SettingsEditor, SettingsFile
+
+    try:
+        saved = read_settings(site.data_dir)
+    except ConfigError:
+        saved = None  # site.settings_problems says why
+    locked = {"house.dry_run": "Set by --dry-run on the command line."} if args.dry_run else {}
+    return SettingsEditor.start(
+        read_house_file(args.config),
+        SettingsFile(site.data_dir),
+        saved,
+        locked=locked,
+        problems=site.settings_problems,
+    )
+
+
+def _otlp_config(site):
+    """The OpenTelemetry export's settings: the house file's `export.otlp`, else
+    RADIATE_OTLP_ENDPOINT (and RADIATE_OTLP_PROTOCOL), as the App and the demo set them."""
+    from radiate.config.export import parse_export
+
+    if site is not None and site.export.otlp is not None:
+        return site.export.otlp
+    endpoint = os.environ.get("RADIATE_OTLP_ENDPOINT", "").strip()
+    if not endpoint:
+        return None
+    raw = {"endpoint": endpoint}
+    if os.environ.get("RADIATE_OTLP_PROTOCOL"):
+        raw["protocol"] = os.environ["RADIATE_OTLP_PROTOCOL"].strip()
+    export, problems = parse_export({"otlp": raw})
+    if problems:
+        sys.exit("RADIATE_OTLP_*: " + "; ".join(p.removeprefix("export.otlp.") for p in problems))
+    return export.otlp
+
+
+def _start_otlp(runtime, site, session) -> None:
+    """Start the OpenTelemetry export (spec 9.1) when it is configured and enabled."""
+    import logging
+
+    from radiate.export.otlp import (
+        LOGS_MAX,
+        METRICS_MAX,
+        OtlpExporter,
+        resolve_api_key,
+        safe_endpoint,
+    )
+    from radiate.server.store import SqliteQueue
+
+    cfg = _otlp_config(site)
+    if cfg is None:
+        return
+    log = logging.getLogger("radiate")
+    if not cfg.enabled:
+        log.info("OpenTelemetry export: configured but turned off (export.otlp.enabled)")
+        return
+    try:
+        api_key = resolve_api_key(cfg)
+    except ValueError as err:
+        sys.exit(f"OpenTelemetry export: {err}")
+    queues = (None, None)
+    if runtime.store is not None:  # survive restarts and outages, like the Elastic queue
+        queues = (
+            SqliteQueue(runtime.store, METRICS_MAX, table="otlp_metrics_queue"),
+            SqliteQueue(runtime.store, LOGS_MAX, table="otlp_logs_queue"),
+        )
+    runtime.otlp = OtlpExporter(
+        cfg,
+        runtime.house_id,
+        {r.id: r.name for r in runtime.cfg.rooms},
+        api_key,
+        *queues,
+    )
+    runtime.otlp.start(session)
+    log.info(
+        "OpenTelemetry export: %s to %s every %g s%s",
+        cfg.protocol,
+        safe_endpoint(cfg.endpoint),
+        cfg.interval_s,
+        "" if api_key or cfg.headers else ", without an API key",
+    )
+
+
 async def _start_live(site, session):
     """Wire the live driver: SQLite store, MQTT, Shelly, then restore state."""
     import logging
@@ -144,8 +236,16 @@ async def _start_live(site, session):
     from radiate.server.store import SqliteQueue, Store
 
     log = logging.getLogger("radiate")
+    if site.saved_settings:
+        log.info(
+            "settings: saved from the web UI, in %s: %s",
+            Path(site.data_dir),
+            ", ".join(site.saved_settings),
+        )
     if site.household_source == "saved":
         log.info("household: saved from the web UI, in %s", Path(site.data_dir))
+    for warning in _household_warnings(site):
+        log.warning("household: %s", warning)
     for note in site.notes:
         log.info("config: %s", note)
     store = Store(Path(site.data_dir) / "radiate.db")
@@ -198,6 +298,9 @@ async def _start_live(site, session):
         household=site.household,
         timezone=site.timezone,
         schedule_use=site.schedule_use,
+        fire_flag_max_s=site.fire_flag_s,
+        outdoor_source=site.outdoor_source,
+        outdoor_stale_after_s=site.outdoor_stale_after_s,
     )
     runtime.setup = HouseholdSetup(site, SavedFile(site.data_dir))
     for problem in runtime.restore():
@@ -233,6 +336,12 @@ def _sim(args: argparse.Namespace) -> None:
         print(f"{k:{width}}  {b[k]:>11}  {r[k]:>8}")
 
 
+def _sim_efficiency(args: argparse.Namespace) -> None:
+    from radiate.sim.compare import main
+
+    main(args)
+
+
 def _household_line(site) -> str | None:
     from radiate.config.saved import saved_path
 
@@ -246,12 +355,32 @@ def _household_line(site) -> str | None:
     return None
 
 
+def _household_warnings(site) -> list[str]:
+    """The config-source trap: a saved household hides the house file's section."""
+    from radiate.config.site import SAVED_SOURCE_WARNING, shadowed_household_keys
+
+    if site.household_source != "saved" or site.file_household is None:
+        return []
+    out = [SAVED_SOURCE_WARNING[0].lower() + SAVED_SOURCE_WARNING[1:]]
+    hidden = shadowed_household_keys(site)
+    if hidden:
+        out.append("house file household settings not in effect: " + ", ".join(hidden))
+    return out
+
+
 def _check_config(args: argparse.Namespace) -> None:
     site = _load(args.path, args.data_dir)
     print(f"{args.path}: OK")
+    if site.saved_settings:
+        from radiate.config.saved import settings_path
+
+        print(f"  settings saved from the web UI in {settings_path(site.data_dir)}:")
+        print(f"    {', '.join(site.saved_settings)}")
     line = _household_line(site)
     if line:
         print(f"  {line}")
+    for warning in _household_warnings(site):
+        print(f"  warning: {warning}")
     for r in site.house.rooms:
         dev = site.devices[r.id]
         parts = [f"role={r.role.value}"]
@@ -649,6 +778,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="how calling rooms fire the boiler (default eco)",
     )
     m.set_defaults(func=_sim)
+    e = sub.add_parser(
+        "sim-efficiency",
+        help="compare eco with and without room use, comfort and a plain timer in the simulator",
+    )
+    e.add_argument("--days", type=int, default=24)
+    e.add_argument("--warmup", type=int, default=3)
+    e.add_argument("--seeds", default="1,2,3", help="comma-separated seeds (default 1,2,3)")
+    e.add_argument(
+        "--scenarios",
+        default="fixed,mild,cold",
+        help="comma-separated: fixed, mild, cold, owner, owner_cold (default fixed,mild,cold)",
+    )
+    e.add_argument("--workers", type=int, default=None, help="parallel runs (default: CPUs)")
+    e.set_defaults(func=_sim_efficiency)
     c = sub.add_parser("check-config", help="validate a house configuration file")
     c.add_argument("path")
     c.add_argument("--data-dir", help=DATA_DIR_HELP)

@@ -14,6 +14,7 @@ from radiate.config import parse_site
 from radiate.config.household import compile_household
 from radiate.core import Mode
 from radiate.drivers.live import LiveDriver
+from radiate.drivers.shelly import SwitchStatus
 from radiate.server import bridge
 from radiate.server.app import create_app
 from radiate.server.runtime import Runtime
@@ -57,12 +58,38 @@ async def _publish(topic, payload):
     return True
 
 
+class RelayOff:
+    """A boiler relay read as off, its burner metered and not firing, so the rooms can
+    learn their losses in dry run (without knowing when the radiators get heat Radiate
+    does not learn, spec 4.6 `heat_unknown`)."""
+
+    reachable = True
+    heating = store = SwitchStatus(output=False, apower=0.0)
+    heating_burner = store_burner = False
+    errors = 0
+    intended: list = []
+
+    async def refresh(self):
+        pass
+
+    async def command(self, *args, **kw):
+        pass
+
+    async def push_fallback(self, *args):
+        pass
+
+    def telemetry(self):
+        return {}
+
+
 def make(store: Store | None = None, clocks: Clocks | None = None, **site_over):
     data = site_data()
     data["household"].update(site_over)
     site = parse_site(data, env=ENV)
     clocks = clocks or Clocks()
-    drv = LiveDriver(site, _publish, clock=lambda: clocks.mono, wall=lambda: clocks.wall)
+    drv = LiveDriver(
+        site, _publish, RelayOff(), clock=lambda: clocks.mono, wall=lambda: clocks.wall
+    )
     rt = Runtime(
         site.house,
         drv,
@@ -95,13 +122,14 @@ def codes(rt: Runtime) -> list[str]:
     return [d.code for d in rt.decisions if d.code.startswith("away.")]
 
 
-async def test_someone_away_recompiles_and_the_mirror_follows():
+async def test_someone_away_recompiles_but_the_fallbacks_stay_at_home():
     rt, drv, clocks = make()
     feed(drv)
     await rt.step()
     normal = compile_household(rt.household).schedules
     assert wednesday(drv, "bedroom_1") == normal["bedroom_1"].days[2].trvzb()
     lounge = drv.site.schedule_for("lounge")
+    mirror = drv._mirror("bedroom_1")
     drv.intended.clear()
 
     rt.set_away("home_worker", FRI_1800)
@@ -110,19 +138,35 @@ async def test_someone_away_recompiles_and_the_mirror_follows():
     assert wednesday(drv, "bedroom_3") == "00:00/14"
     assert drv.site.schedule_for("lounge") == lounge  # hand-written: unchanged
     assert not rt.everyone_away and rt.effective_mode() is Mode.AUTO
+    # Fail warm: the TRV's own schedule and the Shelly fallback heat the house if
+    # Radiate stops, so they keep the weeks for everyone at home.
+    assert drv._mirror("bedroom_1") == mirror
+    home = normal["bedroom_3"].days[2].trvzb()
+    assert drv.site.fallback_schedule_for("bedroom_3").days[2].trvzb() == home
 
     clocks.advance(MIN)
     await rt.step()
     await drv.drain()
-    # Dry run: the new week is an intended write to the pilot valve, nothing is sent.
+    # No new week goes to the valve: its mirror did not change.
     writes = [p for _, t, p in drv.intended if t == "zigbee2mqtt/trv_bedroom_1/set"]
-    assert writes and writes[-1]["weekly_schedule_wednesday"] == BEDROOM_1_EARLY_RISER_ONLY
+    assert not any("weekly_schedule_wednesday" in w for w in writes)
     assert drv.published == 0
     assert codes(rt) == ["away.schedules"]
 
     rt.clear_away("home_worker")
     assert rt.away == frozenset()
     assert wednesday(drv, "bedroom_1") == normal["bedroom_1"].days[2].trvzb()
+
+
+async def test_everyone_away_keeps_the_fallback_windows_for_everyone_home():
+    rt, drv, clocks = make()
+    home = drv.fallback_windows(2)
+    assert home
+    for pid in rt.people:
+        rt.set_away(pid, FRI_1800)
+    assert rt.everyone_away
+    # The away weeks are flat, which used to leave the watchdog no window at all.
+    assert drv.fallback_windows(2) == home
 
 
 async def test_presence_counts_after_the_delay():
@@ -450,8 +494,11 @@ async def test_live_control_follows_the_need_time_and_the_mirror_keeps_the_prehe
     )
     await rt.step()
     await drv.drain()
+    # The mirror keeps the valve's week for everyone at home, with its preheat.
     mirrored = [p for _, t, p in drv.intended if t == "zigbee2mqtt/trv_bedroom_1/set"]
-    assert mirrored[-1]["weekly_schedule_wednesday"] == BEDROOM_1_EARLY_RISER_ONLY
+    home = compile_household(rt.household).schedules["bedroom_1"].days[2].trvzb()
+    sent = [p["weekly_schedule_wednesday"] for p in mirrored if "weekly_schedule_wednesday" in p]
+    assert sent and sent[-1] == home != BEDROOM_1_EARLY_RISER_ONLY
 
 
 async def test_live_preheat_fixed_follows_the_valve_schedule():

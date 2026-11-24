@@ -132,7 +132,9 @@ For Docker, the Home Assistant App and the other ways to run the server, see [de
 
 Each minute the live server records the tick's snapshot (every room's readings, setpoints and relay states) and what Radiate decided: valve settings, relays, the boiler state, and the reason and alert codes. Reason messages aren't stored. The server also records how its engine state was built each time it starts, and a copy of the engine state every 6 hours.
 
-The history keeps `house.history_days` days, 14 by default, and Radiate deletes older entries every hour. Each tick takes about 0.7 kB, compressed, so the reference house uses about 1.2 MB a day and 17 MB for 14 days. The demo doesn't record.
+The history keeps `house.history_days` days, 14 by default, and Radiate deletes older entries every hour. Each tick takes about 0.7 kB, compressed, so the reference house uses about 1 MB a day and 15 MB for 14 days. `radiate serve --demo` records in memory, so its Raw data view has something to show; the browser demo doesn't record.
+
+The web UI's Raw data view searches and charts the history, and downloads it as CSV or JSON. Radiate keeps an hourly index of it beside the history, about 0.4 MB a day, so a month answers quickly. Each tick also records each room's target and whether it calls for heat, the burner where the boiler reports it, the heating relay's power where the relay measures it, and how many people are home and away; never who.
 
 `radiate replay` shows what Radiate would have done during a dry run and why, and checks a code or configuration change against real days before you use it. If Radiate starts without usable saved state, it replays the history to learn its room models again. See [replay and bootstrap](deployment.md#replay-and-bootstrap).
 
@@ -147,6 +149,23 @@ mqtt:
   password: ${RADIATE_MQTT_PASSWORD}
 ```
 
+## Change settings in the web UI
+
+The web UI's Settings tab shows every key on this page except the `household` and `schedules` sections, which have the household setup and the Schedules section. It doesn't add or remove rooms; list them here.
+
+A change made there is saved to `<data_dir>/settings.yaml`, never to this file, and replaces this file's value for that key from then on. Each key shows where its value comes from: the house file, set in the web UI, or the default. The file looks like this, with `rooms` keyed by room id:
+
+```yaml
+settings:
+  boiler:
+    min_burn_min: 9
+  rooms:
+    lounge:
+      actuate: true
+```
+
+Changes are checked with the same rules as this file and refused if the house wouldn't load. Boiler, hot water, balancing, suggestions, device alert limits, the outdoor source and the fire switch's length apply straight away; everything else after a restart, and the tab says which are waiting. Turning dry run off, changing the relay's host or channels, the schedule mirror, or a room's role, valve or `actuate` asks for confirmation first. Passwords set in the web UI are saved in the file in plain text, like the state database; the API never returns them. See [deployment](deployment.md#what-radiate-stores) for backups and going back to this file.
+
 ## Sections
 
 ### house
@@ -156,9 +175,12 @@ mqtt:
 | `timezone` | `Europe/London` | Time zone for schedules and the store windows |
 | `dry_run` | `true` | Read devices, write nothing |
 | `outdoor_sensor` | none | Zigbee2MQTT name of an outdoor temperature sensor. Without one, the model assumes 5 °C |
+| `outdoor_source` | `zigbee` | Where the outdoor temperature comes from. `zigbee`: the `outdoor_sensor`, as before. `home_assistant`: the reading the Radiate integration posts from the outdoor entity picked in its options (a weather entity's temperature, or a temperature sensor). `both`: the Zigbee sensor while it has a reading, otherwise Home Assistant; needs `outdoor_sensor` |
+| `outdoor_stale_after_min` | 180 | A Home Assistant outdoor reading measured longer ago than this counts as missing: the model assumes 5 °C and the alert `outdoor.stale` shows. 30 to 1440 |
 | `data_dir` | `./data` | Folder for `radiate.db`, and for `household.yaml` when you set up the household in the web UI |
-| `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale |
+| `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale. Room sensor readings are saved with the time they were taken, so after a restart a reading stands until this long after the sensor last reported, not after Radiate started |
 | `history_days` | 14 | Days of tick history kept in `radiate.db`, 0 to 90. Set 0 to turn recording off |
+| `fire_flag_hours` | 6 | How long the manual "fire lit" flag lasts, 0.5 to 24. It also ends at local midnight, so a flag forgotten in the evening doesn't keep the room unheated the next day |
 
 ### mqtt
 
@@ -173,12 +195,21 @@ mqtt:
 | `heating_switch` | 0 | Switch ID for central heating demand (channel 1) |
 | `store_switch` | 1 | Switch ID for the hot-water store (channel 2) |
 | `auto_off_min` | 120 | The heating relay turns itself off this long after Radiate last asserted it |
+| `burner_metering` | `true` | Read burner firing from each channel's power reading |
+| `burner_threshold_w` | 100 | A channel reading at least this many watts means the burner is firing, 10 to 3000 |
+| `burner_hysteresis_w` | 20 | The burner counts as stopped once the reading falls this far below the threshold, 0 to 1000 and less than the threshold |
 
 The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep the defaults unless you also edit the script.
 
+**Burner metering.** Where the boiler's own load passes through the Shelly, its power reading shows whether the burner fires. On the reference boiler, the heating channel reads about 185 W while the burner fires, 52 to 60 W while the boiler's own thermostat holds the burner off with the pump running, and 0 W with the relay off; the store channel reads about 125 W while the store burner runs. Pick a threshold between the pump alone and the burner running: watch `heating_power_w` and `store_power_w` in the web UI telemetry through a burn. Radiate trusts a channel only after it has read at or above the threshold since it started, so a relay that switches only the boiler's thermostat input, which never carries the burner's load, is never taken to mean the burner is off.
+
+With metering, Radiate counts litres from firing time rather than relay time, ends store recovery when the store burner stops, and takes heat as available only once the burner has fired. It also learns during a dry run: without metering it does not, because the boiler's own timer, not the relay, decides when the radiators get heat. Without a `shelly` section Radiate cannot read the relay at all and does not learn.
+
+**Models learned in a dry run without metering.** Earlier versions learned from a dry run as if the relay ran the boiler, which can leave confident models that are far off (a heating gain of a fraction of a K/h). Once the burner is metered, Radiate resets those models to their priors on its own, and treats models saved by a version that did not record how they were learned the same way (ADR-0007). Each reset shows in the web UI's Learning notice. Without metering they are kept and correct themselves over a few burns. To start any models again from priors yourself, use `POST /api/v1/learning/reset` with `{}` for every room or `{"rooms": [...]}` for some. With the server stopped, `radiate bootstrap` re-learns every model from the tick history instead, leaving out the dry run. See [deployment](deployment.md#replay-and-bootstrap).
+
 ### boiler
 
-`min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none), `demand_mode` (`eco`), `eco_limit_k` (1.5). Ranges are checked against spec section 5.1.
+`min_burn_min` (8), `min_off_min` (10), `max_starts_per_hour` (3), `valve_lead_s` (90), `comfort_limit_k` (0.5), `frost_c` (7), `output_kw` (13), `nozzle_lph` (none), `demand_mode` (`eco`), `eco_limit_k` (1.5), `damp_margin_k` (0.3). Ranges are checked against spec section 5.1.
 
 `demand_mode` decides how calling rooms fire the boiler (spec section 5.3):
 
@@ -188,6 +219,8 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 | `comfort` | Any calling room more than `comfort_limit_k` below its target fires the boiler, as does a predicted burn of 1.5 minimum burns. Rooms stay closer to their targets, with more relay starts |
 
 In both modes frost protection and optimum start still fire the boiler. `eco_limit_k` is the most a calling room waits below its target in `eco` mode: 0.5 to 3 K, and at least `comfort_limit_k`.
+
+`damp_margin_k` applies in `eco` to rooms with a use level. A room set back waits for other rooms before it starts a burn, but never below the 12 °C damp floor. It starts a burn on its own this far above the floor (12.3 °C by default), so its air stays above 12 °C while the radiator warms. 0 to 1 K; 0 starts the burn at the floor itself, which saves a little more oil and lets the air dip a few tenths below 12 °C.
 
 You can change the demand mode without a restart with the **Eco** and **Comfort** control in the web UI, the Demand mode select in Home Assistant, or the API (`POST /api/v1/settings` with `{"demand_mode": "comfort"}`). That choice is saved in `radiate.db` and overrides `demand_mode` in this file until you send `{"demand_mode": null}`. The web UI and Home Assistant send null when you pick the mode set in this file, so Radiate follows the file again.
 
@@ -387,6 +420,8 @@ The web UI doesn't change the house file, which may be read-only or managed by t
 
 When `household.yaml` exists, it replaces the house file's `household` section. The house file's other sections still apply, and a room the saved household leaves out follows its own `schedule`. To go back to the house file's setup, choose **Use the house file's setup instead** in the wizard, or delete the file and restart Radiate.
 
+> **Warning:** the saved household replaces the house file's `household` section as a whole, including `household.away` (`everyone_away`, `presence_delay_min`, `presence_stale_after_min` and the rest), `timing` and `temperatures`. While `household.yaml` exists, editing any of those in the house file, for example through GitOps, has no effect. Change them in the web UI, or delete the saved household first. Saving the household in the web UI also never merges in later house file edits. `check-config` and the server's start-up log name every house file setting that is not in effect, and `GET /api/v1/household` returns the same as `source_warning` and `house_file_ignored`.
+
 `check-config` and `radiate schedules` read `household.yaml` from the same data directory as the server, so they agree with it. Give them `--data-dir` when the server runs with one:
 
 ```bash
@@ -493,7 +528,7 @@ In the web UI, you can make an adjustment in the Schedules section instead. Drag
 
 #### Away
 
-When a person is away, Radiate rebuilds the household's schedules without their part of the routine. If the home worker travels, their office drops to the unused temperature and the bedroom stays warm for the early riser. Rooms with a hand-written `schedule` don't change. The schedule mirror writes the rebuilt weeks to the TRVs (in dry run, it logs them).
+When a person is away, Radiate rebuilds the household's schedules without their part of the routine. If the home worker travels, their office drops to the unused temperature and the bedroom stays warm for the early riser. Rooms with a hand-written `schedule` don't change. Radiate follows the rebuilt weeks while it runs. The schedule mirror and the Shelly fallback don't: they keep the weeks for everyone at home, so if Radiate stops, the TRVs and the boiler heat as if someone is home.
 
 A person counts as away in two ways:
 
@@ -572,6 +607,31 @@ When the web UI's Suggestions view (`GET /api/v1/suggestions`) gives advice abou
 
 Rooms measured only by their TRV (`internal_sensor_only`) and rooms with a `continuous` heat source are never judged from their model. Weak Zigbee links use `monitoring.weak_signal_lqi`.
 
+### export
+
+Where to send data besides the web UI. One subsection today, `otlp`: the [OpenTelemetry export](deployment.md#opentelemetry-export) over OTLP/HTTP. Leave it out to send nothing.
+
+```yaml
+export:
+  otlp:
+    endpoint: https://my-project.ingest.eu-west-1.aws.elastic.cloud:443
+    api_key: ${RADIATE_OTLP_API_KEY}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `endpoint` | required | The collector's OTLP/HTTP base URL. Radiate adds `/v1/metrics` and `/v1/logs`. No credentials, query or signal path in it |
+| `enabled` | `true` | Set `false` to keep the section and send nothing |
+| `api_key` | none | Sent as `Authorization: ApiKey <key>`. A value starting `ApiKey ` has the prefix dropped |
+| `api_key_file` | none | A file holding the key, instead of `api_key`. Without either, `RADIATE_OTLP_API_KEY` is used if set |
+| `headers` | none | Extra request headers. An `Authorization` header here replaces the API key |
+| `protocol` | `http/protobuf` | Or `http/json`. gRPC is not supported |
+| `interval_s` | 60 | Seconds between sends, 10 to 3600 |
+| `timeout_s` | 30 | Seconds to wait for an answer, 1 to 120 |
+| `compression` | `none` | Or `gzip` |
+| `signals` | `[metrics, logs]` | Readings as metrics, decisions and alerts as logs |
+| `dataset` | `radiate` | Sent as `data_stream.dataset`, which Elastic routes by. Empty to leave it out |
+
 ### balancing
 
 A top-level key, default `true`. Set `balancing: false` to open every heating valve fully instead of sharing flow between them. The boiler guards, optimum start and learning still run. It exists to compare against balancing, for example in the simulator.
@@ -609,13 +669,13 @@ rooms:
     use: {weekdays: unused, weekend: occasional}
 ```
 
-The room's warm periods are the parts of each day where its schedule is above that day's lowest temperature. Inside them the room is in use or occasional, by its level; outside them, and all day when its level is `unused`, it is set back. With `daily: "00:00/14 06:30/19 08:00/16 21:30/19 23:00/14"`, a bedroom is warm from 06:30 to 23:00 and set back overnight. A day at one temperature all day has no warm periods, so give a used room a lower overnight temperature. `weekend` means Saturday and Sunday, as in `schedules`. A setpoint override counts as in use.
+The room's warm periods are the parts of each day where its schedule is above that day's lowest temperature. Inside them the room is in use or occasional, by its level; outside them, and all day when its level is `unused`, it is set back. With `daily: "00:00/14 06:30/19 08:00/16 21:30/19 23:00/14"`, a bedroom is warm from 06:30 to 23:00 and set back overnight. A day at one temperature all day has no warm periods: on an `in_use` or `occasional` day the room counts as warm all day at that level, and on an `unused` day it is set back all day. `weekend` means Saturday and Sunday, as in `schedules`. A setpoint override counts as in use.
 
 Without `use` the room has no room use, as before, and no savings baseline.
 
 With `use`, the room also gets a savings baseline ([spec 5.9](spec.md#59-savings)): a heating timer on from the first person up, less the fixed preheat, to the last to bed when a household with people is saved (even one that covers no rooms), or otherwise from the earliest warm period start to the latest warm period end across all hand-written schedules that day. While the timer is on, the baseline holds the room at the highest temperature its schedule sets that day; while it is off, the baseline puts no heat in. So a house of hand-written rooms shows savings once every heated room has `use`.
 
-Today Radiate only records room use, in each tick's snapshot. A later release uses it in `eco` to let set-back rooms wait longer before they start the boiler.
+In `eco`, room use decides how far below its target a room waits before it starts the boiler on its own, and whether it counts towards a shared burn: a set-back room only takes heat while the boiler runs for other rooms, unless it falls to 12 °C ([spec 5.8](spec.md#58-room-use-in-demand)). `comfort` ignores it.
 
 #### Unheated rooms
 

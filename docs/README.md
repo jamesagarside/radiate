@@ -27,6 +27,7 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 - [ADR-0004](adr/0004-efficiency-by-room-use.md) (proposed): in `eco`, how a room is used right now decides its part in demand, and savings are measured against one stated baseline with comfort beside them.
 - [ADR-0005](adr/0005-fail-warm-presence.md) (proposed): fail warm, so uncertain presence counts as home and presence alone never holds the house at frost.
 - [ADR-0006](adr/0006-user-login.md) (proposed): user login with local passwords, OIDC and optional SAML, server-side sessions, admin and viewer roles, alongside the unchanged API token and ingress.
+- [ADR-0007](adr/0007-learned-state-across-upgrades.md) (proposed): learned state survives upgrades through tested migrations and provenance, and a release resets only the learning it can name as wrong.
 - [ADR template](adr/template.md): copy it for a new decision.
 
 ## Proposals

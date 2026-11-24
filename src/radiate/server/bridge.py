@@ -14,17 +14,21 @@ import json
 import re
 from collections.abc import Coroutine
 from typing import Any
+from urllib.parse import parse_qs
 
 from radiate.config.away import parse_local
 from radiate.config.site import HA_PERSON
 from radiate.core import DemandMode, Mode
+from radiate.core.outdoor import OUTDOOR_MAX_C, OUTDOOR_MIN_C, plausible
 from radiate.core.types import RoomConfig, RoomRole
 from radiate.drivers.devices import ScanRefused
 
+from .data import QueryError, data_view, export_view, series_view
 from .layout import LayoutError
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
+from .settings import SettingsEditor, SettingsError
 from .setup import HouseholdSetup, SetupError
 from .suggestions import suggestions_view
 
@@ -144,6 +148,37 @@ def say_home(rt: Runtime, person_id: str, body: Any) -> dict:
     return {"ok": True, "person": rt.person_view(pid)}
 
 
+OUTDOOR_SOURCE_MAX = 100
+
+
+def set_outdoor(rt: Runtime, body: Any) -> dict:
+    """An outdoor temperature from Home Assistant.
+
+    `{"temperature_c": 7.5, "measured_at": "2026-11-24T08:10:00+00:00", "source":
+    "weather.forecast_home"}`. `measured_at` (when it was measured, optional, now
+    without it) and `source` (where it came from, optional) are kept with it.
+    `{"temperature_c": null}` forgets it. Used only when `house.outdoor_source` is
+    `home_assistant` or `both`.
+    """
+    body = require_object(body)
+    if "temperature_c" not in body:
+        raise RequestError(400, "temperature_c is required: degrees Celsius, or null to forget")
+    t = body["temperature_c"]
+    if t is not None and (isinstance(t, bool) or not isinstance(t, (int, float))):
+        raise RequestError(400, "temperature_c must be a number or null")
+    if t is not None and not plausible(t):
+        raise RequestError(
+            400, f"temperature_c must be between {OUTDOOR_MIN_C:g} and {OUTDOOR_MAX_C:g} °C"
+        )
+    raw_at = body.get("measured_at")
+    measured_at = None if raw_at is None else _local_time(rt, raw_at, "measured_at")
+    source = body.get("source")
+    if source is not None and (not isinstance(source, str) or len(source) > OUTDOOR_SOURCE_MAX):
+        raise RequestError(400, f"source must be text of at most {OUTDOOR_SOURCE_MAX} characters")
+    rt.report_outdoor(t, measured_at, source or None)
+    return {"ok": True, "outdoor": rt.outdoor_view()}
+
+
 HA_PERSONS_MAX = 200
 HA_NAME_MAX = 100
 
@@ -221,12 +256,11 @@ def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
 
 def set_fire(rt: Runtime, room_id: str, body: Any) -> dict:
     rc = room(rt, room_id)
-    if require_object(body).get("lit"):
-        rt.fire.add(rc.id)
+    lit = bool(require_object(body).get("lit"))
+    rt.set_fire(rc.id, lit)
+    if lit:
         rt.note_home_evidence("fire_switch")  # someone lit it (fail warm)
-    else:
-        rt.fire.discard(rc.id)
-    return {"ok": True}
+    return {"ok": True, "expires_in_min": rt.fire_expires_in_min(rc.id, rt.driver.clock())}
 
 
 def boost_store(rt: Runtime, body: Any) -> dict:
@@ -252,6 +286,23 @@ def set_mode(rt: Runtime, body: Any) -> dict:
     return {"ok": True}
 
 
+def reset_learning(rt: Runtime, body: Any) -> dict:
+    """Put rooms' learned models back to their priors (spec 4.3).
+
+    `{"rooms": ["bedroom_1", "dining"]}`, or `{}` for every room with a model. For
+    models learned under conditions that did not hold, such as a dry run without
+    burner metering before Radiate learned to ignore one.
+    """
+    rooms = require_object(body).get("rooms")
+    if rooms is not None:
+        if not isinstance(rooms, list) or not rooms or not all(isinstance(r, str) for r in rooms):
+            raise RequestError(400, "rooms must be a non-empty list of room ids")
+        unknown = [r for r in rooms if r not in rt.state.rooms]
+        if unknown:
+            raise RequestError(400, f"no learned model for: {', '.join(unknown)}")
+    return {"reset": rt.reset_learning(rooms)}
+
+
 def setup(rt: Runtime) -> HouseholdSetup:
     if not isinstance(rt.setup, HouseholdSetup):
         raise RequestError(404, "household setup is not available")
@@ -273,6 +324,29 @@ def household(rt: Runtime, method: str, body: Any = None) -> dict:
             return s.revert(rt)
     except SetupError as err:
         raise RequestError(err.status, str(err) or "invalid household", err.body) from err
+    raise RequestError(405, "method not allowed")
+
+
+def settings_editor(rt: Runtime) -> SettingsEditor:
+    if not isinstance(rt.settings_editor, SettingsEditor):
+        raise RequestError(404, "settings are not available")
+    return rt.settings_editor
+
+
+def config(rt: Runtime, method: str, target: str | None = None, body: Any = None) -> dict:
+    """Every house-file setting (`radiate.server.settings`): GET reads them, PUT saves
+    changes over the house file, DELETE goes back to the house file's value for one
+    setting, a section, a room (`rooms.<id>`) or, without a target, all of them."""
+    editor = settings_editor(rt)
+    try:
+        if method == "GET" and target is None:
+            return editor.view()
+        if method == "PUT" and target is None:
+            return editor.save(rt, body)
+        if method == "DELETE":
+            return editor.revert(rt, target, body)
+    except SettingsError as err:
+        raise RequestError(err.status, str(err) or "invalid settings", err.body) from err
     raise RequestError(405, "method not allowed")
 
 
@@ -336,8 +410,11 @@ def set_layout(rt: Runtime, body: Any) -> dict:
 
 
 def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
-    """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`."""
+    """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`,
+    and may end in a query string (`data?metric=room.temperature`)."""
     method = method.upper()
+    path, _, qs = path.partition("?")
+    query = {k: ",".join(v) for k, v in parse_qs(qs).items()}
     parts = [p for p in path.strip("/").split("/") if p]
     if parts == ["household"] and method in ("GET", "PUT", "DELETE"):
         return household(rt, method, body)
@@ -345,6 +422,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
         return household(rt, "PREVIEW", body)
     if parts == ["layout"] and method == "PUT":
         return set_layout(rt, body)
+    if parts[:2] == ["settings", "config"] and len(parts) <= 3:
+        return config(rt, method, parts[2] if len(parts) == 3 else None, body)
     if method == "GET":
         if parts == ["house"]:
             return rt.house()
@@ -366,17 +445,30 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return suggestions_view(rt)
         if parts == ["savings"]:
             return savings_view(rt)
+        if parts == ["data"]:
+            try:
+                return data_view(rt, query)
+            except QueryError as err:
+                raise RequestError(400, str(err)) from err
+        if parts == ["data", "series"]:
+            return series_view(rt, export_view(rt)["otlp"])
+        if parts == ["export"]:
+            return export_view(rt)
     elif method == "POST":
         if parts == ["devices", "scan"]:
             return scan_network(rt, body)
         if parts == ["mode"]:
             return set_mode(rt, body)
+        if parts == ["learning", "reset"]:
+            return reset_learning(rt, body)
         if parts == ["settings"]:
             return set_settings(rt, body)
         if parts == ["store", "boost"]:
             return boost_store(rt, body)
         if parts == ["ha", "persons"]:
             return set_ha_persons(rt, body)
+        if parts == ["outdoor"]:
+            return set_outdoor(rt, body)
         if len(parts) == 3 and parts[0] == "people":
             if parts[2] == "away":
                 return set_away(rt, parts[1], body)

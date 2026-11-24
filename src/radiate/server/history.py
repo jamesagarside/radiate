@@ -152,6 +152,8 @@ class Recorder:
         self._checkpoint_at = now  # the start entry is the first anchor
         self._pruned_at: float | None = None
         self._error_at: float | None = None
+        # The raw data index (radiate.server.data.SeriesIndex), set by the runtime.
+        self.index: Any = None
 
     def compact(self, actions: Actions) -> dict[str, Any] | None:
         """The actions as `decide` returned them, before the driver adds its alerts."""
@@ -169,7 +171,10 @@ class Recorder:
         driver_alerts: list[Reason],
         state: EngineState,
         now: float,
+        observed: dict[str, Any] | None = None,
     ) -> None:
+        """`observed`: values for raw data only (`radiate.core.series.observed_values`),
+        kept with the actions under `observed`. Replay and the summary ignore them."""
         if actions is None:
             return
         try:
@@ -178,6 +183,8 @@ class Recorder:
                 self.history.append(START, self._start_wall, self.segment, self._start)
             if driver_alerts:
                 actions = {**actions, "driver_alerts": [[a.code, a.room_id] for a in driver_alerts]}
+            if observed:
+                actions = {**actions, "observed": observed}
             self.history.append(TICK, wall, self.segment, tick_data(snap, actions))
             if now - self._checkpoint_at >= CHECKPOINT_EVERY_S:
                 self._checkpoint_at = now

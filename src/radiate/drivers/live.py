@@ -20,16 +20,18 @@ from zoneinfo import ZoneInfo
 
 from radiate.config import SiteConfig, WeekSchedule
 from radiate.core import Actions, Mode, Reason, RoomInput, Snapshot
-from radiate.core.types import RoomRole
+from radiate.core.types import HouseConfig, RoomRole
 
 from . import devices as health
 from .devices import DeviceHealth, HealthLimits, NetworkScan, ScanRefused
-from .shelly import ShellyBoiler, fallback_heating_windows
+from .shelly import DEFAULT_UNUSED_C, ShellyBoiler, fallback_heating_windows
 from .z2m import DeviceStore, TrvWriter, Write, is_available, reading_age, trv_get_payload
 
 LOG = logging.getLogger(__name__)
 NEVER = 1e9
 OUTDOOR_MAX_AGE_S = 2 * 3600
+SENSOR_MEMORY_MAX_S = 24 * 3600  # remembered sensor readings older than this are dropped
+REMEMBERED = ("temperature", "humidity")
 
 Publish = Callable[[str, dict[str, Any]], Awaitable[bool]]
 
@@ -55,6 +57,7 @@ class LiveDriver:
         self._connected = connected
         self.tz = ZoneInfo(site.timezone)
         self.dry_run = site.dry_run
+        self._outdoor_age: float | None = None
         names = {n for d in site.devices.values() for n in (d.trv, d.sensor, d.window) if n}
         if site.outdoor_sensor:
             names.add(site.outdoor_sensor)
@@ -91,6 +94,9 @@ class LiveDriver:
         self._pending: set[asyncio.Task] = set()
         # Days of ticks the runtime records for replay and bootstrap (spec 4.3, 6).
         self.history_days = site.history_days
+        self._started_at = self.clock()
+        # Room sensors: remembered across restarts, and awaited after start (spec 7).
+        self._room_sensors = {d.sensor for d in site.devices.values() if d.sensor}
 
     # --- clock -----------------------------------------------------------------------
 
@@ -148,6 +154,20 @@ class LiveDriver:
             household=site.household,
             household_schedules=dict(site.household_schedules),
             household_live=dict(site.household_live),
+            household_fallback=dict(site.household_fallback),
+            household_fallback_levels=dict(site.household_fallback_levels),
+        )
+
+    def replace_settings(self, cfg: HouseConfig, site: SiteConfig) -> None:
+        """Use settings changed in the web UI that apply without a restart
+        (`radiate.server.settings.apply_live`): the hot-water windows the Shelly fallback
+        gets, and when a device needs attention. Rooms and devices stay as they are."""
+        self.cfg = cfg
+        self.site = dataclasses.replace(self.site, house=cfg, monitoring=site.monitoring)
+        self.limits = dataclasses.replace(
+            self.limits,
+            low_battery_pct=site.monitoring.low_battery_pct,
+            weak_signal_lqi=site.monitoring.weak_signal_lqi,
         )
 
     def set_household_schedules(
@@ -157,12 +177,11 @@ class LiveDriver:
     ) -> None:
         """Use these weeks for the household's rooms from now on (away changed).
 
-        `schedules` are the valve's weeks: the schedule mirror and the Shelly fallback
-        read them through `site.schedule_for`. `live` are the weeks Radiate follows:
+        `schedules` are the valve's weeks for the people at home now. The schedule
+        mirror and the Shelly fallback do not follow them: they keep the weeks for
+        everyone at home (`site.fallback_schedule_for`), so they fail warm. `live` are the weeks Radiate follows:
         snapshots and overrides ending at the next change read them through
         `site.live_schedule_for`. Without `live`, Radiate follows the valve's weeks.
-        The mirror writes a changed week to the TRV on the next apply, or only logs it
-        in dry run, like every other write.
         """
         known = {rid: week for rid, week in schedules.items() if rid in self.site.devices}
         live_known = {
@@ -190,6 +209,50 @@ class LiveDriver:
                 if w.device == name:
                     w.forget()
                     LOG.info("%s back online: settings will be re-sent", rid)
+
+    def sensor_memory(self) -> dict[str, dict[str, float]]:
+        """Each room sensor's last readings and when they were taken (wall-clock
+        seconds), for the runtime to save. Battery sensors sleep and cannot be asked
+        for a reading, so after a restart this is all Radiate has until they report."""
+        now, wall = self.clock(), self._wall()
+        out: dict[str, dict[str, float]] = {}
+        for name in sorted(self._room_sensors):
+            dev = self.devices.get(name)
+            if dev is None:
+                continue
+            temp, age = dev.number("temperature"), dev.age("temperature", now)
+            if temp is None or age is None:
+                continue
+            entry = {"temperature": temp, "at": wall - age}
+            humidity = dev.number("humidity")
+            if humidity is not None and dev.age("humidity", now) is not None:
+                entry["humidity"] = humidity
+            out[name] = entry
+        return out
+
+    def restore_sensor_memory(self, data: object) -> None:
+        """Take back saved room sensor readings with their true age (spec 7, fail warm).
+
+        A reading older than a day, from the future, or for a sensor the house file no
+        longer names is dropped. A reading that has arrived since start wins.
+        """
+        if not isinstance(data, dict):
+            return
+        now, wall = self.clock(), self._wall()
+        for name, entry in data.items():
+            dev = self.devices.get(name) if name in self._room_sensors else None
+            if dev is None or not isinstance(entry, dict):
+                continue
+            at = entry.get("at")
+            if isinstance(at, bool) or not isinstance(at, (int, float)):
+                continue
+            age = wall - at
+            if not 0 <= age <= SENSOR_MEMORY_MAX_S:
+                continue
+            for key in REMEMBERED:
+                value = entry.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    dev.remember(key, float(value), age, now)
 
     async def request_state(self) -> None:
         """Ask every TRV for its current state (a read, so also done in dry run)."""
@@ -222,6 +285,10 @@ class LiveDriver:
                 if age is not None and sensor.number("temperature") is not None:
                     inp.temperature = sensor.number("temperature")
                     inp.temperature_age_s = age
+                    inp.temperature_restored = "temperature" in sensor.restored
+                elif rc.role is RoomRole.NORMAL:
+                    # Not heard since start: the core waits for it before the TRV.
+                    inp.sensor_missing_s = now - self._started_at
                 if rc.has_humidity:
                     inp.humidity = sensor.number("humidity")
             trv = self.devices.get(dev.trv)
@@ -252,20 +319,27 @@ class LiveDriver:
             rooms[rc.id] = inp
 
         outdoor = None
+        self._outdoor_age = None
         out_dev = self.devices.get(self.site.outdoor_sensor)
         if out_dev is not None:
             age = out_dev.age("temperature", now)
             if age is not None and age <= OUTDOOR_MAX_AGE_S:
                 outdoor = out_dev.number("temperature")
+                self._outdoor_age = age if outdoor is not None else None
 
         # Without a reading, the relay is taken to be as last commanded. When it is read
         # again, the core is told how long it went unseen: the watchdog may have
         # switched it meanwhile (spec 5.7 hand-back).
         heating, store = self._last_heating, self._last_store
         unseen = 0.0
+        observed = False  # the relay as read, not a stand-in (in dry run, never sent)
+        heating_burner = store_burner = None
         if self.boiler is not None and self.boiler.reachable and self.boiler.heating:
             heating = self.boiler.heating.output
             store = self.boiler.store.output if self.boiler.store else store
+            observed = True
+            heating_burner = self.boiler.heating_burner
+            store_burner = self.boiler.store_burner
             if self._relay_seen_at is not None:
                 unseen = now - self._relay_seen_at
             self._relay_seen_at = now
@@ -282,6 +356,10 @@ class LiveDriver:
             # In dry run the relay is not Radiate's: the guard must not adopt it.
             relay_follows_commands=not self.dry_run,
             heating_relay_unseen_s=unseen,
+            # Learning and accounting take nothing from a stand-in relay (spec 4.6, 5.6).
+            relay_observed=observed,
+            heating_burner=heating_burner,
+            store_burner=store_burner,
         )
 
     async def apply(self, actions: Actions) -> None:
@@ -319,11 +397,20 @@ class LiveDriver:
                 await self.boiler.command(
                     False, actions.store_relay, int(self._wall()), heartbeat=False
                 )
-            heat = fallback_heating_windows(
-                [self.site.schedule_for(r.id) for r in self.cfg.rooms if r.controllable],
-                weekday,
-            )
-            await self.boiler.push_fallback(heat, self.cfg.store.windows)
+            await self.boiler.push_fallback(self.fallback_windows(weekday), self.cfg.store.windows)
+
+    def fallback_windows(self, weekday: int) -> list[list[int]]:
+        """The Shelly watchdog's heating windows for `weekday`: from every room's week
+        with everyone at home, and never empty (spec 7, fail warm)."""
+        rooms = [r.id for r in self.cfg.rooms if r.controllable]
+        household = self.site.household
+        return fallback_heating_windows(
+            [self.site.fallback_schedule_for(rid) for rid in rooms],
+            weekday,
+            frost_c=self.cfg.boiler.frost_c,
+            levels=[self.site.fallback_level(rid, weekday) for rid in rooms],
+            unused_c=household.temperatures.unused_c if household else DEFAULT_UNUSED_C,
+        )
 
     def _mirror(self, room_id: str) -> dict[str, str]:
         """The room's schedule in the frame its TRV compares setpoints with."""
@@ -369,6 +456,10 @@ class LiveDriver:
         return self._connected() and self.devices.bridge_online is not False
 
     # --- reporting -------------------------------------------------------------------
+
+    def outdoor_age_s(self) -> float | None:
+        """Age of the Zigbee outdoor reading in the last snapshot, or None without one."""
+        return self._outdoor_age
 
     def alerts(self) -> list[Reason]:
         out: list[Reason] = []

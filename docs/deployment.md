@@ -63,7 +63,7 @@ Run your own house. Draft the file from Zigbee2MQTT's device list, then check it
 
 Radiate keeps its state in `radiate.db` inside `house.data_dir`, which defaults to `./data` relative to the directory you start it from. See [Data, backups and upgrades](#data-backups-and-upgrades).
 
-To compare Radiate with plain smart TRVs in the simulator, run `.venv/bin/radiate sim --days 5`.
+To compare Radiate with plain smart TRVs in the simulator, run `.venv/bin/radiate sim --days 5`. To compare `eco` with and without room use, `comfort` and a plain heating timer, run `.venv/bin/radiate sim-efficiency` (see [simulation](simulation.md#room-use-in-eco)).
 
 ## Standalone Docker
 
@@ -152,6 +152,8 @@ The container makes outbound connections to the MQTT broker and the Shelly, so t
 |---|---|
 | `RADIATE_TOKEN` | If set, every `/api/` request except `/api/v1/health` needs the header `Authorization: Bearer <token>`. The WebSocket at `/api/v1/stream` also accepts it as the first message, `{"token": "<token>"}` |
 | `RADIATE_ELASTIC_URL`, `RADIATE_ELASTIC_API_KEY` | Turn on [Elastic export](#elastic-export) |
+| `RADIATE_OTLP_ENDPOINT`, `RADIATE_OTLP_PROTOCOL` | Turn on the [OpenTelemetry export](#opentelemetry-export) when the house file has no `export.otlp` section (the App and the demo) |
+| `RADIATE_OTLP_API_KEY` | The OpenTelemetry export's API key, when `export.otlp` gives neither `api_key` nor `api_key_file` |
 | `RADIATE_INGRESS_IP` | Set by the Home Assistant App only. Requests from this address with an `X-Ingress-Path` header skip the token check and any login |
 | `RADIATE_WEB_DIR` | Serve the web UI from another folder, for UI development |
 | Any name used as `${NAME}` in the configuration file | Substituted when the file loads |
@@ -267,6 +269,8 @@ The App runs the Radiate server in a container managed by the Home Assistant Sup
 | **API token** (`token`) | empty | Required by clients outside Home Assistant. The sidebar panel and the discovered integration don't need you to enter it |
 | **Elastic URL** (`elastic_url`) | empty | Turns on [Elastic export](#elastic-export) |
 | **Elastic API key** (`elastic_api_key`) | empty | API key for the export |
+| **OpenTelemetry endpoint** (`otlp_endpoint`) | empty | Turns on the [OpenTelemetry export](#opentelemetry-export). A house file's `export.otlp` section wins over it |
+| **OpenTelemetry API key** (`otlp_api_key`) | empty | Sent as `Authorization: ApiKey <key>` |
 
 ### Run your own house in the App
 
@@ -383,6 +387,30 @@ done
 
 `ADMIN_API_KEY` is a key with the `manage_index_templates` cluster privilege.
 
+## OpenTelemetry export
+
+Radiate can send every raw data reading once a minute, and every decision and alert, to an OpenTelemetry collector over OTLP/HTTP. Any OTLP/HTTP receiver works: an OpenTelemetry Collector, Elastic's managed OTLP endpoint, or another backend. It is off unless the house file has an `export.otlp` section, or `RADIATE_OTLP_ENDPOINT` is set (in the App, the **OpenTelemetry endpoint** option).
+
+```yaml
+export:
+  otlp:
+    endpoint: https://my-project.ingest.eu-west-1.aws.elastic.cloud:443
+    api_key: ${RADIATE_OTLP_API_KEY}
+```
+
+- `endpoint` is the base URL. Radiate posts to `<endpoint>/v1/metrics` and `<endpoint>/v1/logs`, as `OTEL_EXPORTER_OTLP_ENDPOINT` does. For a local collector that is usually `http://192.0.2.10:4318`.
+- The API key goes in `api_key`, or in a file named by `api_key_file`, or in `RADIATE_OTLP_API_KEY`, in that order. It is sent as `Authorization: ApiKey <key>`, which is what Elastic's managed OTLP endpoint expects. For another scheme, leave the key out and set `headers: {Authorization: "Bearer ..."}`. The key is never logged or returned by the API; an error message from the collector that repeats it has it replaced with `[redacted]`.
+- `protocol` is `http/protobuf` (the default, which every OTLP/HTTP receiver accepts) or `http/json`. gRPC is not supported.
+- `interval_s` (60), `timeout_s` (30), `compression` (`none` or `gzip`), `signals` (`[metrics, logs]`) and `enabled` (true) do what they say. `dataset` (`radiate`) is sent as the `data_stream.dataset` resource attribute, which Elastic uses to route data to `metrics-radiate.otel-default` and `logs-radiate.otel-default`; set it to an empty string to leave it out.
+
+With Elastic, create the key under **Add data** for the managed OTLP endpoint, or with the API keys page and the `event:write` privilege on the `apm` application. Copy its encoded value. Pasting the whole header value, `ApiKey ...`, also works.
+
+The export never holds up the control loop. Each tick only adds a record to a queue in the state database (7 days of readings and 20,000 log records; in memory in demo mode). A separate task sends a batch every interval, and a backlog in quick succession after an outage. While the collector can't be reached, or answers 429, 502, 503 or 504, Radiate keeps the data and backs off, doubling up to 10 minutes and honouring `Retry-After`. An authentication error (401, 403) or a wrong endpoint (404) is also kept, so fixing the key delivers the backlog. A 400 drops that batch, and a 413 halves the batch size. When a queue is full, the oldest records go first. The Raw data view's **OpenTelemetry export** plate, and `GET /api/v1/export`, show when it last sent, what is queued, how much was dropped or rejected, and the last error. The log has one warning per distinct error.
+
+Every metric is an OTLP gauge, named in the `radiate.*` namespace, as there are no OpenTelemetry semantic conventions for room heating. The resource carries `service.name` (`radiate`), `service.version`, `service.instance.id` and `radiate.house.id` (both the random house ID). [Spec section 9.1](spec.md#91-opentelemetry-export) lists the metrics and attributes.
+
+To try it without a backend, run an OpenTelemetry Collector with the `debug` exporter and point `RADIATE_OTLP_ENDPOINT` at its port 4318.
+
 ## Data, backups and upgrades
 
 ### What Radiate stores
@@ -390,14 +418,18 @@ done
 `<data_dir>/radiate.db` is a SQLite database in WAL mode, so you also see `radiate.db-wal` and `radiate.db-shm` next to it. It holds:
 
 - Learned room models, arrival lags, lockshield caps, disturbance hold-offs, stuck and leaking valve verdicts, the short-cycle adaptation, the day's accounting and the boiler guard. A restart in the middle of a burn still honours minimum burn.
+- Where each room's learning came from (its provenance), and the learning notes of the last 14 days.
 - The house ID used by Elastic and the Home Assistant integration.
 - The heating mode, the demand mode setting, setpoint overrides, and away state: who is away until when, and the presence Home Assistant last reported.
-- The Elastic export queue.
+- The Elastic export queue, and the OpenTelemetry export's queues (`otlp_metrics_queue`, `otlp_logs_queue`).
 - With [user login](#user-login) on: the people who can sign in (`users`, with scrypt password hashes) and their sessions (`sessions`, holding only a hash of each session ID).
 - The closed day summaries savings are worked out from (`daily_history`), one per day for 730 days, a few kilobytes each.
-- The tick history: each tick's snapshot and decisions for the last `house.history_days` days (14 by default), about 1.2 MB a day for a 9-room house. See [configuration](configuration.md#tick-history-and-replay).
+- The tick history: each tick's snapshot and decisions for the last `house.history_days` days (14 by default), about 1 MB a day for a 9-room house. See [configuration](configuration.md#tick-history-and-replay).
+- The raw data index (`data_series`, `data_hour`): each series by the hour, about 0.4 MB a day for a 9-room house, pruned with the tick history. It is rebuilt from the tick history in the background if it is missing or from an older version, so it is safe to leave out of a backup.
 
 `<data_dir>/household.yaml` holds the household set up in the web UI, if any. It replaces the house file's `household` section, so pass the same data directory to `radiate check-config` and `radiate schedules` with `--data-dir` to see what the server uses. See [set up in the web UI](configuration.md#set-up-in-the-web-ui).
+
+`<data_dir>/settings.yaml` holds the settings changed in the web UI's Settings view, if any. Each value in it replaces the house file's for that key; the house file itself is never written, so it can stay read-only (a Kubernetes ConfigMap, or the file the Home Assistant App manages). The server, `radiate check-config`, `radiate schedules` and `radiate shelly` all apply it, given the same data directory, and `check-config` lists the keys it sets. If the saved settings would make the house invalid (a room was removed from the house file since, say), the server logs why, starts with the house file's values and the Settings view shows the problem. Delete the file, or choose "Use the house file for every setting", to go back to the house file. `house.data_dir` is the one key it can't set, as the file lives there. `--dry-run` still forces dry run whatever the file says. Back up both files with the database.
 
 Radiate saves engine state every 5 minutes and when it stops cleanly. The manual fire switch is not saved.
 
@@ -440,6 +472,19 @@ radiate bootstrap --config radiate.yaml
 
 The command replaces each room's model, arrival lags and lockshield cap with the ones learned from the history, and keeps the boiler guard and every timer as saved. It refuses to run if Radiate saved its state in the last 15 minutes, because a running server would overwrite the result. Add `--force` to run it anyway.
 
+Recorded dry-run ticks teach nothing unless the Shelly showed the burner firing (spec 4.1, `heat_unknown`), so a bootstrap after a dry run without metering learns from the live days only.
+
+Models learned in a dry run without metering, or saved by a version before Radiate recorded how each model was learned, are reset on their own once the Shelly shows the burner (spec 4.3, ADR-0007). To put room models back to their priors for any other reason without stopping the server, post to the learning reset. It writes no device:
+
+```bash
+curl -X POST -H "Authorization: Bearer $RADIATE_TOKEN" -H "Content-Type: application/json" \
+  -d '{}' http://localhost:8099/api/v1/learning/reset
+curl -X POST -H "Authorization: Bearer $RADIATE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"rooms": ["bedroom_1", "dining_room"]}' http://localhost:8099/api/v1/learning/reset
+```
+
+A replay across a reset differs from then on, because the reset is not a recorded tick.
+
 ### Upgrades
 
 - From source: `git pull`, then run the `uv pip install` command again.
@@ -447,7 +492,9 @@ The command replaces each room's model, arrival lags and lockshield cap with the
 - Home Assistant App: the App version does not change with each commit yet, so Home Assistant won't offer updates. Select **Rebuild** on the App page to build it again from `main`.
 - HACS integration: update it in HACS and restart Home Assistant.
 
-Saved state carries a format version. If a new release cannot read it, Radiate logs the problem and starts from priors rather than refusing to start.
+Learned state survives an upgrade ([ADR-0007](adr/0007-learned-state-across-upgrades.md)). Saved engine state carries a format version, and a new release brings an older save forward rather than starting again. A release that knows some learning is wrong, such as models learned in a dry run without burner metering, resets only the rooms concerned. Each change is logged and shown for 14 days in the web UI's Learning notice and in `learning_notes` in `GET /api/v1/state`.
+
+Going back to an older release: it does not read state saved by a newer one. It keeps that state untouched in the database under `engine.v<N>`, starts from priors or the tick history, and says so. To return to the newer release with its state, restore the database from a backup taken before the downgrade.
 
 ## Shelly watchdog
 
