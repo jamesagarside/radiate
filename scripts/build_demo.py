@@ -32,6 +32,7 @@ DEFAULT_OUT = ROOT / "dist" / "demo"
 STATIC_FILES = (
     "app.js",
     "app.css",
+    "pending.js",
     "week.js",
     "household.js",
     "setup.js",

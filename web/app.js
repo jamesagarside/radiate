@@ -17,6 +17,7 @@ import { createData } from "./data.js";
 import { createHouse } from "./house.js";
 import { createGuide, guideNote } from "./guide.js";
 import { createSettings } from "./settings.js";
+import { failText, pendingValue, sendChange } from "./pending.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -161,6 +162,18 @@ async function post(path, body) {
   }
 }
 
+// Send a change for a control painted from `p` (pending.js): it shows at once, is busy
+// while the request is out, then shows the server's state, or goes back with a message.
+// Every state that arrives meanwhile, from the stream or a poll, is painted through
+// `p`, so a state from before the press can't undo it.
+const change = (p, value, path, body, paint) => sendChange(p, value, { send: () => post(path, body), paint, refresh });
+
+// Show a control's error under it, or hide the line.
+function showError(el, text) {
+  el.hidden = !text;
+  el.textContent = text;
+}
+
 // Roles (ADR-0006): what the signed-in person may change. Token, ingress, a server
 // without login and the demo count as admin. A control the role can't use stays in
 // its place, disabled, with a short tag saying why, so nothing fails with "Not saved".
@@ -239,10 +252,10 @@ function ensureCard(r) {
   const fire = node.querySelector(".fire");
   if (r.heat_source === "episodic") {
     fire.hidden = false;
-    fire.addEventListener("click", async () => {
-      const lit = fire.getAttribute("aria-pressed") !== "true";
-      fire.setAttribute("aria-pressed", String(lit));
-      try { await post(`rooms/${r.id}/fire`, { lit }); } catch { fire.setAttribute("aria-pressed", String(!lit)); }
+    fire.addEventListener("click", () => {
+      const p = firePending(r.id);
+      const lit = !p.shown(fireOn(rooms.get(r.id) ?? r));
+      change(p, lit, `rooms/${r.id}/fire`, { lit }, () => renderFire(node, rooms.get(r.id) ?? r));
     });
   }
   const stepper = node.querySelector(".stepper");
@@ -256,6 +269,25 @@ function ensureCard(r) {
   $("rooms").appendChild(node);
   cards.set(r.id, node);
   return node;
+}
+
+// The fire switch: the manual flag a person sets, `fire_switch`. `fire` is also true
+// for a detected fire, which this button cannot clear, so the button shows the switch.
+// Older servers send only `fire`.
+const firePresses = new Map(); // room id -> pendingValue
+function firePending(id) {
+  if (!firePresses.has(id)) firePresses.set(id, pendingValue());
+  return firePresses.get(id);
+}
+const fireOn = (r) => Boolean(r.fire_switch ?? r.fire);
+
+function renderFire(n, r) {
+  const fire = n.querySelector(".fire");
+  if (fire.hidden) return;
+  const p = firePending(r.id);
+  fire.setAttribute("aria-pressed", String(Boolean(p.shown(fireOn(r)))));
+  fire.setAttribute("aria-busy", String(p.busy));
+  showError(n.querySelector(".fire-error"), p.error);
 }
 
 // Setpoint control. Presses change the shown value at once and are sent together
@@ -301,10 +333,10 @@ async function sendSetpoint(id) {
   const value = c.pending;
   try {
     await post(`rooms/${id}/setpoint`, { setpoint: value });
-  } catch {
+  } catch (err) {
     if (c.pending === value) {
       c.pending = null;
-      c.error = "Not saved. Try again.";
+      c.error = failText(err);
     }
     if (rooms.has(id)) renderRoom(rooms.get(id));
     return;
@@ -329,9 +361,9 @@ async function resumeSchedule(id) {
   if (rooms.has(id)) renderRoom(rooms.get(id));
   try {
     await post(`rooms/${id}/setpoint`, { setpoint: null });
-  } catch {
+  } catch (err) {
     c.clearing = false;
-    c.error = "Not saved. Try again.";
+    c.error = failText(err);
     if (rooms.has(id)) renderRoom(rooms.get(id));
     return;
   }
@@ -436,8 +468,7 @@ function renderRoom(r) {
   } else {
     meta.textContent = r.humidity != null ? `${r.humidity}% RH` : "";
   }
-  const fire = n.querySelector(".fire");
-  if (!fire.hidden && document.activeElement !== fire) fire.setAttribute("aria-pressed", String(!!r.fire));
+  renderFire(n, r);
 }
 
 // Away, per person (household setup). The server says who counts as away; this only
@@ -551,7 +582,7 @@ function ensurePerson(p) {
       const text = String(err?.message ?? "");
       error.textContent = text.includes("in the future")
         ? "Not saved: pick a time that has not passed."
-        : text.includes("within") ? "Not saved: pick a date in the next 60 days." : "Not saved. Try again.";
+        : text.includes("within") ? "Not saved: pick a date in the next 60 days." : failText(err);
       return;
     }
     save.disabled = false;
@@ -561,15 +592,25 @@ function ensurePerson(p) {
   });
   // "I'm home": ends an away until and sets aside a not home from Home Assistant until
   // their presence next changes. An older server without the route: clear the away until.
+  const clearError = node.querySelector(".person-error");
   clear.addEventListener("click", async () => {
     clear.disabled = true;
+    clear.setAttribute("aria-busy", "true");
+    showError(clearError, "");
     try {
       await post(`people/${p.id}/home`, {});
-    } catch {
-      try { await post(`people/${p.id}/away`, { until: null }); } catch { /* the state shows what holds */ }
+    } catch (err) {
+      // 404 is an older server without the route; anything else is a refusal to show.
+      try {
+        if (!/HTTP 404/.test(String(err?.message))) throw err;
+        await post(`people/${p.id}/away`, { until: null });
+      } catch (err2) {
+        showError(clearError, failText(err2));
+      }
     }
     clear.disabled = false;
-    refresh();
+    clear.setAttribute("aria-busy", "false");
+    await refresh();
   });
   $("people-list").appendChild(node);
   people.set(p.id, node);
@@ -737,7 +778,7 @@ function render(s) {
   const minOff = b.min_off_s ?? house?.boiler.min_off_s ?? 600;
   $("status").textContent = statusLine(s, minBurn);
   $("outdoor").textContent = s.outdoor != null ? `Outside ${s.outdoor.toFixed(1)}°` : "";
-  for (const btn of $("mode").querySelectorAll("button")) btn.setAttribute("aria-checked", String(btn.dataset.mode === s.mode));
+  renderMode(s.mode);
   renderDemand(s.settings);
 
   const chip = $("boiler-chip");
@@ -752,7 +793,7 @@ function render(s) {
   $("boiler-detail").textContent = firing
     ? b.burn_elapsed_s < minBurn ? `minimum burn ${mins(minBurn - b.burn_elapsed_s)} to go` : "minimum burn met"
     : b.state === "rest" ? `${mins(Math.max(0, minOff - b.state_elapsed_s))} until it may start again` : "";
-  $("boost").setAttribute("aria-pressed", String(s.store.boost));
+  renderBoost(s.store.boost);
 
   lane(document.querySelector(".lane.burns"), s.timeline.burns, s.timeline.window_s);
   lane(document.querySelector(".lane.store"), s.timeline.store, s.timeline.window_s);
@@ -875,7 +916,7 @@ const DEMAND_NOTE = {
   eco: "fewer, longer burns. Rooms might warm a bit later.",
   comfort: "every room held at its target, with more burns.",
 };
-const demand = { pending: null, error: "" };
+const demand = pendingValue();
 
 function renderDemand(settings) {
   const group = $("demand");
@@ -883,9 +924,9 @@ function renderDemand(settings) {
   const known = settings && DEMAND_NOTE[settings.demand_mode];
   group.hidden = note.hidden = !known;
   if (!known) return;
-  if (demand.pending === settings.demand_mode) demand.pending = null;
-  const shown = demand.pending ?? settings.demand_mode;
+  const shown = demand.shown(settings.demand_mode);
   for (const btn of group.querySelectorAll("button")) btn.setAttribute("aria-checked", String(btn.dataset.demand === shown));
+  group.setAttribute("aria-busy", String(demand.busy));
   // The segmented control names the mode, so the note only says what it does, and
   // starts "Default:" while it follows the configuration file.
   const text = DEMAND_NOTE[shown];
@@ -895,31 +936,14 @@ function renderDemand(settings) {
     : text[0].toUpperCase() + text.slice(1));
 }
 
-$("demand").addEventListener("click", async (e) => {
+$("demand").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-demand]");
   const settings = last?.settings;
   if (!btn || !settings || btn.getAttribute("aria-checked") === "true") return;
   const value = btn.dataset.demand;
-  demand.pending = value;
-  demand.error = "";
-  renderDemand(settings);
-  try {
-    await post("settings", { demand_mode: value === settings.demand_mode_default ? null : value });
-  } catch {
-    if (demand.pending === value) {
-      demand.pending = null;
-      demand.error = "Not saved. Try again.";
-    }
-    renderDemand(last.settings);
-    return;
-  }
-  // Let go of the pressed value if no state confirms it.
-  setTimeout(() => {
-    if (demand.pending !== value) return;
-    demand.pending = null;
-    if (last) renderDemand(last.settings);
-  }, PENDING_MAX_MS);
-  refresh();
+  change(demand, value, "settings", { demand_mode: value === settings.demand_mode_default ? null : value }, () => {
+    if (last?.settings) renderDemand(last.settings);
+  });
 });
 
 // Dry run: the live driver reads devices but holds back every write.
@@ -1039,12 +1063,32 @@ $("alerts-more").addEventListener("click", () => {
   setAlertsExpanded($("alerts-more").getAttribute("aria-expanded") !== "true");
 });
 
+// The heating mode and the hot-water boost. A press shows at once (pending.js), and
+// the server's state follows straight after, not at the next tick.
+const heating = pendingValue();
+function renderMode(mode) {
+  const shown = heating.shown(mode);
+  for (const btn of $("mode").querySelectorAll("button")) btn.setAttribute("aria-checked", String(btn.dataset.mode === shown));
+  $("mode").setAttribute("aria-busy", String(heating.busy));
+  showError($("mode-error"), heating.error);
+}
 $("mode").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-mode]");
-  if (btn) post("mode", { mode: btn.dataset.mode }).catch(() => {});
+  if (!btn || !last || btn.getAttribute("aria-checked") === "true") return;
+  const mode = btn.dataset.mode;
+  change(heating, mode, "mode", { mode }, () => last && renderMode(last.mode));
 });
+
+const boost = pendingValue();
+function renderBoost(on) {
+  $("boost").setAttribute("aria-pressed", String(Boolean(boost.shown(on))));
+  $("boost").setAttribute("aria-busy", String(boost.busy));
+  showError($("boost-error"), boost.error);
+}
 $("boost").addEventListener("click", () => {
-  post("store/boost", { minutes: last?.store.boost ? 0 : 60 }).catch(() => {});
+  if (!last) return;
+  const on = !boost.shown(last.store.boost);
+  change(boost, on, "store/boost", { minutes: on ? 60 : 0 }, () => last && renderBoost(last.store.boost));
 });
 
 // Connection state. While the live stream is down, poll once per reconnect attempt;
