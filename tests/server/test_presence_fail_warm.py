@@ -8,7 +8,8 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from radiate.config import parse_site
-from radiate.core import Mode
+from radiate.core import DemandMode, Mode, RoomUse
+from radiate.core.decide import solo_threshold_c
 from radiate.drivers.live import LiveDriver
 from radiate.server import bridge
 from radiate.server.app import create_app
@@ -465,3 +466,32 @@ async def test_away_from_presence_stops_at_the_damp_floor():
     rt.set_away("home_worker", FRI_1800)
     await rt.step()
     assert rt.last_snapshot.rooms["dining"].setpoint == 10.0
+
+
+def feed_dining(drv: LiveDriver, dining: float) -> None:
+    """Every device reporting at 18 °C, the dining room's sensor at `dining`."""
+    feed(drv)
+    sensor = drv.site.devices["dining"].sensor
+    drv.handle_message(f"zigbee2mqtt/{sensor}", json.dumps({"temperature": dining}).encode())
+
+
+@pytest.mark.parametrize(("dining", "solo"), [(12.5, False), (11.6, True)])
+async def test_room_use_in_eco_keeps_the_presence_damp_floor(dining, solo):
+    # Fail warm floors a room set back by presence at 12 °C, and room use in eco waits
+    # for a setback room's solo threshold, never below the damp floor. Together the
+    # room starts a burn on its own as soon as it calls below 12 °C, not 1.5 K below
+    # it as a room without room use would.
+    temps = {"unused": 10}
+    rt, drv, clocks = make(solo=True, temperatures=temps, everyone_away="unused")
+    rt.report_presence("home_worker", "not_home", WED_0600 - 2 * 3600, evidence_at=clocks.wall)
+    feed_dining(drv, dining)
+    await rt.step()
+    assert rt.away == {"home_worker"}
+    assert rt.effective_demand_mode is DemandMode.ECO
+    snap, rs = rt.last_snapshot.rooms["dining"], rt.state.rooms["dining"]
+    assert snap.setpoint == 12.0 and snap.use is RoomUse.SETBACK
+    assert solo_threshold_c(rs.target, rs.use, rt.cfg.boiler) == 12.0
+    assert solo_threshold_c(rs.target, None, rt.cfg.boiler) == 10.5
+    assert rs.calling is solo and rs.solo is solo
+    floor = [r for r in rt.last_actions.reasons if r.code == "demand.floor"]
+    assert [r.room_id for r in floor] == (["dining"] if solo else [])
