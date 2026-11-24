@@ -717,6 +717,7 @@ function render(s) {
     $("banner-text").textContent = `Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time. Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
   }
   renderDryRun(s.telemetry);
+  renderLearningNotes(s.learning_notes);
   renderPeople(s.away);
   for (const r of s.rooms) renderRoom(r);
   renderAlerts(s.alerts);
@@ -871,6 +872,36 @@ $("demand").addEventListener("click", async (e) => {
 });
 
 // Dry run: the live driver reads devices but holds back every write.
+// Learning notes (ADR-0007): learned state Radiate dropped, carried over or reset in the
+// last 14 days, newest first.
+let learningKey = "";
+function renderLearningNotes(notes = []) {
+  const key = JSON.stringify(notes);
+  if (key === learningKey) return;
+  learningKey = key;
+  const box = $("learning-notes");
+  box.hidden = !notes.length;
+  if (box.hidden) return;
+  const resets = new Set(notes.filter((n) => n.room_id).map((n) => n.room_id)).size;
+  $("learning-notes-lead").textContent = resets
+    ? `${plural(resets, "room's learning was", "rooms' learning was")} reset recently. Those rooms learn again from their next burns.`
+    : "Radiate changed what it had learned when it last started.";
+  const list = box.querySelector("ul");
+  list.textContent = "";
+  for (const n of [...notes].reverse()) {
+    const li = document.createElement("li");
+    const when = document.createElement("span");
+    when.className = "payload";
+    when.textContent = new Date(n.at * 1000).toLocaleString(undefined, {
+      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+    });
+    const what = document.createElement("span");
+    what.textContent = n.message;
+    li.append(when, what);
+    list.appendChild(li);
+  }
+}
+
 let intendedKey = "";
 function renderDryRun(t) {
   const box = $("dryrun");

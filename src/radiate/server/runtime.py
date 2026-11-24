@@ -75,7 +75,9 @@ from radiate.core.outdoor import (
     plausible,
     reading_age,
 )
-from radiate.core.persist import dump_state, first_start_state, load_state
+from radiate.core.persist import VERSION as ENGINE_VERSION
+from radiate.core.persist import dump_state, first_start_state, load_state, saved_version
+from radiate.core.provenance import Provenance
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.server import layout
 from radiate.server.savings import DailyHistory, day_estimate, savings_view
@@ -144,6 +146,16 @@ class DecisionRecord:
     room_id: str | None
 
 
+# Learning notes (ADR-0007): what happened to learned state that a person should see, such
+# as a model dropped, migrated or reset. Kept in the state database this long, at most
+# LEARNING_NOTES_MAX of them.
+LEARNING_NOTES_S = 14 * 86400.0
+LEARNING_NOTES_MAX = 50
+LEARNING_NOTES_KEY = "learning_notes"
+# Learning reasons that become notes: reasons from `decide`, and the manual reset.
+LEARNING_NOTE_CODES = ("learning.invalidated", "learning.reset")
+
+
 @dataclass
 class Runtime:
     cfg: HouseConfig
@@ -210,9 +222,12 @@ class Runtime:
     _away_log: list[Reason] = field(default_factory=list)  # for the exporter, next tick
     _alert_keys: set[tuple[str, str | None, str]] = field(default_factory=set)
     _task: asyncio.Task | None = None
+    # Learning notes, oldest first: {"at" (Unix s), "code", "message", "room_id"}.
+    learning_notes: list[dict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.state = EngineState.new(self.cfg)
+        self.state.code_version = __version__
         # Closed day summaries for savings (spec 5.9), kept in the state database.
         self.daily = DailyHistory(self.store)
 
@@ -264,6 +279,8 @@ class Runtime:
         if saved is not None:
             data, saved_wall = saved
             elapsed = max(0.0, wall - saved_wall)
+            self._keep_newer(data, saved_wall)
+        self.learning_notes = _restore_notes(self.store.get(LEARNING_NOTES_KEY), wall)
         history = self._open_history()
         if history is not None and needs_bootstrap(data):
             data = self._bootstrap(history, data, wall)
@@ -273,12 +290,39 @@ class Runtime:
             self._saved_at = now
         else:
             self.state = first_start_state(self.cfg)
+        self.state.code_version = __version__
+        for problem in problems:
+            self._note(wall, "learning.restore", problem[:1].upper() + problem[1:], None)
+        if problems:
+            self._save_notes()
         if history is not None:
             from radiate.server.history import Recorder
 
             # The start entry records exactly how this state was built, for replay.
             self.recorder = Recorder(history, int(wall * 1000), now, wall, data, elapsed)
         return problems
+
+    def _keep_newer(self, data: object, saved_wall: float) -> None:
+        """Downgrade (ADR-0007): engine state saved by a newer Radiate is copied, as it
+        is, to `engine.v<format>` before this version saves its own over `engine`. An
+        earlier copy of the same format is never replaced."""
+        version = saved_version(data)
+        if version is None or version <= ENGINE_VERSION:
+            return
+        key = f"engine.v{version}"
+        if self.store.get(key) is None:
+            self.store.put(key, data, wall=saved_wall)
+            LOG.warning("restore: kept the newer saved state (format %d) as %s", version, key)
+
+    def _note(self, wall: float, code: str, message: str, room_id: str | None) -> None:
+        self.learning_notes = [
+            *(n for n in self.learning_notes if wall - n["at"] <= LEARNING_NOTES_S),
+            {"at": wall, "code": code, "message": message, "room_id": room_id},
+        ][-LEARNING_NOTES_MAX:]
+
+    def _save_notes(self) -> None:
+        if self.store is not None:
+            self.store.put(LEARNING_NOTES_KEY, self.learning_notes, wall=self.wall())
 
     def _open_history(self):
         days = getattr(self.driver, "history_days", None)
@@ -1235,10 +1279,19 @@ class Runtime:
                 estimate = self._day_estimate(actions.day_summary)
         logged = [(r.code, r.message, r.room_id) for r in self._away_log]
         self._away_log.clear()
+        noted = False
         for r in actions.reasons:
-            if r.code.startswith(("boiler.", "disturbance.", "safe_mode.", "learning.relearn")):
+            if r.code.startswith(
+                ("boiler.", "disturbance.", "safe_mode.", "learning.relearn", *LEARNING_NOTE_CODES)
+            ):
                 self._log(now, r)
                 logged.append((r.code, r.message, r.room_id))
+            if r.code in LEARNING_NOTE_CODES:
+                LOG.warning("learning: %s", r.message)
+                self._note(self.wall(), r.code, r.message, r.room_id)
+                noted = True
+        if noted:
+            self._save_notes()
         # Alerts repeat every tick while they hold; log each one when it first appears
         # or when its message changes.
         keys = set()
@@ -1283,8 +1336,11 @@ class Runtime:
         ids = reset_learned(self.cfg, self.state, room_ids)
         for rid in ids:
             name = self.cfg.room(rid).name
-            self._log(now, Reason("learning.reset", f"{name}: learning reset to priors", rid))
+            message = f"{name}: learning reset to priors"
+            self._log(now, Reason("learning.reset", message, rid))
+            self._note(self.wall(), "learning.reset", message, rid)
         self.save()
+        self._save_notes()
         return ids
 
     def _log(self, now: float, r: Reason) -> None:
@@ -1404,6 +1460,11 @@ class Runtime:
                         "samples": rs.est.samples,
                         "arrival_lag_min": round(rs.arrival_lag_s / 60, 1),
                         "lockshield": rs.lockshield,
+                        # Where it was learned (ADR-0007): learning updates by condition
+                        # (`live_burner`, `live_relay`, `dry_burner`, `dry_relay`,
+                        # `unknown`), the learner version and the dates of the first and
+                        # latest update.
+                        "learned": _learned_view(rs.learned),
                     },
                     reason=reason.message if (reason := reasons_by_room.get(rc.id)) else None,
                     # The code of that reason, such as `demand.pooled` (spec 5.3).
@@ -1486,10 +1547,55 @@ class Runtime:
             else [],
             "telemetry": self.driver.telemetry(),
             "settings": self.settings(),
+            # Learned state dropped, migrated or reset in the last 14 days (ADR-0007),
+            # oldest first: {"at" (Unix s), "code", "message", "room_id"}.
+            "learning_notes": [
+                n for n in self.learning_notes if self.wall() - n["at"] <= LEARNING_NOTES_S
+            ],
         }
 
 
 OUTDOOR_KEY = "outdoor_ha"
+
+
+def _learned_view(p: Provenance) -> dict:
+    def iso(day: int | None) -> str | None:
+        if day is None or not 1 <= day <= 3652059:
+            return None
+        return datetime.fromordinal(day).date().isoformat()
+
+    return {
+        "learner": p.learner,
+        "code": p.code,
+        "since": iso(p.first_day),
+        "latest": iso(p.last_day),
+        "updates": dict(p.updates),
+    }
+
+
+def _restore_notes(saved: tuple | None, wall: float) -> list[dict]:
+    """Saved learning notes from the last LEARNING_NOTES_S; malformed ones are dropped."""
+    if saved is None or not isinstance(saved[0], list):
+        return []
+    notes = []
+    for n in saved[0]:
+        if not isinstance(n, dict) or not isinstance(n.get("message"), str):
+            continue
+        at = n.get("at")
+        if isinstance(at, bool) or not isinstance(at, (int, float)):
+            continue
+        if wall - at > LEARNING_NOTES_S:
+            continue
+        room = n.get("room_id")
+        notes.append(
+            {
+                "at": float(at),
+                "code": n["code"] if isinstance(n.get("code"), str) else "learning.restore",
+                "message": n["message"],
+                "room_id": room if isinstance(room, str) else None,
+            }
+        )
+    return notes[-LEARNING_NOTES_MAX:]
 
 
 def _restore_outdoor(data: object) -> OutdoorReading | None:
