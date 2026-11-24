@@ -171,20 +171,29 @@ How early Radiate can start warming rooms for someone due back from an away unti
 Minutes. Code: `next_return`, `Return` in `radiate.config.away`, `Runtime.returning`, `Runtime._apply_return`, `RoomInput.preheat_max_s`, `AwaySettings.return_warmup_min`, config key `household.away.return_warmup_min`, `away.return` in the API; reason `away.return`.
 
 **Everyone away**:
-Every person in the household counts as away. In the `auto` heating mode, the runtime then runs the core in `frost` until someone is home, or until the return warm-up before someone is due back. With `everyone_away: unused` it keeps the household's schedules instead, which hold every room at its unused temperature. The chosen heating mode is not changed, so `off` and `frost` still apply. Planned (fail warm): the frost hold will apply only when everyone has an away until; presence alone will hold every room at its unused temperature.
-Code: `Runtime.everyone_away`, `Runtime.effective_mode`, `EveryoneAway`, config key `household.away.everyone_away`, `away.frost` in `state`; reasons `away.everyone`, `away.ended`.
+Every person in the household counts as away. In the `auto` heating mode, the runtime then runs the core in `frost` until someone is home, or until the return warm-up before someone is due back. With `everyone_away: unused` it keeps the household's schedules instead, which hold every room at its unused temperature. The chosen heating mode is not changed, so `off` and `frost` still apply. Fail warm: the frost hold applies only when everyone has an away until, and a room override still wins over it; presence alone holds every room at its unused temperature.
+Code: `Runtime.everyone_away`, `Runtime.effective_mode`, `Runtime.frost_held`, `frost_allowed` in `radiate.config.away`, `EveryoneAway`, config key `household.away.everyone_away`, `away.frost` in `state`; reasons `away.everyone`, `away.ended`.
 
 **Fail warm**:
-Planned ([ADR-0005](adr/0005-fail-warm-presence.md), [spec 7](spec.md#7-failure-modes)), not built. The rule that no connectivity or device problem may lower the heating: an input that could lower a room's temperature counts, when it is missing, silent or doubtful, as the reading that keeps the house warmer. Uncertain presence counts as home.
+([ADR-0005](adr/0005-fail-warm-presence.md), [spec 7](spec.md#7-failure-modes)). The rule that no connectivity or device problem may lower the heating: an input that could lower a room's temperature counts, when it is missing, silent or doubtful, as the reading that keeps the house warmer. Uncertain presence counts as home.
 _Avoid_: fail safe for this; fail safe is about Radiate's own outages (governed mode, the schedule mirror, the watchdog).
 
-**Source silence**:
-Planned, not built. How long a person's presence source (the tracker behind their Home Assistant `person`) may go without updating before its `not_home` stops counting as away. 120 minutes by default. Different from stale presence, which is about the integration's reports.
-Minutes. Code: `AwaySettings.presence_source_silence_min`, `source_silent` and `Presence.last_seen` in `radiate.config.away`, `last_seen` in `POST /api/v1/people/{id}/presence`; reason `away.presence_uncertain`.
+**Presence evidence**:
+When a person's trackers (the `device_tracker` entities behind their Home Assistant `person`) last reported, whatever their state. A `not_home` counts as away only while its evidence is younger than the evidence limit, 240 minutes by default; after that it counts as home. Different from stale presence, which is about the integration's reports: a dead phone's `not_home` is reported every 15 minutes, but its evidence stops. Without `evidence_at` (an older integration), the time the state changed stands in.
+Minutes. Code: `AwaySettings.presence_evidence_max_age_min`, `evidence_old`, `evidence_seen` and `Presence.evidence_at` in `radiate.config.away`, `evidence_at` in `POST /api/v1/people/{id}/presence`, `presence.uncertain` `evidence_old` in the API; reason `away.presence_uncertain`.
+_Avoid_: source silence, last seen.
+
+**Weak source**:
+A tracker that can report `not_home` for a phone that is at home: a router or Bluetooth tracker, or a phone at 5 % battery or less. Its `not_home` counts only after the weak source delay, 240 minutes by default.
+Minutes. Code: `weak_source`, `Presence.source_type`, `Presence.battery` in `radiate.config.away`, `AwaySettings.presence_weak_source_delay_min`.
+
+**I'm home**:
+A person saying they are home: Back now in the web UI, or `POST /api/v1/people/{id}/home`. It ends their away until, and a `not_home` from before it counts as home until their presence changes again.
+Code: `Runtime.say_home`, `Presence.home_at`, `home_at` in the API, `presence.uncertain` `said_home`; reason `away.home`.
 
 **Home evidence**:
-Planned, not built. A sign someone is in the house (a setpoint override, a store boost, the fire switch, a shower detected) that sets aside presence-based away until that person's presence changes again.
-Code: `Runtime.note_home_evidence`, `Presence.home_evidence_at`; reason `away.home_evidence`.
+A sign someone is in the house (a setpoint override, a store boost, the fire switch, a shower detected) that sets aside presence-based away until that person's presence changes again.
+Code: `Runtime.note_home_evidence`, `Presence.home_evidence_at`, `presence.uncertain` `home_evidence`; reason `away.home_evidence`.
 
 ## Valve actuation
 

@@ -109,6 +109,36 @@ def test_bridge_devices():
     assert parse_bridge_devices(b"not json") is None
 
 
+def test_bridge_devices_lists_what_each_device_exposes():
+    payload = [
+        {
+            "friendly_name": "trv_a",
+            "type": "EndDevice",
+            "definition": {
+                "model": "TRVZB",
+                "exposes": [
+                    {
+                        "type": "climate",
+                        "features": [
+                            {"property": "occupied_heating_setpoint", "name": "x"},
+                            {"property": "system_mode"},
+                        ],
+                    },
+                    {"type": "numeric", "property": "valve_opening_degree"},
+                    {"type": "binary", "name": "child_lock"},
+                    "junk",
+                ],
+            },
+        },
+        {"friendly_name": "plain", "definition": {"model": "X"}},
+    ]
+    listed = parse_bridge_devices(json.dumps(payload))
+    assert listed["trv_a"].exposes == frozenset(
+        {"occupied_heating_setpoint", "system_mode", "valve_opening_degree", "child_lock"}
+    )
+    assert listed["plain"].exposes is None  # unknown: nothing is skipped
+
+
 def test_network_map_parents():
     routes = parse_network_map(NETWORK_MAP).routes
     assert routes["plug_hall"].via == "Coordinator"

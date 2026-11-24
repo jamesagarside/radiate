@@ -293,7 +293,9 @@ class LiveDriver:
                 continue
             echo = self.devices.get(writer.device)
             mirror = self._mirror(rid)
-            for write in writer.plan(action, echo, now, mirror):
+            info = self.devices.bridge_devices.get(writer.device)
+            exposes = info.exposes if info is not None else None
+            for write in writer.plan(action, echo, now, mirror, exposes):
                 self._send(write)
         self._last_heating, self._last_store = actions.heating_relay, actions.store_relay
         # Safe mode with no burn of Radiate's own: stop commanding the relay and stop

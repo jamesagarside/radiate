@@ -1,6 +1,7 @@
 """Away at runtime: recompiling the household, everyone away, persistence and the API."""
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -138,11 +139,14 @@ async def test_presence_counts_after_the_delay():
     assert wednesday(drv, "bedroom_3") == "00:00/14"
     person = next(p for p in rt.describe()["away"]["people"] if p["id"] == "home_worker")
     assert person["away"] and person["reason"] == "presence"
-    assert person["presence"] == {
-        "state": "not_home",
-        "since": "2026-11-18T06:00+00:00",
-        "stale": False,
-    }
+    assert (
+        person["presence"].items()
+        >= {
+            "state": "not_home",
+            "since": "2026-11-18T06:00+00:00",
+            "stale": False,
+        }.items()
+    )
     # Back home: counts at once, no delay.
     rt.report_presence("home_worker", "home", None)
     assert rt.away == frozenset()
@@ -207,10 +211,13 @@ async def test_a_mode_the_user_set_still_wins(mode):
 async def test_presence_only_stays_away_until_someone_is_home():
     rt, _, clocks = make(away={"presence_stale_after_min": 0})  # no heartbeat here
     for pid in ("early_riser", "home_worker"):
-        rt.report_presence(pid, "not_home", WED_0600 - 3 * 3600)
+        rt.report_presence(pid, "not_home", WED_0600 - 3 * 3600, evidence_at=clocks.wall)
     await rt.step()
-    assert rt.everyone_away
+    # Fail warm: everyone away by presence alone keeps rooms unused, never frost.
+    assert rt.everyone_away and rt.last_snapshot.mode is Mode.AUTO
     clocks.advance(5 * 86400)
+    for pid in ("early_riser", "home_worker"):  # the trackers still report not home
+        rt.report_presence(pid, "not_home", WED_0600 - 3 * 3600, evidence_at=clocks.wall)
     await rt.step()
     assert rt.everyone_away
     rt.report_presence("early_riser", "home", None)
@@ -239,7 +246,7 @@ async def test_away_survives_a_restart_and_expired_entries_clear(tmp_path):
     rt.restore()
     rt.set_away("early_riser", FRI_1800)
     rt.set_away("home_worker", WED_0600 + 2 * 3600)
-    rt.report_presence("home_worker", "not_home", WED_0600 - 3600)
+    rt.report_presence("home_worker", "not_home", WED_0600 - 3600, evidence_at=WED_0600)
     await rt.stop()
 
     clocks.advance(4 * 3600)  # down for four hours: the home worker's away until ended
@@ -249,7 +256,8 @@ async def test_away_survives_a_restart_and_expired_entries_clear(tmp_path):
     await rt2.step()
     assert rt2.presence["home_worker"].away_until is None
     assert rt2.presence["home_worker"].state == "not_home"
-    assert rt2.everyone_away and rt2.last_snapshot.mode is Mode.FROST
+    # One away until and one away by presence: fail warm, so unused rather than frost.
+    assert rt2.everyone_away and rt2.last_snapshot.mode is Mode.AUTO
     assert wednesday(drv2, "bedroom_3") == "00:00/14"
     saved = store.get("away")[0]["people"]
     assert saved["home_worker"]["away_until"] is None
@@ -335,6 +343,7 @@ async def test_people_house_and_state(client):
         "reason": None,
         "until": None,
         "presence": None,
+        "home_at": None,
     }
     state = await (await client.get("/api/v1/state", headers=H)).json()
     assert state["away"] == people
@@ -379,11 +388,14 @@ async def test_report_presence(client):
     assert r.status == 200
     person = (await r.json())["person"]
     assert person["away"] and person["reason"] == "presence"
-    assert person["presence"] == {
-        "state": "not_home",
-        "since": "2026-11-18T04:30+00:00",
-        "stale": False,
-    }
+    assert (
+        person["presence"].items()
+        >= {
+            "state": "not_home",
+            "since": "2026-11-18T04:30+00:00",
+            "stale": False,
+        }.items()
+    )
     # A time in the future is taken as now.
     body = {"state": "home", "since": "2026-11-19T00:00"}
     person = (await (await client.post(url, json=body, headers=H)).json())["person"]
@@ -612,6 +624,8 @@ async def test_presence_stale_limit_is_a_setting():
     rt, _, clocks = make(away={"presence_stale_after_min": 0})
     rt.report_presence("early_riser", "not_home", WED_0600 - 3 * 3600)
     clocks.advance(30 * 86400)
+    # Fresh tracker evidence without a new report: only staleness is off here.
+    rt.presence["early_riser"] = replace(rt.presence["early_riser"], evidence_at=clocks.wall)
     await rt.step()
     assert rt.away == {"early_riser"}
 

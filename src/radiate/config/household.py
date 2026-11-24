@@ -65,6 +65,14 @@ PRESENCE_DELAY_MIN = 60
 # Presence not reported again within this long counts as unknown, not away. The
 # integration reports every 15 minutes, so an hour is four missed reports.
 PRESENCE_STALE_AFTER_MIN = 60
+# Fail warm (ADR-0005): `not_home` whose trackers have not reported within this long
+# counts as unknown, so as home. Four hours covers a phone that reports location
+# rarely; too short only costs saving, never warmth.
+PRESENCE_EVIDENCE_MAX_AGE_MIN = 240
+# `not_home` from a router or Bluetooth tracker, or from a phone at 5 % battery or less,
+# waits this long instead of the presence delay: a phone asleep or dead at home looks
+# just like one that has left.
+PRESENCE_WEAK_SOURCE_DELAY_MIN = 240
 # How far ahead of a known return Radiate may start warming the house. Three hours is
 # the core's usual optimum start horizon (decide.PREHEAT_MAX_S).
 RETURN_WARMUP_MIN = 180
@@ -131,6 +139,8 @@ LIMITS: dict[str, Limit] = {
     "away.presence_delay_min": Limit(0, 720, "min"),
     # Longer than the integration's 15 minute heartbeat; 0 turns staleness off.
     "away.presence_stale_after_min": Limit(20, 1440, "min", off=0),
+    "away.presence_evidence_max_age_min": Limit(30, 1440, "min"),
+    "away.presence_weak_source_delay_min": Limit(0, 1440, "min"),
     # Six hours bounds how early an unlearned room model can start the boiler.
     "away.return_warmup_min": Limit(0, 360, "min"),
     "temperatures": Limit(MIN_C, MAX_C, "°C"),
@@ -209,7 +219,9 @@ class AwaySettings:
     presence_delay_min: int = PRESENCE_DELAY_MIN
     presence_stale_after_min: int = PRESENCE_STALE_AFTER_MIN  # 0: never stale
     return_warmup_min: int = RETURN_WARMUP_MIN
-    everyone_away: EveryoneAway = EveryoneAway.FROST
+    everyone_away: EveryoneAway = EveryoneAway.FROST  # frost only with an away until each
+    presence_evidence_max_age_min: int = PRESENCE_EVIDENCE_MAX_AGE_MIN
+    presence_weak_source_delay_min: int = PRESENCE_WEAK_SOURCE_DELAY_MIN
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,6 +576,8 @@ def _settings(t: Timing, a: AwaySettings, temps: Temperatures, weekend: frozense
             "presence_stale_after_min": a.presence_stale_after_min,
             "return_warmup_min": a.return_warmup_min,
             "everyone_away": a.everyone_away.value,
+            "presence_evidence_max_age_min": a.presence_evidence_max_age_min,
+            "presence_weak_source_delay_min": a.presence_weak_source_delay_min,
         },
         "temperatures": {
             "in_use": temps.in_use_c,
