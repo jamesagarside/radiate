@@ -35,6 +35,7 @@ from radiate.core.types import (
     SuggestionConfig,
 )
 
+from .auth import AuthConfig, parse_auth
 from .household import (
     ADJUST_GROUPS,
     LIMITS,
@@ -139,6 +140,7 @@ class SiteConfig:
     shelly: ShellyConfig | None = None
     trv: TrvOptions = field(default_factory=TrvOptions)
     monitoring: MonitoringOptions = field(default_factory=MonitoringOptions)
+    auth: AuthConfig = field(default_factory=AuthConfig)
     data_dir: str = "./data"
     # Battery sensors report on change; between reports their last value stands for up
     # to this long (their maximum reporting interval) before it counts as stale.
@@ -1076,6 +1078,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "learning",
             "monitoring",
             "suggestions",
+            "auth",
         },
         "",
     )
@@ -1135,6 +1138,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     shelly = _shelly(ctx, ctx.section(data, "shelly"))
     trv = _trv(ctx, ctx.section(data, "trv"))
     monitoring = _monitoring(ctx, ctx.section(data, "monitoring"))
+    auth = parse_auth(ctx, ctx.section(data, "auth"))
     outdoor = ctx.get(house, "outdoor_sensor", str, None, "house.") or None
     if any(d.trv or d.sensor or d.window for d in devices.values()) or outdoor:
         if mqtt is None:
@@ -1161,6 +1165,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         shelly=shelly,
         trv=trv,
         monitoring=monitoring,
+        auth=auth,
         data_dir=data_dir,
         sensor_max_silence_s=silence_min * 60,
         history_days=history_days,

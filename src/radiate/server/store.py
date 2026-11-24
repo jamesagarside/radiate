@@ -1,4 +1,5 @@
-"""SQLite persistence: engine state, runtime settings and the Elastic export queue.
+"""SQLite persistence: engine state, runtime settings, the Elastic export queue, and
+login users and sessions (ADR-0006, `radiate.server.auth.accounts`).
 
 One file (`<data_dir>/radiate.db`), WAL mode, standard library only. Writes are
 small and infrequent (state every few minutes, export batches every 10 s), so they
@@ -25,6 +26,24 @@ CREATE TABLE IF NOT EXISTS export_queue (
     created REAL NOT NULL,
     doc TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    created REAL NOT NULL,
+    updated REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    id_hash TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    role TEXT NOT NULL,
+    method TEXT NOT NULL,
+    csrf TEXT NOT NULL,
+    created REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    expires REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions (method, username);
 """
 
 

@@ -1,5 +1,5 @@
 """Command line: `radiate serve`, `sim`, `check-config`, `discover`, `schedules`, `dashboard`,
-`replay`, `bootstrap` and `shelly`."""
+`replay`, `bootstrap`, `shelly` and `users`."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ def _serve(args: argparse.Namespace) -> None:
         import dataclasses
 
         site = dataclasses.replace(site, dry_run=True)
+    auth_cfg = _auth_config(args, site)
 
     async def main() -> None:
         import aiohttp
@@ -57,11 +58,15 @@ def _serve(args: argparse.Namespace) -> None:
                 queue=queue,
             )
             runtime.exporter.start(session)
+        login = await _start_login(auth_cfg, runtime, args, session)
+        if login is not None:
+            cleanup.append(login.close)
         runtime.start(interval_s=interval)
         app = create_app(
             runtime,
             token=os.environ.get("RADIATE_TOKEN", ""),
             ingress_ip=os.environ.get("RADIATE_INGRESS_IP", ""),
+            login=login,
         )
         runner = web.AppRunner(app)
         await runner.setup()
@@ -80,6 +85,49 @@ def _serve(args: argparse.Namespace) -> None:
 
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
+
+
+def _auth_config(args: argparse.Namespace, site):
+    """The `auth` section: from --auth-config if given, else the house file's."""
+    from radiate.config import ConfigError
+    from radiate.config.auth import AuthConfig, load_auth_file
+
+    if args.auth_config:
+        try:
+            return load_auth_file(args.auth_config)
+        except ConfigError as err:
+            sys.exit(f"{args.auth_config}: {err}")
+        except OSError as err:
+            sys.exit(f"cannot read {args.auth_config}: {err.strerror}")
+    return site.auth if site is not None else AuthConfig()
+
+
+async def _start_login(auth_cfg, runtime, args, session):
+    """Login (ADR-0006), if the configuration turns it on. Users and sessions live in
+    the state database; the demo keeps them in memory unless --data-dir is given."""
+    import logging
+    from pathlib import Path
+
+    from radiate.server.auth import Accounts, AuthSetupError, create_auth
+    from radiate.server.store import Store
+
+    if not auth_cfg.enabled:
+        return None
+    store = runtime.store
+    if store is None:
+        store = Store(Path(args.data_dir) / "radiate.db" if args.data_dir else ":memory:")
+    try:
+        login = await create_auth(auth_cfg, Accounts(store.db), session)
+    except AuthSetupError as err:
+        sys.exit(f"cannot start login: {err}")
+    methods = ", ".join(m["id"] for m in login.methods())
+    logging.getLogger("radiate").info("login on: %s", methods)
+    if auth_cfg.local and login.accounts.count_users() == 0:
+        logging.getLogger("radiate").warning(
+            "login is on but there are no users yet. Add one with "
+            "'radiate users add NAME --role admin' and the same --config or --data-dir."
+        )
+    return login
 
 
 async def _start_live(site, session):
@@ -510,6 +558,64 @@ def _bootstrap(args: argparse.Namespace) -> None:
         )
 
 
+def _users(args: argparse.Namespace) -> None:
+    import getpass
+    from pathlib import Path
+
+    from radiate.server.auth import AccountError, Accounts
+    from radiate.server.auth.passwords import password_problem
+    from radiate.server.store import Store
+
+    if not args.config and not args.data_dir:
+        sys.exit(
+            "Use --config <house file> or --data-dir <folder>, where Radiate keeps radiate.db."
+        )
+    data_dir = args.data_dir or _load(args.config).data_dir
+    store = Store(Path(data_dir) / "radiate.db")
+    accounts = Accounts(store.db)
+
+    def new_password() -> str:
+        if args.password_stdin:
+            password = sys.stdin.readline().rstrip("\n")
+        else:
+            password = getpass.getpass("New password: ")
+            if getpass.getpass("Same again: ") != password:
+                sys.exit("The passwords don't match.")
+        problem = password_problem(password)
+        if problem:
+            sys.exit(f"Password {problem}.")
+        return password
+
+    try:
+        if args.action == "list":
+            users = accounts.users()
+            if not users:
+                print("No users yet. Add one with: radiate users add NAME --role admin")
+            for user in users:
+                print(f"{user.username:<24} {user.role}")
+            return
+        if not args.name:
+            sys.exit(f"radiate users {args.action} needs a username")
+        if args.action == "add":
+            user = accounts.add_user(args.name, new_password(), args.role or "viewer")
+            print(f"Added {user.username} as {user.role}.")
+        elif args.action == "reset-password":
+            accounts.set_password(args.name, new_password())
+            print(f"Password changed for {args.name.lower()}. Their sessions have ended.")
+        elif args.action == "set-role":
+            if not args.role:
+                sys.exit("set-role needs --role admin or --role viewer")
+            accounts.set_role(args.name, args.role)
+            print(f"{args.name.lower()} is now {args.role}. Their sessions have ended.")
+        elif args.action == "remove":
+            accounts.remove_user(args.name)
+            print(f"Removed {args.name.lower()}. Their sessions have ended.")
+    except AccountError as err:
+        sys.exit(str(err))
+    finally:
+        store.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="radiate")
     sub = p.add_subparsers(required=True)
@@ -526,6 +632,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="start the demo this many simulated days in, with the example household",
+    )
+    s.add_argument(
+        "--auth-config",
+        help="YAML file with an auth section for user login, in place of the house file's",
     )
     s.set_defaults(func=_serve)
     m = sub.add_parser("sim", help="compare Radiate with smart TRVs in the simulator")
@@ -608,6 +718,16 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--data-dir", help="override house.data_dir")
     b.add_argument("--force", action="store_true", help="even if Radiate may be running")
     b.set_defaults(func=_bootstrap)
+    u = sub.add_parser("users", help="manage the people who can sign in to the web UI")
+    u.add_argument("action", choices=["list", "add", "reset-password", "set-role", "remove"])
+    u.add_argument("name", nargs="?", help="username")
+    u.add_argument("--role", choices=["admin", "viewer"], help="default viewer for add")
+    u.add_argument("--config", help="house configuration file (for house.data_dir)")
+    u.add_argument("--data-dir", help="folder holding radiate.db, in place of --config")
+    u.add_argument(
+        "--password-stdin", action="store_true", help="read the password from standard input"
+    )
+    u.set_defaults(func=_users)
     return p
 
 

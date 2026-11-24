@@ -12,6 +12,7 @@ from pathlib import Path
 from aiohttp import WSMsgType, web
 
 from . import bridge
+from .auth import AUTH, IDENTITY, AuthService, Identity, add_routes
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
@@ -27,6 +28,11 @@ WEB_DIR = Path(os.environ.get("RADIATE_WEB_DIR") or (_PKG_WEB if _PKG_WEB.exists
 
 
 STREAM_PATH = "/api/v1/stream"
+LOGOUT_PATH = "/api/v1/auth/logout"
+# Paths under /api/ that answer without signing in. The stream checks its own.
+PUBLIC_API = frozenset({"/api/v1/health", "/api/v1/auth/config", "/api/v1/auth/login", STREAM_PATH})
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+SESSION_RECHECK_S = 60.0
 # A browser cannot set headers on a WebSocket, so the stream also accepts the token
 # as its first message: {"token": "..."}. Close code 4401 means it was refused.
 STREAM_AUTH_TIMEOUT_S = 10.0
@@ -38,26 +44,48 @@ def _token_ok(supplied: str, token: str) -> bool:
     return hmac.compare_digest(supplied.encode(), token.encode())
 
 
-def _authorised(request: web.Request) -> bool:
+def identify(request: web.Request) -> Identity | None:
+    """Who the request is from, or None if it isn't allowed in (ADR-0006).
+
+    Ingress first, then an Authorization header (which decides alone when present),
+    then a login session. With login off and no token, everything is open, as before.
+    """
     token = request.app[TOKEN]
-    if not token:
-        return True
+    auth = request.app.get(AUTH)
+    if not token and auth is None:
+        return Identity("open", "admin")
     # Home Assistant ingress authenticates upstream. Trust it only from the
     # Supervisor's ingress address, never from the header alone.
     ingress_ip = request.app[INGRESS_IP]
     if ingress_ip and request.remote == ingress_ip and "X-Ingress-Path" in request.headers:
-        return True
-    auth_header = request.headers.get("Authorization", "")
-    return auth_header.startswith("Bearer ") and _token_ok(auth_header[7:], token)
+        return Identity("ingress", "admin")
+    header = request.headers.get("Authorization")
+    if header is not None:
+        if token and header.startswith("Bearer ") and _token_ok(header[7:], token):
+            return Identity("token", "admin")
+        return None
+    if auth is not None:
+        session = auth.session_for(request)
+        if session is not None:
+            return Identity("session", session.role, session)
+    return None
 
 
 @web.middleware
 async def auth(request: web.Request, handler):
     path = request.path
-    # The stream checks its own token so a browser can send it after the upgrade.
-    if path.startswith("/api/") and path not in ("/api/v1/health", STREAM_PATH):
-        if not _authorised(request):
+    if path.startswith("/api/") and path not in PUBLIC_API:
+        ident = identify(request)
+        if ident is None:
             raise web.HTTPUnauthorized()
+        if ident.session is not None and request.method not in SAFE_METHODS:
+            # A cookie is sent automatically, so a change must also prove it came from
+            # Radiate's own page, which alone can read the session's CSRF token.
+            if not AuthService.csrf_ok(request, ident.session):
+                return web.json_response({"error": "csrf"}, status=403)
+            if ident.role != "admin" and path != LOGOUT_PATH:
+                return web.json_response({"error": "viewer"}, status=403)
+        request[IDENTITY] = ident
     return await handler(request)
 
 
@@ -243,13 +271,21 @@ async def scan_network(request: web.Request) -> web.Response:
 async def stream(request: web.Request) -> web.WebSocketResponse:
     rt = _rt(request)
     ws = web.WebSocketResponse(heartbeat=30)
-    pending_auth = not _authorised(request)
+    ident = identify(request)
+    login = request.app.get(AUTH)
+    if ident is not None and ident.session is not None and not login.origin_ok(request):
+        # Browsers send cookies on cross-site WebSocket handshakes: refuse other sites.
+        raise web.HTTPForbidden()
+    pending_auth = ident is None
     if pending_auth and not ws.can_prepare(request).ok:
         raise web.HTTPUnauthorized()
     await ws.prepare(request)
-    if pending_auth and not await _stream_handshake(ws, request.app[TOKEN]):
+    token = request.app[TOKEN]
+    if pending_auth and (not token or not await _stream_handshake(ws, token)):
         await ws.close(code=WS_UNAUTHORISED, message=b"unauthorised")
         return ws
+    session = ident.session if ident is not None else None
+    checked = asyncio.get_running_loop().time()
     q: asyncio.Queue = asyncio.Queue(maxsize=4)
     rt.listeners.append(q)
     await ws.send_json(rt.describe())
@@ -267,6 +303,12 @@ async def stream(request: web.Request) -> web.WebSocketResponse:
             if task in done:
                 get.cancel()
                 break
+            now = asyncio.get_running_loop().time()
+            if session is not None and now - checked >= SESSION_RECHECK_S:
+                checked = now
+                if not login.still_valid(session):
+                    await ws.close(code=WS_UNAUTHORISED, message=b"session ended")
+                    break
             await ws.send_json(get.result())
     finally:
         rt.listeners.remove(q)
@@ -276,17 +318,22 @@ async def stream(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
-async def index(_: web.Request) -> web.FileResponse:
-    return web.FileResponse(WEB_DIR / "index.html")
-
-
 def create_app(
-    runtime: Runtime, token: str = "", web_dir: Path | None = None, ingress_ip: str = ""
+    runtime: Runtime,
+    token: str = "",
+    web_dir: Path | None = None,
+    ingress_ip: str = "",
+    login: AuthService | None = None,
 ) -> web.Application:
+    """The web app. `login` turns on user login (ADR-0006); without it, the token and
+    ingress checks are all there is, as before."""
     app = web.Application(middlewares=[auth])
     app[RUNTIME] = runtime
     app[TOKEN] = token
     app[INGRESS_IP] = ingress_ip
+    if login is not None:
+        app[AUTH] = login
+    add_routes(app)
     app.add_routes(
         [
             web.get("/api/v1/health", health),
@@ -319,6 +366,14 @@ def create_app(
     )
     root = web_dir or WEB_DIR
     if root.exists():
+
+        async def index(_: web.Request) -> web.FileResponse:
+            return web.FileResponse(root / "index.html")
+
+        async def login_page(_: web.Request) -> web.FileResponse:
+            return web.FileResponse(root / "login.html")
+
         app.router.add_get("/", index)
+        app.router.add_get("/login", login_page)
         app.router.add_static("/static/", root, show_index=False)
     return app

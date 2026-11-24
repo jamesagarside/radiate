@@ -12,7 +12,10 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
-server = ["aiohttp>=3.10", "pyyaml>=6", "aiomqtt>=2.3", "tzdata"]
+server = ["aiohttp>=3.10", "pyyaml>=6", "aiomqtt>=2.3", "tzdata", "joserfc>=1.0"]
+# SAML single sign-on (ADR-0006). Needs the libxml2 and xmlsec libraries, and lxml and
+# xmlsec built against the same libxml2, so it is not in the standard image or the App.
+saml = ["python3-saml>=1.16"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
@@ -20,6 +23,7 @@ dev = [
     "pyyaml>=6",
     "aiomqtt>=2.3",
     "tzdata",
+    "joserfc>=1.0",
     "ruff>=0.6",
 ]
 
