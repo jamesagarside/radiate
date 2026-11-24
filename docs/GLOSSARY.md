@@ -925,6 +925,19 @@ Code: `custom_components/radiate/` in the [radiate-ha](https://github.com/jamesa
 **Edge**:
 The local standalone server that runs the control loop for the cloud edition. Not built yet.
 
+**Settings registry**:
+The one description of every house-file key: its type, unit, range, help, whether it needs a restart, whether it is a secret and whether changing it can write to the boiler or valves. The Settings view is drawn from it, and a test fails when the parser accepts a key it doesn't describe.
+Code: `SECTIONS`, `Section`, `Setting`, `register_section` in `radiate.config.settings`; `register_live` in `radiate.server.settings`.
+
+**Saved settings**:
+Settings changed in the web UI's Settings view, in `<data_dir>/settings.yaml`. Each one replaces the house file's value for its key, for the server and the CLI given the same data directory; the house file is never written. Saved settings that would not load are not used, and the view says why.
+Code: `read_settings`, `write_settings` in `radiate.config.saved`, `merge_settings` in `radiate.config.settings`, `apply_saved_settings` and `parse_with_settings` in `radiate.config.site`, `SiteConfig.saved_settings`, `SiteConfig.settings_problems`, `SettingsEditor` in `radiate.server.settings`, API `GET`, `PUT` and `DELETE /api/v1/settings/config`, `web/settings.js`.
+_Avoid_: overrides (that is a held setpoint), config overlay.
+
+**Setting source**:
+Where a setting's value comes from: the house file, set here (saved settings) or the default.
+Code: `source` (`house_file`, `app`, `default`) in `GET /api/v1/settings/config`.
+
 ## Ambiguities
 
 What is still open. The owner's three behaviour questions (learning memory, pooled demand, learning on a stale room sensor) are decided in spec version 0.3 and described above under learning memory, change detection, demand mode and the sensor stale gate. The `LOCKSHIELD_DECAY` and `FORGETTING` comments that disagreed with their values are fixed or gone.

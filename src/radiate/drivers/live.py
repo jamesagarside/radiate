@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from radiate.config import SiteConfig, WeekSchedule
 from radiate.core import Actions, Mode, Reason, RoomInput, Snapshot
-from radiate.core.types import RoomRole
+from radiate.core.types import HouseConfig, RoomRole
 
 from . import devices as health
 from .devices import DeviceHealth, HealthLimits, NetworkScan, ScanRefused
@@ -156,6 +156,18 @@ class LiveDriver:
             household_live=dict(site.household_live),
             household_fallback=dict(site.household_fallback),
             household_fallback_levels=dict(site.household_fallback_levels),
+        )
+
+    def replace_settings(self, cfg: HouseConfig, site: SiteConfig) -> None:
+        """Use settings changed in the web UI that apply without a restart
+        (`radiate.server.settings.apply_live`): the hot-water windows the Shelly fallback
+        gets, and when a device needs attention. Rooms and devices stay as they are."""
+        self.cfg = cfg
+        self.site = dataclasses.replace(self.site, house=cfg, monitoring=site.monitoring)
+        self.limits = dataclasses.replace(
+            self.limits,
+            low_battery_pct=site.monitoring.low_battery_pct,
+            weak_signal_lqi=site.monitoring.weak_signal_lqi,
         )
 
     def set_household_schedules(
