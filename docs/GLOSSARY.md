@@ -69,8 +69,12 @@ Heat in a room that does not come from its radiator. Two kinds:
 Code: `HeatSource`, config key `rooms[].heat_source`.
 
 **Outdoor temperature**:
-Temperature outside the house, from an optional sensor. The core assumes 5 °C when there is no reading.
+Temperature outside the house, from an optional Zigbee sensor or from Home Assistant. The core assumes 5 °C when there is no reading.
 Symbol `T_out`, °C. Code: `Snapshot.outdoor`, config key `house.outdoor_sensor`.
+
+**Outdoor source**:
+Where the outdoor temperature comes from: the Zigbee sensor, Home Assistant, or both with the Zigbee sensor first. A Home Assistant reading older than the stale limit counts as missing.
+Code: `OutdoorSource`, `choose_outdoor` (`radiate.core.outdoor`), config keys `house.outdoor_source` and `house.outdoor_stale_after_min`, API `POST /api/v1/outdoor`.
 
 ## Household
 
@@ -293,7 +297,7 @@ The observed warming rate minus what the room model predicts. A sustained positi
 Unit K/h. Code: `RoomState.residual`, `RoomEstimator.residual`.
 
 **Confidence**:
-How far the uncertainty of a room's heating gain has shrunk from its prior, from 0 (nothing learned) to 1.
+How far the uncertainty of a room's heating gain has shrunk from its prior, from 0 (nothing learned) to 1. It measures how much data the model has seen, not how well it fits: a model fitted to bad data can be confident and wrong, which change detection catches.
 Code: `RoomEstimator.confidence`, HA sensor `confidence` (as %), Elastic `model.confidence`.
 
 **Learning memory**:
@@ -302,9 +306,40 @@ Code: `LearningConfig.memory_days`, `RoomEstimator.lam`, `forgetting` in `radiat
 _Avoid_: forgetting factor, except for `λ` itself.
 
 **Change detection**:
-A room model checking its own residuals so a long learning memory still follows a real change, such as a radiator bled, replaced or silting up. When the residual's slope against the drive stays at 35 % of the heating gain over about 6 hours of learning, or its mean stays at half its root mean square over about a day, the model re-learns: part of the prior covariance is added back, so new data outweighs the old memory.
-Code: `RoomEstimator.change_detected`, `RoomEstimator.relearn`, `RoomEstimator.relearns`, reason `learning.relearn`.
+A room model checking its own residuals so a long learning memory still follows a real change, such as a radiator bled, replaced or silting up. When the residual's slope against the drive stays at 35 % of the heating gain over about 6 hours of learning, or its mean stays at half its root mean square over about a day, the model re-learns: part of the prior covariance is added back, so new data outweighs the old memory. A confident model (0.8 or more) is judged on the gain before its 2-day warm-up ends, against twice the gain. Samples held back only by `unexplained_heat` or `cooker_spike` still feed the gain statistic, so a wrong model cannot lock itself behind its own residual.
+Code: `RoomEstimator.change_detected`, `RoomEstimator.watch`, `RoomEstimator.relearn`, `RoomEstimator.relearns`, `CHANGE_CONFIDENT`, `CHANGE_GAIN_SHARE_EARLY`, reason `learning.relearn`.
 _Avoid_: reset (the model keeps what it learned and adapts from there).
+
+**Doubt**:
+The 60 heating updates after a re-learn, while the model is not trusted to call heat extra: the residual rules (`unexplained_heat`, `cooker_spike`, the fire residual rule) stand down and no sample is rejected as an outlier.
+Code: `RoomEstimator.doubt`, `RELEARN_DOUBT_UPDATES`, `DOUBT_MIN_DRIVE`.
+
+**Learning reset**:
+Putting rooms' learned parts (room model, arrival lags, lockshield histogram) back to their priors on a person's request, for models learned under conditions that did not hold.
+Code: `reset_learned` in `radiate.core.decide`, `Runtime.reset_learning`, API `POST /api/v1/learning/reset`, decision `learning.reset`.
+_Avoid_: re-learn, which is change detection's partial forgetting.
+
+**Provenance**:
+Where a room's learned parts (room model, arrival lags, lockshield histogram) came from: learning updates counted by condition (`live_burner`, `live_relay`, `dry_burner`, `dry_relay`, and `unknown` for updates carried over from a save that did not record them), the local days of the first and latest update, the learner version and the Radiate version that last learned. Saved with the model (ADR-0007).
+Code: `Provenance` and `Conditions` in `radiate.core.provenance`, `RoomState.learned`, state field `model.learned`.
+
+**Learner version**:
+A number bumped when what a learning update means changes, so an invalidation rule can name models learned before it. 1: saves from before provenance. 2: learning sees only heat Radiate can see (`heat_unknown`, burner metering).
+Code: `LEARNER_VERSION`, `Provenance.learner`.
+_Avoid_: schema version, which is the saved format (`persist.VERSION`).
+
+**Invalidation rule**:
+A rule, shipped with a release, that declares some learned values invalid, such as learning from a dry run without burner metering once the burner is metered (`dry_run_unmetered`). Checked for every room each tick; a room it names goes back to its priors, and no other room does.
+Code: `Invalidation`, `RULES`, `invalid` in `radiate.core.provenance`, decision `learning.invalidated`.
+_Avoid_: learning reset, which a person asks for.
+
+**Migration**:
+A function that brings saved engine state from one format version to the next, so learning survives an upgrade. Tested from a fixture of what the older version wrote.
+Code: `MIGRATIONS`, `migrate` in `radiate.core.persist`, fixtures in `tests/core/fixtures`.
+
+**Learning note**:
+A line the web UI shows for 14 days when learned state was dropped, brought forward or reset: on restart, by an invalidation rule or by a person.
+Code: `Runtime.learning_notes`, state field `learning_notes`, codes `learning.restore`, `learning.invalidated`, `learning.reset`.
 
 **Flow fraction**:
 The share of full flow a valve passes at a given opening limit.
@@ -327,8 +362,20 @@ The always-open path through the bypass radiator, counted in fully open radiator
 Symbol `κ_bypass`. Code: `HouseConfig.bypass_equivalent`.
 
 **Heat availability**:
-Whether hot water is reaching a radiator: 0 while the boiler is off or the store has priority, and 1 once the arrival lag has passed after flow starts.
-Symbol `φ`, 0 or 1. Code: computed inline in `decide` (`flowing`, `avail`); no named field.
+Whether hot water is reaching a radiator: 0 while the boiler is off or the store has priority, and 1 once the arrival lag has passed after flow starts. With burner metering, a call for heat brings heat only once the burner has fired in it (or shortly before it), and keeps it until the relay goes off.
+Symbol `φ`, 0 or 1. Code: computed inline in `decide` (`flowing`, `avail`, `EngineState.burner_at`, `EngineState.relay_on_since`); no named field.
+
+**Heat known**:
+Whether the relay, or the burner, shows when the radiators get heat. Not when the relay was not read, and not in a dry run without burner metering, as something else (the boiler's own timer) runs the boiler then. Learning pauses meanwhile, and the fire rise rule does not count.
+Code: `heat_known` in `decide`, gate `heat_unknown`.
+
+**Burner firing**:
+The burner running, as a relay channel's power reading shows it: at or above the burner threshold (100 W by default), stopped below it less the hysteresis (20 W). Trusted on a channel only once it has read at or above the threshold. Unknown (None) without metering.
+Code: `Snapshot.heating_burner`, `Snapshot.store_burner`, `BurnerMeter` in `radiate.drivers.shelly`, config keys `shelly.burner_metering`, `shelly.burner_threshold_w`, `shelly.burner_hysteresis_w`, API `boiler.burner`, `store.burner`, telemetry `heating_burner`, `store_burner`.
+
+**Relay read**:
+Whether a snapshot's relay states were read from the relay that tick. Without a reading the driver stands in its last command, which in dry run was never sent.
+Code: `Snapshot.relay_observed`, API `boiler.relay_read`.
 
 **Drive**:
 The product of supply factor, flow fraction and heat availability for one radiator, low-pass filtered with a 15-minute time constant. It is the heating input to the room model.
@@ -345,7 +392,7 @@ Symbol `η`, dimensionless. Code: `AllocRoom.eta`, `EMITTER_LIMITED_ETA`.
 
 **Learning gate**:
 A rule that stops a sample being used to update a room model. A room is learning when no gate is closed.
-Code: `RoomState.learning_gate`, values `fire`, `fire_holdoff`, `window`, `shower`, `cooker_spike`, `unexplained_heat`, `no_heat`, `valve_untrusted`, `valve_leaking`, `valve_rejected`, `no_data`, `sensor_stale`, `trv_offline`, `store_recovery`, `setpoint_change`, and `starting` before the first tick. Elastic `learning.gate`.
+Code: `RoomState.learning_gate`, values `fire`, `fire_holdoff`, `window`, `shower`, `cooker_spike`, `unexplained_heat`, `no_heat`, `heat_unknown`, `valve_untrusted`, `valve_leaking`, `valve_rejected`, `no_data`, `sensor_stale`, `trv_offline`, `store_recovery`, `setpoint_change`, and `starting` before the first tick. Elastic `learning.gate`.
 
 **Remembered reading**:
 A room sensor's last reading, saved with the time it was taken and given back when Radiate starts. Battery sensors sleep and can't be asked for a reading, so without it a room would wait for its next report. Its age carries on from that time, so the usual silence and stale limits apply. It counts for demand, but slopes, detectors and learning start from the sensor's next report. A room whose sensor has no remembered reading waits up to 20 minutes for one before falling back to the TRV.
@@ -359,7 +406,7 @@ Code: gate `sensor_stale`, `RoomState.fallback_until`, `LearningConfig.learn_on_
 A detected event that heats or cools a room for reasons other than its radiator. Each one closes a learning gate while it lasts.
 Code: `DisturbanceState`, `radiate.core.disturbance`.
 
-- **Fire**: an episodic heat source is active in the room. Radiate closes its valve, takes it out of boiler demand and stops learning. Raised by the fire switch, a rise with the radiator off for 30 minutes, or a large sustained residual. The fire switch (manual fire flag) expires after `house.fire_flag_hours`, 6 by default, and at local midnight at the latest. Code: `DisturbanceState.fire`, `Runtime.set_fire`, `Runtime.fire_until`, config key `house.fire_flag_hours`, reason `room.fire_switch_expired`, API `POST /api/v1/rooms/{id}/fire`.
+- **Fire**: an episodic heat source is active in the room. Radiate closes its valve, takes it out of boiler demand and stops learning. Raised by the fire switch, a rise with the radiator off for 30 minutes (heat known), or a large sustained residual from a confident model; the last two only while the radiator is cold, its TRV reading no more than 1 K above the room. The fire switch (manual fire flag) expires after `house.fire_flag_hours`, 6 by default, and at local midnight at the latest. Code: `DisturbanceState.fire`, `FIRE_RADIATOR_WARM_K`, `Runtime.set_fire`, `Runtime.fire_until`, config key `house.fire_flag_hours`, reason `room.fire_switch_expired`, API `POST /api/v1/rooms/{id}/fire`.
 - **Fire hold-off**: the 4 hours after a fire clears, while masonry still radiates heat. Learning stays paused. Code: `fire_holdoff_until`.
 - **Window**: a window sensor reports open, or the room drops 0.6 K within 5 minutes. Code: `window_until`.
 - **Shower**: bathroom humidity 8 points or more above its 2-hour median, with a 45-minute hold-off. Code: `shower_until`.
@@ -577,7 +624,12 @@ The heating relay switching on. Radiate controls these.
 _Avoid_: burner start for this.
 
 **Burner start**:
-The burner itself firing. The boiler's own thermostat can cycle the burner several times within one relay start. Radiate can't see burner starts without a burner-firing signal; the simulator counts them as "physical burner starts".
+The burner itself lighting. The boiler's own thermostat can cycle the burner several times within one relay start. With burner metering Radiate counts them per day; the boiler guard never acts on them. The simulator counts them as "physical burner starts".
+Code: `DayTotals.burner_starts`, `DayTotals.store_starts`, API `accounting.{today,yesterday}.burner.{heating_starts,store_starts}`.
+
+**Burner hours**:
+A day's heating burner time: metered firing time where the burner is metered, relay time otherwise (never in a dry run), as the day's litres basis says. Relay hours are reported beside them.
+Code: `DayTotals.burner_s`, `firing_s`, `fallback_s`, `relay_s`, API `accounting.{today,yesterday}.{burner_hours,relay_hours,litres_relay}`.
 
 **Frost threshold**:
 Any room below it makes the boiler fire regardless of pooling. Default 7 °C. Below the hard frost threshold, 5 °C, the start also ignores minimum off and starts per hour.
@@ -609,7 +661,7 @@ The store relay turned on outside its windows for a set time, 60 minutes by defa
 Code: `Snapshot.store_boost`, `Runtime.store_boost_until`, API `POST /api/v1/store/boost`, HA service `radiate.boost_store`, HA binary sensor `store_boost`.
 
 **Store recovery**:
-The period after the store relay turns on when the boiler heats the store first and radiators get no flow (hot-water priority). Heat availability is 0 and learning is gated.
+The period after the store relay turns on when the boiler heats the store first and radiators get no flow (hot-water priority): the store's recovery time, or with burner metering exactly while the store burner fires. Heat availability is 0 and learning is gated.
 Code: `StoreConfig.recovery_s`, `StoreConfig.priority_over_heating`, gate `store_recovery`.
 _Avoid_: DHW priority.
 
@@ -665,8 +717,8 @@ The UI's words for a closed day that isn't an eligible day. Shown as an empty sl
 Code: API `days[].eligible` false with `days[].why`.
 
 **Litres basis**:
-What litres are worked out from: `relay` (heating relay time, an upper bound, the only basis today) or `firing` (burner firing seen in the Shelly's channel 1 power, planned). A house signature uses days of one basis only.
-Code: `basis` in the daily summary and in `GET /api/v1/savings`; planned `Snapshot.heating_power_w`, `BoilerConfig.firing_power_w`.
+What litres are worked out from: `firing` (burner firing seen in the Shelly's channel power), `relay` (heating relay time, an upper bound) or `mixed` (part of the day each). A house signature uses days of one basis only.
+Code: `basis` in the daily summary and in `GET /api/v1/savings` (planned), Elastic `boiler.hours_basis`.
 
 ## Safety and fallback
 
@@ -834,7 +886,7 @@ Learning room models from the tick history by replaying it from priors with a th
 Code: `radiate.core.bootstrap`, `Runtime.restore`, `radiate bootstrap`.
 
 **Decision log**:
-The last 500 boiler, disturbance, safe mode and `learning.relearn` reasons, with the time they happened.
+The last 500 boiler, disturbance, safe mode, `learning.relearn`, `learning.invalidated` and `learning.reset` reasons, with the time they happened.
 Code: `Runtime.decisions`, `DecisionRecord`, API `GET /api/v1/decisions`.
 
 **Driver**:
@@ -872,6 +924,19 @@ Code: `custom_components/radiate/` in the [radiate-ha](https://github.com/jamesa
 
 **Edge**:
 The local standalone server that runs the control loop for the cloud edition. Not built yet.
+
+**Settings registry**:
+The one description of every house-file key: its type, unit, range, help, whether it needs a restart, whether it is a secret and whether changing it can write to the boiler or valves. The Settings view is drawn from it, and a test fails when the parser accepts a key it doesn't describe.
+Code: `SECTIONS`, `Section`, `Setting`, `register_section` in `radiate.config.settings`; `register_live` in `radiate.server.settings`.
+
+**Saved settings**:
+Settings changed in the web UI's Settings view, in `<data_dir>/settings.yaml`. Each one replaces the house file's value for its key, for the server and the CLI given the same data directory; the house file is never written. Saved settings that would not load are not used, and the view says why.
+Code: `read_settings`, `write_settings` in `radiate.config.saved`, `merge_settings` in `radiate.config.settings`, `apply_saved_settings` and `parse_with_settings` in `radiate.config.site`, `SiteConfig.saved_settings`, `SiteConfig.settings_problems`, `SettingsEditor` in `radiate.server.settings`, API `GET`, `PUT` and `DELETE /api/v1/settings/config`, `web/settings.js`.
+_Avoid_: overrides (that is a held setpoint), config overlay.
+
+**Setting source**:
+Where a setting's value comes from: the house file, set here (saved settings) or the default.
+Code: `source` (`house_file`, `app`, `default`) in `GET /api/v1/settings/config`.
 
 ## Ambiguities
 

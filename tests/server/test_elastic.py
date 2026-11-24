@@ -6,6 +6,7 @@ from radiate.export.elastic import (
     DAILY_STREAM,
     ROOM_STREAM,
     ElasticExporter,
+    boiler_doc,
     bulk_body,
     index_templates,
 )
@@ -181,3 +182,57 @@ async def test_flush_keeps_buffer_on_failure_and_drains_on_success():
     assert len(exp.buffer) == n and exp.failures == 1
     assert await exp.flush(_Session())
     assert len(exp.buffer) == n - 5 and exp.sent == 5
+
+
+def test_daily_document_carries_relay_time_and_the_metered_burner():
+    exp = ElasticExporter("http://es:9200", "key", house_id="h")
+    metered = {
+        **SUMMARY,
+        "basis": "firing",
+        "relay_hours": 9.0,
+        "litres_relay": 18.0,
+        "burner": {
+            "metered": True,
+            "heating_hours": 6.5,
+            "heating_starts": 21,
+            "store_hours": 0.4,
+            "store_starts": 2,
+            "store_litres": 0.8,
+        },
+    }
+    exp.record_daily(metered, ts=TS)
+    (doc,) = list(exp.buffer)
+    b = doc["boiler"]
+    assert b["hours_basis"] == "firing" and b["relay_hours"] == 9.0
+    assert b["litres_relay"] == 18.0
+    assert b["burner"]["heating_starts"] == 21 and b["burner"]["store_litres"] == 0.8
+    mapping = index_templates()["radiate-daily"]["template"]["mappings"]["properties"]
+    boiler = mapping["boiler"]["properties"]
+    assert boiler["relay_hours"] == {"type": "float"}
+    assert boiler["burner"]["properties"]["heating_starts"] == {"type": "short"}
+
+
+def test_daily_document_from_an_older_summary_has_no_burner_section():
+    exp = ElasticExporter("http://es:9200", "key", house_id="h")
+    exp.record_daily(SUMMARY, ts=TS)
+    (doc,) = list(exp.buffer)
+    assert "burner" not in doc["boiler"] and "relay_hours" not in doc["boiler"]
+
+
+def test_boiler_document_carries_the_burner():
+    state = {
+        "mode": "auto",
+        "outdoor": 4.0,
+        "boiler": {
+            "state": "firing",
+            "relay": True,
+            "burn_elapsed_s": 600,
+            "starts_last_hour": 1,
+            "predicted_burn_min": 40,
+            "supply": 0.5,
+            "burner": False,
+        },
+        "store": {"relay": False, "boost": False, "burner": None},
+    }
+    doc = boiler_doc(state, "h", TS)
+    assert doc["boiler"]["burner"] is False and doc["store"]["burner"] is None

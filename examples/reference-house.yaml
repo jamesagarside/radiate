@@ -9,6 +9,10 @@ house:
   # when you are ready for Radiate to control the house.
   dry_run: true
   # outdoor_sensor: outdoor_temperature   # optional Zigbee2MQTT sensor
+  # Without a Zigbee sensor, take the outdoor temperature from Home Assistant: pick
+  # the entity in the Radiate integration's options. "both" prefers the Zigbee sensor.
+  # outdoor_source: home_assistant         # zigbee (default), home_assistant or both
+  # outdoor_stale_after_min: 180           # older Home Assistant readings count as missing
   data_dir: ./data                        # SQLite state and the export queue
 
 mqtt:

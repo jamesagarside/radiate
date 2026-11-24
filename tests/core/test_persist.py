@@ -70,7 +70,7 @@ def test_lead_restarts_from_idle():
     assert restored.boiler.state is BoilerState.IDLE
 
 
-def test_corrupt_room_resets_to_priors():
+def test_implausible_parameter_goes_back_to_its_prior_alone():
     cfg, st = learned()
     data = dump_state(st, st.last_now)
     data["rooms"]["bedroom_1"]["est"]["theta"][0] = float("nan")
@@ -78,10 +78,28 @@ def test_corrupt_room_resets_to_priors():
     data["rooms"]["bedroom_3"] = "junk"
     restored, problems = load_state(cfg, data, 0.0)
     fresh = EngineState.new(cfg)
-    for rid in ("bedroom_1", "bedroom_2", "bedroom_3"):
-        assert restored.rooms[rid].est.theta == fresh.rooms[rid].est.theta
+    for rid in ("bedroom_1", "bedroom_2"):
+        r, f, old = restored.rooms[rid].est, fresh.rooms[rid].est, st.rooms[rid].est
+        assert r.theta == [f.a, old.b, old.d]  # only the heating gain goes back
+        assert r.p[0] == [f.p0_diag[0], 0.0, 0.0] and r.p[1][0] == r.p[2][0] == 0.0
+        assert r.p[1][1:] == old.p[1][1:] and r.p[2][1:] == old.p[2][1:]
+        assert r.samples == old.samples
+    assert restored.rooms["bedroom_3"].est.theta == fresh.rooms["bedroom_3"].est.theta
     assert len(problems) == 3
+    assert (
+        "Bedroom 2: saved heating gain a 99 K/h is outside 0.1 to 12, back to its prior" in problems
+    )
     assert restored.rooms["dining"].est.theta == st.rooms["dining"].est.theta
+
+
+def test_negative_variance_drops_only_that_parameter():
+    cfg, st = learned()
+    data = json.loads(json.dumps(dump_state(st, st.last_now)))
+    data["rooms"]["lounge"]["est"]["p"][1][1] = -1.0
+    restored, problems = load_state(cfg, data, 0.0)
+    r, old = restored.rooms["lounge"].est, st.rooms["lounge"].est
+    assert r.a == old.a and r.d == old.d and r.b == EngineState.new(cfg).rooms["lounge"].est.b
+    assert problems == ["Lounge: saved loss rate b has an invalid variance, back to its prior"]
 
 
 def test_raised_minimum_off_survives_a_restart():
@@ -235,3 +253,38 @@ def test_learning_memory_comes_from_the_configuration():
     restored, _ = load_state(short, dump_state(st, st.last_now), 0.0)
     assert all(rs.est.lam == forgetting(3) for rs in restored.rooms.values())
     assert all(rs.est.lam == forgetting(730) for rs in EngineState.new(cfg).rooms.values())
+
+
+def test_burner_accounting_and_model_doubt_survive_a_restart():
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    t = st.ledger.today
+    t.relay_s, t.firing_s, t.fallback_s, t.metered_s = 6000.0, 4000.0, 0.0, 7000.0
+    t.store_firing_s, t.burner_starts, t.store_starts = 540.0, 7, 1
+    t.burner_s = 4000.0
+    st.rooms["bedroom_1"].est.relearn()
+    st.rooms["bedroom_1"].est.doubt = 17
+    data = json.loads(json.dumps(dump_state(st, 100.0)))
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == []
+    r = restored.ledger.today
+    assert (r.relay_s, r.firing_s, r.fallback_s, r.metered_s) == (6000.0, 4000.0, 0.0, 7000.0)
+    assert (r.store_firing_s, r.burner_starts, r.store_starts) == (540.0, 7, 1)
+    assert restored.rooms["bedroom_1"].est.doubt == 17
+
+
+def test_older_saves_take_burner_time_as_relay_time():
+    # Before metering, `burner_s` was relay time.
+    cfg = house_config()
+    st = EngineState.new(cfg)
+    st.ledger.today.burner_s = 3600.0
+    data = json.loads(json.dumps(dump_state(st, 100.0)))
+    for key in ("relay_s", "firing_s", "fallback_s", "metered_s", "store_firing_s"):
+        del data["accounting"][key]
+    del data["rooms"]["bedroom_1"]["est"]["change"]["doubt"]
+    restored, problems = load_state(cfg, data, now=1.0)
+    assert problems == []
+    r = restored.ledger.today
+    assert r.burner_s == r.relay_s == r.fallback_s == 3600.0 and r.metered_s == 0.0
+    assert restored.ledger.summary(None)["basis"] == "relay"
+    assert restored.rooms["bedroom_1"].est.doubt == 0

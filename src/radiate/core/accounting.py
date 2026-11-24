@@ -1,9 +1,15 @@
 """Oil and runtime accounting per day, and the daily balance score (spec 5.6, 9).
 
 Pure: the caller passes monotonic `now`, a local day label and what happened this
-tick. Burner time is relay time: the relay is what Radiate sees today. A relay call
-includes the boiler's own thermostat cycling, so litres and kWh are an upper bound
-until a burner-firing signal is available (spec open question 1).
+tick. Burner time is the burner's firing time when the relay's power metering shows
+it (basis `firing`). Without metering it falls back to relay time (basis `relay`),
+which includes the boiler's own thermostat cycling inside a call, so litres and kWh
+are an upper bound; a day with both is `mixed`. Relay time and relay-basis litres are
+always reported too.
+
+Only what was seen counts. A relay the driver could not read counts nothing, and in a
+dry run, where Radiate does not run the boiler, relay time is not burner time and
+burns get no arrival spread: only a metered burner counts.
 
 A day is partial when Radiate did not see all of it: it started after midnight
 (a first install, or a restart without saved state) or there was a long gap between
@@ -38,7 +44,14 @@ def balance_score(spreads_min: list[float]) -> float | None:
 @dataclass(slots=True)
 class DayTotals:
     day: int
-    burner_s: float = 0.0
+    burner_s: float = 0.0  # heating burner time on the day's basis: firing_s + fallback_s
+    relay_s: float = 0.0  # heating relay on, as read
+    firing_s: float = 0.0  # heating burner firing, metered
+    fallback_s: float = 0.0  # heating relay on, unmetered, while Radiate ran the boiler
+    metered_s: float = 0.0  # time with heating burner metering
+    store_firing_s: float = 0.0  # store burner firing, metered
+    burner_starts: int = 0  # heating burner lighting, metered
+    store_starts: int = 0
     starts: list[float] = field(default_factory=list)  # relay start times (monotonic)
     burns_min: list[float] = field(default_factory=list)  # completed burns, minutes
     spreads_min: list[float] = field(default_factory=list)  # arrival spread per burn
@@ -62,7 +75,10 @@ class Arrival:
 class Ledger:
     today: DayTotals = field(default_factory=lambda: DayTotals(day=0))
     history: list[dict] = field(default_factory=list)  # closed day summaries, oldest first
-    relay: bool | None = None  # observed relay last tick
+    relay: bool | None = None  # observed relay last tick (None: not read)
+    burner: bool | None = None  # heating burner firing last tick (None: not metered)
+    store_burner: bool | None = None
+    live: bool = True  # last tick, Radiate ran the boiler (not a dry run)
     burn_start: float | None = None
     firing: bool = False  # guard FIRING last tick
     arrival: Arrival | None = None
@@ -81,15 +97,36 @@ class Ledger:
         below: dict[str, bool],
         minute: int | None = None,
         nozzle_lph: float | None = None,
+        relay_observed: bool = True,
+        live: bool = True,
+        heating_burner: bool | None = None,
+        store_burner: bool | None = None,
     ) -> dict | None:
-        """Advance one tick. Returns the summary of a day that just closed, if any."""
+        """Advance one tick. Returns the summary of a day that just closed, if any.
+
+        `relay_observed`: `relay_on` was read from the relay. `live`: Radiate runs the
+        boiler (False in a dry run). `heating_burner`, `store_burner`: the burner firing
+        on each channel, from power metering, or None.
+        """
         gap = 0.0 if self.last_t is None else max(0.0, now - self.last_t)
         dt = min(MAX_TICK_S, gap)
         missed = gap - dt  # not counted: Radiate was not running, or the loop stalled
         self.last_t = now
-        # The interval since the last tick belongs to the day it started in.
+        # The interval since the last tick belongs to the day it started in, and is
+        # counted by what was seen at its start.
+        d = self.today
         if self.relay:
-            self.today.burner_s += dt
+            d.relay_s += dt
+        if self.burner is not None:
+            d.metered_s += dt
+            if self.burner:
+                d.firing_s += dt
+                d.burner_s += dt
+        elif self.relay and self.live:
+            d.fallback_s += dt
+            d.burner_s += dt
+        if self.store_burner:
+            d.store_firing_s += dt
         # Time since local midnight, when known, for the part of a gap in a new day.
         since_midnight = minute * 60.0 if minute is not None else 0.0
 
@@ -110,16 +147,23 @@ class Ledger:
         for rid, is_below in below.items():
             if is_below:
                 t.below_min[rid] = t.below_min.get(rid, 0.0) + dt / 60
-        if self.relay is not None and relay_on != self.relay:
-            if relay_on:
+        relay = relay_on if relay_observed else None
+        if self.relay is not None and relay is not None and relay != self.relay:
+            if relay:
                 t.starts.append(now)
                 self.burn_start = now
             else:
                 if self.burn_start is not None:
                     t.burns_min.append((now - self.burn_start) / 60)
                 self.burn_start = None
-        self.relay = relay_on
-        self._track_arrival(now, firing, calling)
+        if self.burner is False and heating_burner:
+            t.burner_starts += 1
+        if self.store_burner is False and store_burner:
+            t.store_starts += 1
+        self.relay = relay
+        self.burner, self.store_burner, self.live = heating_burner, store_burner, live
+        # A dry run's burns are Radiate's intentions, not the boiler's: no spread.
+        self._track_arrival(now, firing and live, calling)
         return closed
 
     def _label(self, day: int | None, minute: int | None) -> int:
@@ -158,13 +202,34 @@ class Ledger:
             idx = sum(1 for edge in BURN_EDGES_MIN if b >= edge)
             histogram[BURN_BUCKETS[idx]] += 1
         litres = hours * nozzle_lph if nozzle_lph else None
+        metered = t.metered_s > 0
+
+        def h(s: float) -> float:
+            return round(s / 3600, 2)
+
+        def litres_for(s: float) -> float | None:
+            return round(s / 3600 * nozzle_lph, 2) if nozzle_lph else None
+
         spreads = t.spreads_min
         return {
             "day": t.day,
             # Radiate missed part of the day: totals cover what it saw, no balance score.
             "partial": t.partial,
-            "basis": "relay",
+            # What `burner_hours`, `litres` and `kwh` are counted from.
+            "basis": ("mixed" if t.fallback_s > 0 else "firing") if metered else "relay",
             "burner_hours": round(hours, 2),
+            "relay_hours": h(t.relay_s),
+            # Relay time: an upper bound, as the boiler's own thermostat cycles inside.
+            "litres_relay": litres_for(t.relay_s),
+            # The burner as the relay's power metering shows it (None: not metered).
+            "burner": {
+                "metered": metered,
+                "heating_hours": h(t.firing_s) if metered else None,
+                "heating_starts": t.burner_starts if metered else None,
+                "store_hours": h(t.store_firing_s) if metered else None,
+                "store_starts": t.store_starts if metered else None,
+                "store_litres": litres_for(t.store_firing_s) if metered else None,
+            },
             "starts": len(t.starts),
             "max_starts_in_hour": max(
                 (sum(1 for s in t.starts if a <= s < a + 3600) for a in t.starts), default=0

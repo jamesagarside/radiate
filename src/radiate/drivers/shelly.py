@@ -178,6 +178,38 @@ class SwitchStatus:
     timer_duration: float | None = None
 
 
+@dataclass(slots=True)
+class BurnerMeter:
+    """Whether the burner fires, from one channel's power reading (`apower`).
+
+    On the reference boiler the heating channel reads about 185 W while the burner
+    fires, 52 to 60 W with the relay on and the burner held off by the boiler's own
+    thermostat (the pump only), and 0 W with the relay off; the store channel reads
+    about 125 W while the store burner runs and 0 W once the store is satisfied, relay
+    on or not. So: firing at or above `threshold_w`, stopped below `threshold_w -
+    hysteresis_w`, unchanged in between (a relight's single high reading or a dip).
+
+    Only trusted once the channel has read at or above the threshold since Radiate
+    started: where the relay switches a low-current demand line, the burner's load
+    never passes through it and a low reading proves nothing. Until then, None.
+    """
+
+    threshold_w: float = 100.0
+    hysteresis_w: float = 20.0
+    proven: bool = False
+    firing: bool = False
+
+    def update(self, status: SwitchStatus | None) -> bool | None:
+        """The burner as of this reading, or None when the channel is not metered."""
+        if status is None or status.apower is None:
+            return None
+        if status.apower >= self.threshold_w:
+            self.proven = self.firing = True
+        elif not status.output or status.apower < self.threshold_w - self.hysteresis_w:
+            self.firing = False
+        return self.firing if self.proven else None
+
+
 @dataclass(frozen=True, slots=True)
 class WatchdogStatus:
     installed: bool
@@ -254,6 +286,17 @@ class ShellyBoiler:
         self.store: SwitchStatus | None = None
         self.reachable = False
         self.errors = 0
+        # The burner firing on each channel, from its power reading (None: not metered).
+        self.heating_burner: bool | None = None
+        self.store_burner: bool | None = None
+        self._meters = (
+            (
+                BurnerMeter(cfg.burner_threshold_w, cfg.burner_hysteresis_w),
+                BurnerMeter(cfg.burner_threshold_w, cfg.burner_hysteresis_w),
+            )
+            if cfg.burner_metering
+            else None
+        )
         self._kvs_sent: dict[str, str] = {}
         self.intended: list[tuple[str, dict]] = []  # dry run: what would have been sent
 
@@ -271,12 +314,16 @@ class ShellyBoiler:
             s = await self.rpc.call("Switch.GetStatus", {"id": self.cfg.store_switch})
         except Exception as err:
             self.reachable = False
+            self.heating_burner = self.store_burner = None
             self.errors += 1
             LOG.warning("Shelly %s unreachable: %r", self.cfg.host, err)
             return
         self.heating = _switch(h)
         self.store = _switch(s)
         self.reachable = True
+        if self._meters is not None:
+            self.heating_burner = self._meters[0].update(self.heating)
+            self.store_burner = self._meters[1].update(self.store)
 
     async def command(
         self, heating: bool, store: bool, unix_now: int, heartbeat: bool = True
@@ -369,6 +416,10 @@ class ShellyBoiler:
             "heating_output": self.heating.output if self.heating else None,
             "heating_power_w": self.heating.apower if self.heating else None,
             "store_output": self.store.output if self.store else None,
+            "store_power_w": self.store.apower if self.store else None,
+            # The burner firing, from the power reading (None: not metered).
+            "heating_burner": self.heating_burner,
+            "store_burner": self.store_burner,
             "shelly_errors": self.errors,
         }
 
