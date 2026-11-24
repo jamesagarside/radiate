@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hmac
 import ipaddress
 import logging
-import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -14,6 +16,8 @@ import aiohttp
 from aiohttp import web
 
 from radiate.config.auth import AuthConfig
+from radiate.export import telemetry
+from radiate.server.security import SecurityLog
 
 from .accounts import Accounts, Session
 from .limiter import LoginLimiter
@@ -26,6 +30,44 @@ SESSION_COOKIE = "radiate_session"
 OIDC_COOKIE = "radiate_oidc"
 CSRF_HEADER = "X-CSRF-Token"
 OIDC_CALLBACK = "/auth/oidc/callback"
+
+
+# How a session's method is named in the security log.
+METHOD_NAMES = {"local": "password", "oidc": "oidc", "saml": "saml"}
+REASON_WORDS = {
+    "expired": "expired",
+    "idle": "idle too long",
+    "password_reset": "password reset",
+    "role_changed": "role changed",
+    "user_removed": "user removed",
+}
+
+
+def proxy_networks(proxies: Iterable[str]) -> tuple:
+    return tuple(ipaddress.ip_network(p) for p in proxies)
+
+
+def _trusted(address: str | None, proxies: tuple) -> bool:
+    if not address or not proxies:
+        return False
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return any(ip in net for net in proxies)
+
+
+def forwarded_client(request: web.BaseRequest, proxies: tuple) -> str:
+    """The client's address. X-Forwarded-For counts only from a trusted proxy, and
+    then the rightmost address that isn't itself a trusted proxy."""
+    remote = request.remote or ""
+    if not _trusted(remote, proxies):
+        return remote
+    hops = [h.strip() for h in request.headers.get("X-Forwarded-For", "").split(",")]
+    for hop in reversed([h for h in hops if h]):
+        if not _trusted(hop, proxies):
+            return hop
+    return remote
 
 
 class AuthSetupError(RuntimeError):
@@ -49,13 +91,16 @@ class AuthService:
         oidc: OidcClient | None = None,
         saml: SamlServiceProvider | None = None,
         limiter: LoginLimiter | None = None,
+        security: SecurityLog | None = None,
     ):
         self.cfg = cfg
         self.accounts = accounts
         self.oidc = oidc
         self.saml = saml
         self.limiter = limiter or LoginLimiter()
-        self._proxies = tuple(ipaddress.ip_network(p) for p in cfg.trusted_proxies)
+        self.security = security or SecurityLog(None)
+        self._proxies = proxy_networks(cfg.trusted_proxies)
+        accounts.on_session_end = self._session_ended
         accounts.prune(cfg.idle_s)
 
     async def close(self) -> None:
@@ -65,25 +110,12 @@ class AuthService:
     # --- the request ---------------------------------------------------------------
 
     def _trusted(self, address: str | None) -> bool:
-        if not address or not self._proxies:
-            return False
-        try:
-            ip = ipaddress.ip_address(address)
-        except ValueError:
-            return False
-        return any(ip in net for net in self._proxies)
+        return _trusted(address, self._proxies)
 
-    def client_ip(self, request: web.Request) -> str:
+    def client_ip(self, request: web.BaseRequest) -> str:
         """The client's address. X-Forwarded-For counts only from a trusted proxy, and
         then the rightmost address that isn't itself a trusted proxy."""
-        remote = request.remote or ""
-        if not self._trusted(remote):
-            return remote
-        hops = [h.strip() for h in request.headers.get("X-Forwarded-For", "").split(",")]
-        for hop in reversed([h for h in hops if h]):
-            if not self._trusted(hop):
-                return hop
-        return remote
+        return forwarded_client(request, self._proxies)
 
     def is_secure(self, request: web.Request) -> bool:
         if self.cfg.secure_cookie == "always":
@@ -119,12 +151,13 @@ class AuthService:
     def still_valid(self, session: Session) -> bool:
         """For long-lived streams: the session hasn't ended or been signed out."""
         row = self.accounts.db.execute(
-            "SELECT expires, last_seen FROM sessions WHERE id_hash = ?", (session.id_hash,)
+            "SELECT id_hash, username, role, method, csrf, created, last_seen, expires "
+            "FROM sessions WHERE id_hash = ?",
+            (session.id_hash,),
         ).fetchone()
         if row is None:
             return False
-        now = time.time()
-        return now < row[0] and now - row[1] < self.cfg.idle_s
+        return not self.accounts.expire(Session(*row), self.cfg.idle_s)
 
     @staticmethod
     def csrf_ok(request: web.Request, session: Session) -> bool:
@@ -153,14 +186,90 @@ class AuthService:
             secure=self.is_secure(request),
             samesite="Lax",
         )
-        log.info("signed in: %s (%s, %s) from %s", username, role, method, self.client_ip(request))
+        how = METHOD_NAMES.get(method, method)
+        self.security.record(
+            telemetry.SECURITY_LOGIN,
+            "login",
+            f"Signed in: {username} ({role}, {how})",
+            {
+                "user.name": username,
+                "user.roles": [role],
+                "source.address": self.client_ip(request),
+                "radiate.auth.method": how,
+            },
+        )
         return session
 
-    def end_session(self, request: web.Request, response: web.StreamResponse) -> None:
+    # --- the security log ----------------------------------------------------------
+
+    def login_failed(
+        self,
+        request: web.BaseRequest,
+        method: str,
+        code: str,
+        why: str,
+        username: str | None = None,
+    ) -> None:
+        """A refused sign-in. `why` is for people; `code` is the schema's error.type."""
+        who = f" for {username}" if username else ""
+        self.security.record(
+            telemetry.SECURITY_LOGIN_FAILED,
+            "login",
+            f"Sign-in refused{who}: {why}",
+            {
+                "user.name": username,
+                "source.address": self.client_ip(request),
+                "radiate.auth.method": METHOD_NAMES.get(method, method),
+                "error.type": code if code in telemetry.LOGIN_ERRORS else "bad_claims",
+            },
+        )
+
+    def lockouts(self, started: list[tuple[str, str, float]]) -> None:
+        """Record lockouts the limiter just started, and their end when it comes."""
+        for scope, value, seconds in started:
+            attrs = {"radiate.lockout.scope": scope}
+            attrs["user.name" if scope == "username" else "source.address"] = value
+            self.security.record(
+                telemetry.SECURITY_LOCKOUT_STARTED,
+                "lockout.started",
+                f"Sign-in locked for {seconds:.0f} s: {scope} {value}",
+                {**attrs, "radiate.lockout.duration": round(seconds, 1)},
+            )
+            # Without a running event loop nothing can time the end.
+            with contextlib.suppress(RuntimeError):
+                asyncio.get_running_loop().call_later(
+                    max(0.0, seconds),
+                    self.security.record,
+                    telemetry.SECURITY_LOCKOUT_ENDED,
+                    "lockout.ended",
+                    f"Sign-in lockout ended: {scope} {value}",
+                    attrs,
+                )
+
+    def _session_ended(
+        self, username: str, role: str | None, method: str, reason: str, count: int
+    ) -> None:
+        record_session_end(self.security, username, role, method, reason, count)
+
+    def end_session(
+        self, request: web.Request, response: web.StreamResponse, session: Session | None = None
+    ) -> None:
         session_id = request.cookies.get(SESSION_COOKIE)
         if session_id:
             self.accounts.end_session(session_id)
         response.del_cookie(SESSION_COOKIE, path="/")
+        if session is not None:
+            self.security.record(
+                telemetry.SECURITY_LOGOUT,
+                "logout",
+                f"Signed out: {session.username}",
+                {
+                    "user.name": session.username,
+                    "user.roles": [session.role],
+                    "source.address": self.client_ip(request),
+                    "radiate.auth.method": METHOD_NAMES.get(session.method, session.method),
+                },
+            )
 
     def methods(self) -> list[dict]:
         out = []
@@ -207,7 +316,10 @@ async def _saml_metadata(cfg, http: aiohttp.ClientSession | None) -> str:
 
 
 async def create_auth(
-    cfg: AuthConfig, accounts: Accounts, http: aiohttp.ClientSession | None = None
+    cfg: AuthConfig,
+    accounts: Accounts,
+    http: aiohttp.ClientSession | None = None,
+    security: SecurityLog | None = None,
 ) -> AuthService:
     """Everything login needs, or AuthSetupError saying what is missing."""
     oidc = None
@@ -233,4 +345,30 @@ async def create_auth(
         except saml_module.SamlError as err:
             raise AuthSetupError(f"auth.saml: {err}") from err
         saml = SamlServiceProvider(cfg.saml, cfg.public_url, idp)
-    return AuthService(cfg, accounts, oidc=oidc, saml=saml)
+    return AuthService(cfg, accounts, oidc=oidc, saml=saml, security=security)
+
+
+def record_session_end(
+    security: SecurityLog, username: str, role: str | None, method: str, reason: str, count: int
+) -> None:
+    """Sessions that ended without signing out (`Accounts.on_session_end`), for the
+    security log. The command line uses it too, when `radiate users` ends sessions."""
+    if reason in ("expired", "idle"):
+        message = f"Session {REASON_WORDS[reason]}: {username}"
+        action = "session.expired" if reason == "expired" else "session.idle"
+    else:
+        noun = "session" if count == 1 else "sessions"
+        message = f"{count} {noun} ended for {username}: {REASON_WORDS.get(reason, reason)}"
+        action = "session.revoked"
+    security.record(
+        telemetry.SECURITY_SESSION_ENDED,
+        action,
+        message,
+        {
+            "user.name": username,
+            "user.roles": [role] if role else None,
+            "radiate.auth.method": METHOD_NAMES.get(method, method),
+            "event.reason": reason,
+            "radiate.sessions.ended": count,
+        },
+    )

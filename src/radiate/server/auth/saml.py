@@ -35,7 +35,36 @@ INSTALL_HINT = (
 
 
 class SamlError(Exception):
-    """Sign-in failed. The message is for the log, never for the browser."""
+    """Sign-in failed. The message is for the log, never for the browser. `code` is the
+    security log's `error.type` (the telemetry schema's LOGIN_ERRORS), and `user` the
+    username, once the assertion has named one."""
+
+    def __init__(self, message: str, code: str = "bad_claims", user: str | None = None):
+        super().__init__(message)
+        self.code = code
+        self.user = user
+
+
+# python3-saml reports why a response failed in words; these pick the code.
+_REASON_CODES = (
+    ("signature", "bad_signature"),
+    ("not signed", "bad_signature"),
+    ("audience", "wrong_audience"),
+    ("issuer", "wrong_issuer"),
+    ("expired", "expired"),
+    ("notonorafter", "expired"),
+    ("no longer valid", "expired"),
+    ("inresponseto", "bad_state"),
+)
+
+
+def response_code(reason: str) -> str:
+    """The security log's error.type for python3-saml's reason a response failed."""
+    text = reason.lower()
+    for words, code in _REASON_CODES:
+        if words in text:
+            return code
+    return "bad_claims"
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,19 +187,22 @@ class SamlServiceProvider:
         relay = form.get("RelayState", "")
         entry = self._pending.pop(relay, None)
         if entry is None or now - entry[1] >= PENDING_TTL_S:
-            raise SamlError("no sign-in was started for this response (unsolicited or replayed)")
+            raise SamlError(
+                "no sign-in was started for this response (unsolicited or replayed)", "bad_state"
+            )
         request_id = entry[0]
         auth = self._auth(ACS_PATH, post=form)
         try:
             auth.process_response(request_id=request_id)
         except Exception as err:
-            raise SamlError(f"response refused: {err}") from err
+            raise SamlError(f"response refused: {err}", response_code(str(err))) from err
         errors = auth.get_errors()
         if errors or not auth.is_authenticated():
-            raise SamlError(f"response refused: {errors} {auth.get_last_error_reason()}")
+            reason = f"{errors} {auth.get_last_error_reason()}"
+            raise SamlError(f"response refused: {reason}", response_code(reason))
         assertion_id = auth.get_last_assertion_id()
         if not assertion_id or assertion_id in self._seen:
-            raise SamlError("assertion already used")
+            raise SamlError("assertion already used", "replayed")
         not_after = auth.get_last_assertion_not_on_or_after()
         self._seen[assertion_id] = max(float(not_after or 0), now) + REPLAY_KEEP_S
         attributes = auth.get_attributes()
@@ -180,7 +212,7 @@ class SamlServiceProvider:
         else:
             username = auth.get_nameid()
         if not isinstance(username, str) or not username:
-            raise SamlError("the assertion names no user")
+            raise SamlError("the assertion names no user", "no_user")
         roles: tuple[str, ...] = ()
         if self.cfg.roles.claim:
             roles = tuple(
@@ -188,5 +220,7 @@ class SamlServiceProvider:
             )
         role = self.cfg.roles.role_for(username, roles)
         if role is None:
-            raise SamlError(f"{username} is in none of admins, households or viewers")
+            raise SamlError(
+                f"{username} is in none of admins, households or viewers", "not_permitted", username
+            )
         return SamlIdentity(username=username, role=role)

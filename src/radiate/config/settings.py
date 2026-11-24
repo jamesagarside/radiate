@@ -851,6 +851,23 @@ SECTIONS: list[Section] = [
                 "Sent as data_stream.dataset, which Elastic routes by. radiate by default.",
                 optional=True,
             ),
+            Setting(
+                "export.otlp.daily_metrics",
+                "Send daily figures",
+                "bool",
+                "Each closed day's summary and savings, once a day. On by default.",
+                optional=True,
+            ),
+            Setting(
+                "export.otlp.daily_timestamp",
+                "Time daily figures at",
+                "choice",
+                "end_of_day: the day's last second, so each figure lands on the day it "
+                "covers. day_close: when Radiate closed the day, just after midnight. "
+                "end_of_day by default.",
+                choices=("end_of_day", "day_close"),
+                optional=True,
+            ),
         ),
         covers=("export.otlp.headers",),
     ),
@@ -921,6 +938,18 @@ SECTIONS: list[Section] = [
                 unit="days",
                 lo=1,
                 hi=400,
+                step=1,
+                optional=True,
+            ),
+            Setting(
+                "auth.audit_days",
+                "Keep the security log for",
+                "number",
+                "Sign-ins, refusals and changes in the security log older than this are "
+                "deleted. Kept whether or not login is on. 90 days by default.",
+                unit="days",
+                lo=1,
+                hi=3650,
                 step=1,
                 optional=True,
             ),

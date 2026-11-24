@@ -12,6 +12,7 @@ export:
     api_key: ${RADIATE_OTLP_API_KEY}   # sent as "Authorization: ApiKey <key>"
     protocol: http/protobuf             # or http/json
     interval_s: 60
+    daily_timestamp: end_of_day         # or day_close
 ```
 
 `OTLP_SETTINGS` describes every key (type, default, limits, help) for a settings form.
@@ -28,6 +29,9 @@ from urllib.parse import urlsplit
 PROTOCOLS = ("http/protobuf", "http/json")
 COMPRESSIONS = ("none", "gzip")
 SIGNALS = ("metrics", "logs")
+# When a closed day's figures are timed: the day's last second, local time (so a daily
+# date histogram puts each on the day it covers), or the moment Radiate closed the day.
+DAILY_TIMESTAMPS = ("end_of_day", "day_close")
 INTERVAL_S = (10.0, 3600.0)
 TIMEOUT_S = (1.0, 120.0)
 _HEADER = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$")
@@ -53,6 +57,9 @@ class OtlpConfig:
     # Elastic routes OTLP data by `data_stream.dataset`, so with "radiate" metrics land
     # in metrics-radiate.otel-default. Empty: the attribute is not sent.
     dataset: str = "radiate"
+    # The once-a-day summary and savings gauges (telemetry `radiate.daily.*`).
+    daily_metrics: bool = True
+    daily_timestamp: str = "end_of_day"  # one of DAILY_TIMESTAMPS
 
     def url(self, signal: str) -> str:
         return f"{self.endpoint.rstrip('/')}/v1/{signal}"
@@ -137,6 +144,21 @@ OTLP_SETTINGS: tuple[dict[str, Any], ...] = (
         "default": "radiate",
         "help": "Sent as data_stream.dataset, which Elastic uses to pick the data stream. "
         "Empty to leave it out.",
+    },
+    {
+        "key": "daily_metrics",
+        "type": "bool",
+        "default": True,
+        "help": "Send each closed day's summary and savings (radiate.daily.*) once a day. "
+        "Needs metrics in signals.",
+    },
+    {
+        "key": "daily_timestamp",
+        "type": "choice",
+        "default": "end_of_day",
+        "choices": list(DAILY_TIMESTAMPS),
+        "help": "When daily figures are timed: end_of_day, the day's last second in the "
+        "house's time zone; day_close, when Radiate closed the day, a minute or so later.",
     },
 )
 
@@ -250,6 +272,8 @@ def _otlp(raw: Any, problems: list[str]) -> OtlpConfig | None:
     if not isinstance(dataset, str) or (dataset and not _DATASET.match(dataset)):
         problems.append(f"{p}dataset: lower case letters, digits, '_' and '.' only")
         dataset = "radiate"
+    daily_metrics = _bool(raw, "daily_metrics", True, problems, p)
+    daily_timestamp = _choice(raw, "daily_timestamp", "end_of_day", DAILY_TIMESTAMPS, problems, p)
     return OtlpConfig(
         endpoint=endpoint,
         enabled=enabled,
@@ -262,6 +286,8 @@ def _otlp(raw: Any, problems: list[str]) -> OtlpConfig | None:
         compression=compression,
         signals=tuple(s for s in SIGNALS if s in signals),
         dataset=dataset,
+        daily_metrics=daily_metrics,
+        daily_timestamp=daily_timestamp,
     )
 
 

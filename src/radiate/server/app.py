@@ -11,18 +11,24 @@ from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
+from radiate.export import telemetry
+
 from . import bridge
 from .auth import AUTH, IDENTITY, AuthService, Identity, add_routes
+from .auth.service import SESSION_COOKIE, forwarded_client, proxy_networks
 from .data import QueryError, data_view, export_view, series_view, to_csv
 from .permissions import ADMIN, HOUSEHOLD_SETTINGS, PUBLIC, allowed, needed_role
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
+from .security import SecurityLog
 from .suggestions import suggestions_view
 
 RUNTIME = web.AppKey("runtime", Runtime)
 TOKEN = web.AppKey("token", str)
 INGRESS_IP = web.AppKey("ingress_ip", str)
+SECURITY = web.AppKey("security", SecurityLog)
+PROXIES = web.AppKey("proxies", tuple)
 SUPERVISOR_INGRESS_IP = "172.30.32.2"
 _PKG_WEB = Path(__file__).resolve().parents[1] / "web"  # installed wheel
 _REPO_WEB = Path(__file__).resolve().parents[3] / "web"  # source checkout
@@ -71,9 +77,117 @@ def identify(request: web.Request) -> Identity | None:
     return None
 
 
-def _refused(role: str, needed: str) -> web.Response:
+# --- the security log (ADR-0008) ---------------------------------------------------------
+
+
+def client_address(request: web.BaseRequest) -> str:
+    """The client's address, believing X-Forwarded-For only from a trusted proxy."""
+    login = request.app.get(AUTH)
+    if login is not None:
+        return login.client_ip(request)
+    return forwarded_client(request, request.app.get(PROXIES, ()))
+
+
+def _who(request: web.BaseRequest, ident: Identity | None) -> dict:
+    """Who made a request, from where and how, for a security record."""
+    out = {
+        "source.address": client_address(request),
+        "http.request.method": request.method,
+        "url.path": request.path,
+    }
+    if ident is not None:
+        out["radiate.auth.method"] = ident.via
+        if ident.session is not None:
+            out["user.name"] = ident.session.username
+            out["user.roles"] = [ident.session.role]
+    return out
+
+
+def _actor(ident: Identity | None) -> str:
+    if ident is not None and ident.session is not None:
+        return f"{ident.session.username} ({ident.session.role})"
+    return {"token": "the API token", "ingress": "Home Assistant ingress"}.get(
+        ident.via if ident is not None else "", "an open server"
+    )
+
+
+def _security(request: web.BaseRequest) -> SecurityLog:
+    return request.app[SECURITY]
+
+
+def _credential_error(request: web.BaseRequest) -> str:
+    """What was wrong with a request refused with 401."""
+    if request.headers.get("Authorization") is not None:
+        return "bad_token"
+    if request.cookies.get(SESSION_COOKIE):
+        return "bad_session"
+    return "no_credentials"
+
+
+CREDENTIAL_WORDS = {
+    "bad_token": "wrong API token",
+    "bad_session": "session unknown, expired or signed out",
+    "no_credentials": "not signed in",
+}
+
+
+def _record_refused(request: web.BaseRequest, error: str, action: str = "request.refused") -> None:
+    what = "Stream refused" if action == "stream.refused" else "Request refused"
+    _security(request).record(
+        telemetry.SECURITY_REQUEST_REFUSED,
+        action,
+        f"{what}: {CREDENTIAL_WORDS[error]}",
+        {**_who(request, None), "error.type": error},
+    )
+
+
+ACCESS_WORDS = {"csrf": "missing or wrong CSRF token", "origin": "another site's page"}
+
+
+def _record_denied(
+    request: web.BaseRequest, ident: Identity | None, error: str, needed: str | None = None
+) -> None:
+    if error == "forbidden":
+        why = f"needs {needed} for {request.method} {request.path}"
+    else:
+        why = f"{ACCESS_WORDS[error]} for {request.method} {request.path}"
+    _security(request).record(
+        telemetry.SECURITY_ACCESS_DENIED,
+        "access.denied",
+        f"Refused: {_actor(ident)} {why}",
+        {**_who(request, ident), "error.type": error, "radiate.auth.needed_role": needed},
+    )
+
+
+def _record_change(
+    request: web.BaseRequest,
+    action: str,
+    area: str,
+    message: str,
+    paths: list[str] | None = None,
+    rooms: list[str] | None = None,
+) -> None:
+    """A change to how Radiate runs: who made it and what, never a value."""
+    ident = request.get(IDENTITY)
+    _security(request).record(
+        telemetry.SECURITY_CONFIG_CHANGED,
+        action,
+        f"{message} by {_actor(ident)}",
+        {
+            **_who(request, ident),
+            "radiate.config.area": area,
+            "radiate.settings.paths": sorted(paths) if paths is not None else None,
+            "radiate.room.ids": rooms,
+        },
+    )
+
+
+def _refused(request: web.Request, needed: str) -> web.Response:
     """403 for a role below what the route needs. `error` names the caller's role, as
     `viewer` always has; `needs` is the role that may."""
+    ident = request.get(IDENTITY)
+    _record_denied(request, ident, "forbidden", needed)
+    role = ident.role if ident is not None else ADMIN
     return web.json_response({"error": role, "needs": needed}, status=403)
 
 
@@ -85,28 +199,18 @@ async def auth(request: web.Request, handler):
         if needed != PUBLIC:
             ident = identify(request)
             if ident is None:
-                _count_denied(request)
+                _record_refused(request, _credential_error(request))
                 raise web.HTTPUnauthorized()
             if ident.session is not None and request.method not in SAFE_METHODS:
                 # A cookie is sent automatically, so a change must also prove it came
                 # from Radiate's own page, which alone can read the session's CSRF token.
                 if not AuthService.csrf_ok(request, ident.session):
+                    _record_denied(request, ident, "csrf")
                     return web.json_response({"error": "csrf"}, status=403)
-            if not allowed(ident.role, needed):
-                return _refused(ident.role, needed)
             request[IDENTITY] = ident
-    response = await handler(request)
-    if request.path == LOGIN_PATH and response.status == 401:
-        _count_denied(request)  # a wrong username or password
-    return response
-
-
-def _count_denied(request: web.Request) -> None:
-    """Count a refused request for the OpenTelemetry export's radiate.auth.denied: a
-    count only, never who sent it."""
-    rt = request.app.get(RUNTIME)
-    if isinstance(getattr(rt, "auth_denied", None), int):
-        rt.auth_denied += 1
+            if not allowed(ident.role, needed):
+                return _refused(request, needed)
+    return await handler(request)
 
 
 def _role(request: web.Request) -> str:
@@ -114,20 +218,24 @@ def _role(request: web.Request) -> str:
     return ident.role if ident is not None else ADMIN
 
 
-async def _stream_handshake(ws: web.WebSocketResponse, token: str) -> bool:
-    """Wait for the first message and check it carries the token."""
+async def _stream_handshake(ws: web.WebSocketResponse, token: str) -> str | None:
+    """Wait for the first message and check it carries the token. None if it does,
+    else the security log's error.type: `bad_token`, or `no_credentials` for no token
+    in time."""
     try:
         msg = await ws.receive(timeout=STREAM_AUTH_TIMEOUT_S)
     except TimeoutError:
-        return False
+        return "no_credentials"
     if msg.type is not WSMsgType.TEXT:
-        return False
+        return "no_credentials"
     try:
         body = json.loads(msg.data)
     except ValueError:
-        return False
+        return "no_credentials"
     supplied = body.get("token") if isinstance(body, dict) else None
-    return isinstance(supplied, str) and _token_ok(supplied, token)
+    if not isinstance(supplied, str):
+        return "no_credentials"
+    return None if token and _token_ok(supplied, token) else "bad_token"
 
 
 def _rt(request: web.Request) -> Runtime:
@@ -198,7 +306,17 @@ async def set_mode(request: web.Request) -> web.Response:
 
 
 async def reset_learning(request: web.Request) -> web.Response:
-    return await _post(request, bridge.reset_learning)
+    response = await _post(request, bridge.reset_learning)
+    rooms = json.loads(response.body).get("reset", [])
+    if rooms:
+        _record_change(
+            request,
+            "learning.reset",
+            "learning",
+            f"Learning reset for {len(rooms)} {'room' if len(rooms) == 1 else 'rooms'}",
+            rooms=rooms,
+        )
+    return response
 
 
 async def people(request: web.Request) -> web.Response:
@@ -276,12 +394,18 @@ async def household_save(request: web.Request) -> web.Response:
         except bridge.RequestError as err:
             raise _http_error(err) from err
         if not setup.only_adjustments(await _json(request)):
-            return _refused(role, ADMIN)
-    return await _household(request, "PUT", with_body=True)
+            return _refused(request, ADMIN)
+    response = await _household(request, "PUT", with_body=True)
+    if response.status == 200:
+        _record_change(request, "household.saved", "household", "Household setup saved")
+    return response
 
 
 async def household_revert(request: web.Request) -> web.Response:
-    return await _household(request, "DELETE", with_body=False)
+    response = await _household(request, "DELETE", with_body=False)
+    if response.status == 200:
+        _record_change(request, "household.reverted", "household", "Household setup reverted")
+    return response
 
 
 async def set_away(request: web.Request) -> web.Response:
@@ -317,7 +441,7 @@ async def settings(request: web.Request) -> web.Response:
 async def set_settings(request: web.Request) -> web.Response:
     role = _role(request)
     if role != ADMIN and not set(await _json(request)) <= HOUSEHOLD_SETTINGS:
-        return _refused(role, ADMIN)
+        return _refused(request, ADMIN)
     return await _post(request, bridge.set_settings)
 
 
@@ -330,7 +454,19 @@ async def _config(request: web.Request, method: str, with_body: bool) -> web.Res
         if with_body or (method == "DELETE" and request.can_read_body):
             body = await _json(request)
         target = request.match_info.get("target")
-        return web.json_response(bridge.config(rt, method, target, body))
+        view = bridge.config(rt, method, target, body)
+        if method != "GET":
+            changed = [*view.get("applied", []), *view.get("restart", [])]
+            if changed:
+                verb = "saved" if method == "PUT" else "reverted"
+                _record_change(
+                    request,
+                    f"settings.{verb}",
+                    "settings",
+                    f"Settings {verb}: {', '.join(sorted(changed))}",
+                    paths=changed,
+                )
+        return web.json_response(view)
     except bridge.RequestError as err:
         if err.body is not None:
             return web.json_response(err.body, status=err.status)
@@ -354,7 +490,26 @@ async def get_layout(request: web.Request) -> web.Response:
 
 
 async def put_layout(request: web.Request) -> web.Response:
-    return await _post(request, bridge.set_layout)
+    response = await _post(request, bridge.set_layout)
+    _record_change(request, "layout.saved", "layout", "Layout saved")
+    return response
+
+
+async def audit(request: web.Request) -> web.Response:
+    """The security log, newest first (ADR-0008). Admin only. `outcome` (success or
+    failure) and `user` filter; `before`, an event ID, pages; `limit` up to 500."""
+    q = request.query
+    outcome = q.get("outcome") or None
+    if outcome not in (None, "success", "failure"):
+        raise web.HTTPBadRequest(text="outcome must be success or failure")
+    try:
+        limit = int(q.get("limit", "100"))
+        before = int(q["before"]) if q.get("before") else None
+    except ValueError as err:
+        raise web.HTTPBadRequest(text="limit and before must be whole numbers") from err
+    return web.json_response(
+        _security(request).query(outcome, q.get("user") or None, limit, before)
+    )
 
 
 async def devices(request: web.Request) -> web.Response:
@@ -383,17 +538,23 @@ async def stream(request: web.Request) -> web.WebSocketResponse:
     login = request.app.get(AUTH)
     if ident is not None and ident.session is not None and not login.origin_ok(request):
         # Browsers send cookies on cross-site WebSocket handshakes: refuse other sites.
+        _record_denied(request, ident, "origin")
         raise web.HTTPForbidden()
     pending_auth = ident is None
     if pending_auth and not ws.can_prepare(request).ok:
-        _count_denied(request)
+        _record_refused(request, _credential_error(request), "stream.refused")
         raise web.HTTPUnauthorized()
     await ws.prepare(request)
     token = request.app[TOKEN]
-    if pending_auth and (not token or not await _stream_handshake(ws, token)):
-        _count_denied(request)
-        await ws.close(code=WS_UNAUTHORISED, message=b"unauthorised")
-        return ws
+    if pending_auth:
+        # With no token set there is nothing to wait for: only a session lets it in.
+        error = await _stream_handshake(ws, token) if token else _credential_error(request)
+        if error is not None:
+            if error == "no_credentials":
+                error = _credential_error(request)
+            _record_refused(request, error, "stream.refused")
+            await ws.close(code=WS_UNAUTHORISED, message=b"unauthorised")
+            return ws
     session = ident.session if ident is not None else None
     checked = asyncio.get_running_loop().time()
     q: asyncio.Queue = asyncio.Queue(maxsize=4)
@@ -434,14 +595,26 @@ def create_app(
     web_dir: Path | None = None,
     ingress_ip: str = "",
     login: AuthService | None = None,
+    security: SecurityLog | None = None,
+    trusted_proxies: tuple[str, ...] = (),
 ) -> web.Application:
     """The web app. `login` turns on user login (ADR-0006); without it, the token and
-    ingress checks are all there is, as before."""
+    ingress checks are all there is, as before. `security` is the security log
+    (ADR-0008), the runtime's if it has one, else one in memory; `trusted_proxies`
+    (`auth.trusted_proxies`) say whose X-Forwarded-For the log believes with login off."""
     app = web.Application(middlewares=[auth])
     app[RUNTIME] = runtime
     app[TOKEN] = token
     app[INGRESS_IP] = ingress_ip
+    security = security or getattr(runtime, "security", None) or SecurityLog.memory()
+    if getattr(runtime, "security", None) is None and hasattr(runtime, "security"):
+        runtime.security = security
+    if security.sink is None and callable(getattr(runtime, "telemetry_event", None)):
+        security.sink = runtime.telemetry_event
+    app[SECURITY] = security
+    app[PROXIES] = proxy_networks(trusted_proxies)
     if login is not None:
+        login.security = security
         app[AUTH] = login
     add_routes(app)
     app.add_routes(
@@ -481,6 +654,7 @@ def create_app(
             web.put("/api/v1/layout", put_layout),
             web.get("/api/v1/devices", devices),
             web.post("/api/v1/devices/scan", scan_network),
+            web.get("/api/v1/audit", audit),
             web.get(STREAM_PATH, stream),
         ]
     )

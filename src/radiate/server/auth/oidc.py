@@ -35,7 +35,56 @@ HTTP_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
 class OidcError(Exception):
-    """Sign-in failed. The message is for the log, never for the browser."""
+    """Sign-in failed. The message is for the log, never for the browser. `code` is the
+    security log's `error.type` (the telemetry schema's LOGIN_ERRORS), and `user` the
+    username, once the provider has named one."""
+
+    def __init__(self, message: str, code: str = "provider_error", user: str | None = None):
+        super().__init__(message)
+        self.code = code
+        self.user = user
+
+
+# joserfc's claim errors name the claim; each claim has its own code.
+_CLAIM_CODES = {
+    "iss": "wrong_issuer",
+    "aud": "wrong_audience",
+    "exp": "expired",
+    "nonce": "bad_nonce",
+}
+
+
+def _jose_code(err: Exception) -> str:
+    """The security log's error.type for a joserfc error."""
+    from joserfc.errors import (
+        BadSignatureError,
+        DecodeError,
+        ExpiredTokenError,
+        InvalidKeyIdError,
+        MissingClaimError,
+        MissingKeyError,
+        UnsupportedAlgorithmError,
+    )
+
+    if isinstance(err, ExpiredTokenError):
+        return "expired"
+    if isinstance(err, MissingClaimError):
+        return "bad_claims"
+    claim = getattr(err, "claim", None)
+    if claim is not None:
+        return _CLAIM_CODES.get(claim, "bad_claims")
+    if isinstance(
+        err,
+        (
+            BadSignatureError,
+            DecodeError,
+            UnsupportedAlgorithmError,
+            MissingKeyError,
+            InvalidKeyIdError,
+        ),
+    ):
+        return "bad_signature"
+    return "bad_claims"
 
 
 @dataclass(slots=True)
@@ -239,7 +288,7 @@ class OidcClient:
         info = await self._get_json(url, headers={"Authorization": f"Bearer {access_token}"})
         # OIDC Core 5.3.2: the userinfo sub must match the ID token's.
         if info.get("sub") != sub:
-            raise OidcError("userinfo sub does not match the ID token")
+            raise OidcError("userinfo sub does not match the ID token", "bad_claims")
         return info
 
     async def validate_id_token(self, id_token: str, nonce: str) -> dict:
@@ -269,18 +318,26 @@ class OidcClient:
             )
             registry.validate(claims)
         except JoseError as err:
-            raise OidcError(f"ID token refused: {err}") from err
+            raise OidcError(f"ID token refused: {err}", _jose_code(err)) from err
+        except ValueError as err:
+            raise OidcError(f"ID token refused: {err}", "bad_signature") from err
         aud = claims.get("aud")
         if isinstance(aud, list) and len(aud) > 1 and claims.get("azp") != self.cfg.client_id:
-            raise OidcError("ID token has several audiences and azp is not this client")
+            raise OidcError(
+                "ID token has several audiences and azp is not this client", "wrong_audience"
+            )
         return claims
 
     def identity(self, claims: dict) -> OidcIdentity:
         username = claims.get(self.cfg.username_claim)
         if not isinstance(username, str) or not username:
-            raise OidcError(f"ID token has no {self.cfg.username_claim} claim")
+            raise OidcError(f"ID token has no {self.cfg.username_claim} claim", "no_user")
         values = _claim_values(claims.get(self.cfg.roles.claim)) if self.cfg.roles.claim else ()
         role = self.cfg.roles.role_for(username, values)
         if role is None:
-            raise OidcError(f"{username} is in none of admins, households or viewers")
+            raise OidcError(
+                f"{username} is in none of admins, households or viewers",
+                "not_permitted",
+                username,
+            )
         return OidcIdentity(username=username, role=role, subject=str(claims["sub"]))

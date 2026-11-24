@@ -6,10 +6,6 @@
           "required": true,
           "type": "string"
         },
-        "event.name": {
-          "required": true,
-          "type": "string"
-        },
         "radiate.room.id": {
           "required": false,
           "type": "string"
@@ -27,10 +23,6 @@
           "required": true,
           "type": "string"
         },
-        "event.name": {
-          "required": true,
-          "type": "string"
-        },
         "radiate.room.id": {
           "required": false,
           "type": "string"
@@ -42,31 +34,9 @@
       },
       "severity": "INFO"
     },
-    "radiate.auth.denied": {
-      "attributes": {
-        "event.action": {
-          "required": true,
-          "type": "string"
-        },
-        "event.name": {
-          "required": true,
-          "type": "string"
-        },
-        "radiate.auth.failures": {
-          "required": true,
-          "type": "int",
-          "unit": "{request}"
-        }
-      },
-      "severity": "WARN"
-    },
     "radiate.boiler.burn": {
       "attributes": {
         "event.action": {
-          "required": true,
-          "type": "string"
-        },
-        "event.name": {
           "required": true,
           "type": "string"
         },
@@ -85,10 +55,6 @@
     "radiate.decision": {
       "attributes": {
         "event.action": {
-          "required": true,
-          "type": "string"
-        },
-        "event.name": {
           "required": true,
           "type": "string"
         },
@@ -139,10 +105,6 @@
           "required": true,
           "type": "string"
         },
-        "event.name": {
-          "required": true,
-          "type": "string"
-        },
         "radiate.export.dropped": {
           "required": true,
           "type": "int",
@@ -165,10 +127,6 @@
           "required": true,
           "type": "string"
         },
-        "event.name": {
-          "required": true,
-          "type": "string"
-        },
         "radiate.room.id": {
           "required": false,
           "type": "string"
@@ -183,10 +141,6 @@
     "radiate.mode.changed": {
       "attributes": {
         "event.action": {
-          "required": true,
-          "type": "string"
-        },
-        "event.name": {
           "required": true,
           "type": "string"
         },
@@ -229,10 +183,6 @@
           "required": true,
           "type": "string"
         },
-        "event.name": {
-          "required": true,
-          "type": "string"
-        },
         "radiate.people.away": {
           "required": false,
           "type": "int",
@@ -246,13 +196,802 @@
       },
       "severity": "INFO"
     },
-    "radiate.settings.changed": {
+    "radiate.security.access.denied": {
+      "attributes": {
+        "error.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "forbidden",
+            "csrf",
+            "origin"
+          ]
+        },
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "http.request.method": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.auth.method": {
+          "required": false,
+          "type": "string",
+          "values": [
+            "password",
+            "oidc",
+            "saml",
+            "session",
+            "token",
+            "ingress",
+            "open",
+            "cli"
+          ]
+        },
+        "radiate.auth.needed_role": {
+          "required": false,
+          "type": "string",
+          "values": [
+            "viewer",
+            "household",
+            "admin"
+          ]
+        },
+        "radiate.security.count": {
+          "required": false,
+          "type": "int",
+          "unit": "{event}"
+        },
+        "source.address": {
+          "required": false,
+          "type": "string"
+        },
+        "url.path": {
+          "required": false,
+          "type": "string"
+        },
+        "user.name": {
+          "required": false,
+          "type": "string"
+        },
+        "user.roles": {
+          "required": false,
+          "type": "string[]"
+        }
+      },
+      "severity": "WARN"
+    },
+    "radiate.security.config.changed": {
       "attributes": {
         "event.action": {
           "required": true,
           "type": "string"
         },
-        "event.name": {
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "http.request.method": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.auth.method": {
+          "required": false,
+          "type": "string",
+          "values": [
+            "password",
+            "oidc",
+            "saml",
+            "session",
+            "token",
+            "ingress",
+            "open",
+            "cli"
+          ]
+        },
+        "radiate.config.area": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "settings",
+            "household",
+            "layout",
+            "learning"
+          ]
+        },
+        "radiate.room.ids": {
+          "required": false,
+          "type": "string[]"
+        },
+        "radiate.settings.paths": {
+          "required": false,
+          "type": "string[]"
+        },
+        "source.address": {
+          "required": false,
+          "type": "string"
+        },
+        "url.path": {
+          "required": false,
+          "type": "string"
+        },
+        "user.name": {
+          "required": false,
+          "type": "string"
+        },
+        "user.roles": {
+          "required": false,
+          "type": "string[]"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.security.lockout.ended": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "radiate.lockout.scope": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "username",
+            "address"
+          ]
+        },
+        "source.address": {
+          "required": false,
+          "type": "string"
+        },
+        "user.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.security.lockout.started": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "radiate.lockout.duration": {
+          "required": true,
+          "type": "double",
+          "unit": "s"
+        },
+        "radiate.lockout.scope": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "username",
+            "address"
+          ]
+        },
+        "source.address": {
+          "required": false,
+          "type": "string"
+        },
+        "user.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "severity": "WARN"
+    },
+    "radiate.security.login": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "radiate.auth.method": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "password",
+            "oidc",
+            "saml",
+            "session",
+            "token",
+            "ingress",
+            "open",
+            "cli"
+          ]
+        },
+        "source.address": {
+          "required": false,
+          "type": "string"
+        },
+        "user.name": {
+          "required": true,
+          "type": "string"
+        },
+        "user.roles": {
+          "required": true,
+          "type": "string[]"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.security.login.config": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "radiate.auth.ingress": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.auth.login": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.auth.methods": {
+          "required": true,
+          "type": "string[]"
+        },
+        "radiate.auth.token": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.auth.trusted_proxies": {
+          "required": true,
+          "type": "int",
+          "unit": "{network}"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.security.login.failed": {
+      "attributes": {
+        "error.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "bad_request",
+            "bad_password",
+            "unknown_user",
+            "rate_limited",
+            "bad_state",
+            "provider_error",
+            "bad_signature",
+            "wrong_issuer",
+            "wrong_audience",
+            "expired",
+            "bad_nonce",
+            "bad_claims",
+            "replayed",
+            "no_user",
+            "not_permitted"
+          ]
+        },
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "radiate.auth.method": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "password",
+            "oidc",
+            "saml",
+            "session",
+            "token",
+            "ingress",
+            "open",
+            "cli"
+          ]
+        },
+        "radiate.security.count": {
+          "required": false,
+          "type": "int",
+          "unit": "{event}"
+        },
+        "source.address": {
+          "required": false,
+          "type": "string"
+        },
+        "user.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "severity": "WARN"
+    },
+    "radiate.security.logout": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "radiate.auth.method": {
+          "required": false,
+          "type": "string",
+          "values": [
+            "password",
+            "oidc",
+            "saml",
+            "session",
+            "token",
+            "ingress",
+            "open",
+            "cli"
+          ]
+        },
+        "source.address": {
+          "required": false,
+          "type": "string"
+        },
+        "user.name": {
+          "required": true,
+          "type": "string"
+        },
+        "user.roles": {
+          "required": false,
+          "type": "string[]"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.security.request.refused": {
+      "attributes": {
+        "error.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "no_credentials",
+            "bad_token",
+            "bad_session"
+          ]
+        },
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "http.request.method": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.security.count": {
+          "required": false,
+          "type": "int",
+          "unit": "{event}"
+        },
+        "source.address": {
+          "required": false,
+          "type": "string"
+        },
+        "url.path": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "severity": "WARN"
+    },
+    "radiate.security.session.ended": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.reason": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "expired",
+            "idle",
+            "password_reset",
+            "role_changed",
+            "user_removed"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "radiate.auth.method": {
+          "required": false,
+          "type": "string",
+          "values": [
+            "password",
+            "oidc",
+            "saml",
+            "session",
+            "token",
+            "ingress",
+            "open",
+            "cli"
+          ]
+        },
+        "radiate.sessions.ended": {
+          "required": true,
+          "type": "int",
+          "unit": "{session}"
+        },
+        "user.name": {
+          "required": true,
+          "type": "string"
+        },
+        "user.roles": {
+          "required": false,
+          "type": "string[]"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.security.user.changed": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "radiate.auth.method": {
+          "required": false,
+          "type": "string",
+          "values": [
+            "password",
+            "oidc",
+            "saml",
+            "session",
+            "token",
+            "ingress",
+            "open",
+            "cli"
+          ]
+        },
+        "user.target.name": {
+          "required": true,
+          "type": "string"
+        },
+        "user.target.roles": {
+          "required": false,
+          "type": "string[]"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.settings.changed": {
+      "attributes": {
+        "event.action": {
           "required": true,
           "type": "string"
         },

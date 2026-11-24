@@ -452,7 +452,7 @@ def _log_record(rec: dict, rooms: Mapping[str, str]) -> dict | None:
         name, extra = built["e"], built["a"]
     d = telemetry.EVENT_BY_NAME[name]
     allowed = {a.key for a in d.attributes}
-    attrs = [_attr(telemetry.EVENT_NAME.key, name), _attr(telemetry.EVENT_ACTION.key, code)]
+    attrs = [_attr(telemetry.EVENT_ACTION.key, code)]
     room = rec.get("r")
     if room and telemetry.ROOM_ID.key in allowed:
         attrs.append(_attr(telemetry.ROOM_ID.key, str(room)))
@@ -482,10 +482,9 @@ def logs_request(
     """ExportLogsServiceRequest (OTLP/JSON) for queued events: {"t", "e", "c", "m", "r",
     "a"}, from `radiate.export.telemetry`'s builders plus the time.
 
-    The event name goes in the log record's event name field and, for backends that
-    don't read it, the `event.name` attribute. `event.action` holds the reason code, as
-    in the Elastic export's decision stream; the body is the message as the web UI
-    shows it.
+    The event name goes in the log record's event name field (OpenTelemetry's
+    `event_name`) only. `event.action` holds the reason code, as in the Elastic
+    export's decision stream; the body is the message as the web UI shows it.
     """
     built = (_log_record(rec, rooms or {}) for rec in records if isinstance(rec, dict))
     out = [r for r in built if r is not None]
@@ -649,9 +648,15 @@ class OtlpExporter:
         end: float,
     ) -> None:
         """Queue a closed day's summary and savings `estimate`, to be sent as gauges
-        timed at `end`, the day's last second, with `start` its first."""
+        with `start`, the day's first second, as their start time. They are timed at
+        `end`, the day's last second, or with `export.otlp.daily_timestamp: day_close`
+        at `wall`, when Radiate closed the day. Nothing with `daily_metrics: false`."""
         if not self.cfg.enabled or "metrics" not in self.cfg.signals:
             return
+        if not self.cfg.daily_metrics:
+            return
+        if self.cfg.daily_timestamp == "day_close":
+            end = wall
         day = {"summary": dict(summary), "estimate": dict(estimate) if estimate else None}
         day.update(start=start, end=end)
         self.queues["metrics"].extend([{"t": wall, "d": day}])

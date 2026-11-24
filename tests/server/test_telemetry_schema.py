@@ -68,18 +68,34 @@ def test_names_units_and_text_follow_the_rules():
     for e in EVENTS:
         assert e.severity in telemetry.SEVERITY
         keys = [a.key for a in e.attributes]
-        assert len(set(keys)) == len(keys) and keys[:2] == ["event.name", "event.action"]
+        # The event name is in the log record's event name field, never an attribute.
+        assert len(set(keys)) == len(keys) and keys[0] == "event.action"
+        assert "event.name" not in keys
     text = json.dumps([str(x) for x in (*METRICS, *EVENTS, *telemetry.RESOURCE)])
     assert all(chr(c) not in text for c in (0x2013, 0x2014))  # no en or em dashes
 
 
 def test_no_attribute_could_carry_a_person_or_a_place():
-    keys = {a.key for d in (*METRICS, *EVENTS) for a in d.attributes}
+    """Except on security audit events (ADR-0008), which say who and from where."""
+    plain = [e for e in EVENTS if not e.name.startswith("radiate.security.")]
+    keys = {a.key for d in (*METRICS, *plain) for a in d.attributes}
     keys |= {a.key for a in telemetry.RESOURCE}
     for key in keys:
         assert not re.search(r"person\.|\.name$|address|location|geo|client|user", key) or (
-            key in ("radiate.room.name", "service.name", "event.name")
+            key in ("radiate.room.name", "service.name")
         ), key
+
+
+def test_only_security_events_identify_people():
+    personal = {"user.name", "user.target.name", "source.address"}
+    for e in EVENTS:
+        keys = {a.key for a in e.attributes}
+        if e.name.startswith("radiate.security."):
+            assert e.name in telemetry.SECURITY_KINDS
+            assert {"event.category", "event.type", "event.outcome"} <= keys
+            assert "Security audit." in e.brief
+        else:
+            assert not keys & personal, e.name
 
 
 def test_reason_codes_map_to_events():
@@ -261,9 +277,139 @@ def _every_event() -> list[dict]:
         t.reason_record("learning.reset", "Lounge: learning reset to priors", "lounge"),
         t.settings_record("settings.saved", ["boiler.min_burn_min", "house.timezone"], True),
         t.reason_record("household.setup", "Household setup changed: schedules rebuilt"),
-        t.auth_record(3),
         t.dropped_record("metrics", 12, "queue_full"),
+        *_every_security_event(),
     ]
+
+
+def _every_security_event() -> list[dict]:
+    t = telemetry
+    who = {
+        "user.name": "alice",
+        "user.roles": ["admin"],
+        "source.address": "192.0.2.10",
+        "radiate.auth.method": "session",
+    }
+    req = {"http.request.method": "PUT", "url.path": "/api/v1/layout"}
+    rec = t.security_record
+    return [
+        rec(
+            t.SECURITY_LOGIN,
+            "login",
+            "Signed in: alice (admin, password)",
+            {**who, "radiate.auth.method": "password"},
+        ),
+        rec(
+            t.SECURITY_LOGIN_FAILED,
+            "login",
+            "Sign-in refused for bob: wrong password",
+            {
+                "user.name": "bob",
+                "source.address": "192.0.2.10",
+                "radiate.auth.method": "password",
+                "error.type": "bad_password",
+                "radiate.security.count": 3,
+            },
+        ),
+        rec(t.SECURITY_LOGOUT, "logout", "Signed out: alice", who),
+        rec(
+            t.SECURITY_SESSION_ENDED,
+            "session.revoked",
+            "2 sessions ended for alice: password reset",
+            {
+                "user.name": "alice",
+                "radiate.auth.method": "password",
+                "event.reason": "password_reset",
+                "radiate.sessions.ended": 2,
+            },
+        ),
+        rec(
+            t.SECURITY_REQUEST_REFUSED,
+            "request.refused",
+            "Request refused: wrong API token",
+            {"source.address": "192.0.2.10", "error.type": "bad_token", **req},
+        ),
+        rec(
+            t.SECURITY_ACCESS_DENIED,
+            "access.denied",
+            "Refused: alice (viewer) needs admin for PUT /api/v1/layout",
+            {**who, **req, "error.type": "forbidden", "radiate.auth.needed_role": "admin"},
+        ),
+        rec(
+            t.SECURITY_LOCKOUT_STARTED,
+            "lockout.started",
+            "Sign-in locked for 900 s: username bob",
+            {
+                "user.name": "bob",
+                "radiate.lockout.scope": "username",
+                "radiate.lockout.duration": 900.0,
+            },
+        ),
+        rec(
+            t.SECURITY_LOCKOUT_ENDED,
+            "lockout.ended",
+            "Sign-in lockout ended: username bob",
+            {"user.name": "bob", "radiate.lockout.scope": "username"},
+        ),
+        rec(
+            t.SECURITY_USER_CHANGED,
+            "user.added",
+            "User added: carol (household)",
+            {
+                "event.type": "creation",
+                "user.target.name": "carol",
+                "user.target.roles": ["household"],
+                "radiate.auth.method": "cli",
+            },
+        ),
+        rec(
+            t.SECURITY_CONFIG_CHANGED,
+            "settings.saved",
+            "Settings saved by alice (admin)",
+            {
+                **who,
+                **req,
+                "radiate.config.area": "settings",
+                "radiate.settings.paths": ["boiler.min_burn_min"],
+            },
+        ),
+        rec(
+            t.SECURITY_LOGIN_CONFIG,
+            "login.config",
+            "Login on: password; API token set",
+            {
+                "radiate.auth.login": True,
+                "radiate.auth.methods": ["password"],
+                "radiate.auth.token": True,
+                "radiate.auth.ingress": False,
+                "radiate.auth.trusted_proxies": 1,
+            },
+        ),
+    ]
+
+
+def test_a_security_record_keeps_only_its_own_attributes():
+    rec = telemetry.security_record(
+        telemetry.SECURITY_LOGIN_FAILED,
+        "login",
+        "Sign-in refused for bob: wrong password",
+        {
+            "user.name": "bob",
+            "radiate.auth.method": "password",
+            "error.type": "bad_password",
+            "password": "hunter2-hunter2",
+            "radiate.settings.paths": ["x"],
+            "source.address": None,
+        },
+    )
+    assert rec["a"] == {
+        "event.category": "authentication",
+        "event.type": "start",
+        "event.outcome": "failure",
+        "user.name": "bob",
+        "radiate.auth.method": "password",
+        "error.type": "bad_password",
+    }
 
 
 def test_every_event_is_emitted_and_matches_the_schema():
@@ -301,6 +447,37 @@ def test_the_checks_catch_departures():
     problems = check_logs(logs)
     assert any("required attribute radiate.burn.duration missing" in p for p in problems)
     assert any("severity should be INFO" in p for p in problems)
+
+
+# --- daily figures ------------------------------------------------------------------------
+
+
+def _day_point(cfg) -> list:
+    exp = OtlpExporter(cfg, HOUSE, ROOMS)
+    exp.record_day(T0 + 75, _summary(), None, T0 - 86400, T0 - 1)
+    req = exp._request("metrics", exp.queues["metrics"].peek(10))
+    metrics = req["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+    return [p for m in metrics for p in m["gauge"]["dataPoints"]]
+
+
+def test_daily_figures_are_timed_at_the_end_of_the_day_by_default():
+    points = _day_point(_cfg())
+    assert points and {p["timeUnixNano"] for p in points} == {str(int((T0 - 1) * 1e9))}
+    assert {p["startTimeUnixNano"] for p in points} == {str(int((T0 - 86400) * 1e9))}
+
+
+def test_daily_figures_can_be_timed_when_the_day_closed():
+    points = _day_point(_cfg(daily_timestamp="day_close"))
+    assert points and {p["timeUnixNano"] for p in points} == {str(int((T0 + 75) * 1e9))}
+    assert {p["startTimeUnixNano"] for p in points} == {str(int((T0 - 86400) * 1e9))}
+
+
+def test_daily_figures_can_be_turned_off():
+    exp = OtlpExporter(_cfg(daily_metrics=False), HOUSE, ROOMS)
+    exp.record_day(T0, _summary(), None, T0 - 86400, T0 - 1)
+    assert len(exp.queues["metrics"]) == 0
+    exp.record(T0, {"outdoor.temperature": 1.0})
+    assert len(exp.queues["metrics"]) == 1  # the per-tick metrics still go
 
 
 # --- the exporter reports what it loses ----------------------------------------------------
@@ -355,7 +532,6 @@ async def test_the_runtime_emits_only_what_the_schema_allows():
     rt.set_demand_mode(
         DemandMode.COMFORT if rt.effective_demand_mode is DemandMode.ECO else DemandMode.ECO
     )
-    rt.auth_denied = 2
     await rt.step()
     summary = rt.state.ledger.summary(1.9)
     rt._export_otlp_day(T0, summary, None)
@@ -367,7 +543,6 @@ async def test_the_runtime_emits_only_what_the_schema_allows():
     assert "radiate.daily.burner.time" in names
     events = [r["eventName"] for r in logs["resourceLogs"][0]["scopeLogs"][0]["logRecords"]]
     assert events.count("radiate.mode.changed") == 2
-    assert "radiate.auth.denied" in events and rt.auth_denied == 0
 
 
 async def test_a_burn_and_a_cleared_alert_are_events():
@@ -403,4 +578,5 @@ async def test_settings_and_refused_requests_reach_the_export():
     async with TestClient(TestServer(app)) as client:
         resp = await client.get("/api/v1/state")
         assert resp.status == 401
-    assert rt.auth_denied == 1
+    refused = [e for e in rt._otlp_events if e["e"] == "radiate.security.request.refused"]
+    assert len(refused) == 1 and refused[0]["a"]["error.type"] == "no_credentials"

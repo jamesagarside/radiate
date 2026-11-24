@@ -76,6 +76,8 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/settings/config/{target}"): ADMIN,
     ("PUT", "/api/v1/layout"): ADMIN,
     ("POST", "/api/v1/devices/scan"): ADMIN,
+    # The security log (ADR-0008): who signed in, from where, and what was refused.
+    ("GET", "/api/v1/audit"): ADMIN,
     # Outside /api/: the pages, their files and the single sign-on flows. Public, as
     # the page itself asks the API who is signed in.
     ("GET", "/"): PUBLIC,
