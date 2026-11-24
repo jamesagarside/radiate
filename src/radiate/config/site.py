@@ -35,6 +35,7 @@ from radiate.core.types import (
     SuggestionConfig,
 )
 
+from .export import ExportConfig, parse_export
 from .household import (
     ADJUST_GROUPS,
     LIMITS,
@@ -146,6 +147,8 @@ class SiteConfig:
     # Days of recorded ticks (snapshots and actions) kept in radiate.db for replay and
     # bootstrap (spec 4.3, 6). 0 turns recording off.
     history_days: float = 14.0
+    # Where to send data besides the web UI: the OpenTelemetry export (spec 9.1).
+    export: ExportConfig = field(default_factory=ExportConfig)
     notes: tuple[str, ...] = ()  # non-fatal remarks for the operator
     household: Household | None = None
     # The household's rooms: the valve's week (fixed preheat, fitted to the TRVZB) and
@@ -1076,6 +1079,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "learning",
             "monitoring",
             "suggestions",
+            "export",
         },
         "",
     )
@@ -1147,6 +1151,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     data_dir = ctx.get(house, "data_dir", str, "./data", "house.")
     silence_min = ctx.number(house, "sensor_max_silence_min", 60, 10, 180, "house.")
     history_days = ctx.number(house, "history_days", 14, 0, 90, "house.")
+    export, export_problems = parse_export(data.get("export"))
+    ctx.problems.extend(export_problems)
 
     if ctx.problems:
         raise ConfigError(ctx.problems)
@@ -1164,6 +1170,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         data_dir=data_dir,
         sensor_max_silence_s=silence_min * 60,
         history_days=history_days,
+        export=export,
         notes=tuple(notes),
         room_schedules=own,
         schedule_use=schedule_use,

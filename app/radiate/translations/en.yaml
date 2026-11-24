@@ -14,3 +14,9 @@ configuration:
   elastic_api_key:
     name: Elastic API key
     description: Optional. An API key with permission to write to metrics-radiate.* and logs-radiate.* data streams.
+  otlp_endpoint:
+    name: OpenTelemetry endpoint
+    description: Optional. An OTLP/HTTP collector to send metrics and decision logs to, such as Elastic's managed OTLP endpoint. The base URL; Radiate adds /v1/metrics and /v1/logs.
+  otlp_api_key:
+    name: OpenTelemetry API key
+    description: Optional. Sent as "Authorization: ApiKey <key>", as Elastic's managed OTLP endpoint expects.
