@@ -159,6 +159,48 @@ def test_offline_trv_room_that_does_not_warm_stops_counting():
     assert "valve.offline_no_warming" not in codes(acts[-1])
 
 
+def _dry_run(s: Snapshot) -> None:
+    # A dry run without metering: the relay is Radiate's own unsent command.
+    s.relay_follows_commands = False
+
+
+def test_without_heat_known_neither_trv_rule_judges_the_room():
+    # The TRV rules need heat Radiate can see (spec 4.6 `heat_unknown`). In a dry run
+    # without metering the boiler may not be running at all, so an idle TRV is not
+    # stepped up and an offline TRV room that doesn't warm keeps counting.
+    st = EngineState.new(CFG)
+    cold = {**WARM, "bed": 16.0}
+
+    def idle(s: Snapshot) -> None:
+        _dry_run(s)
+        _bed_trv_idle(s)
+
+    acts, _ = run(st, 0, 90, cold, idle)
+    assert acts[-1].heating_relay and st.rooms["bed"].calling
+    assert "valve.trv_disagrees" not in codes(acts[-1])
+    assert acts[-1].valves["bed"].setpoint == 20.5
+
+    st = EngineState.new(CFG)
+
+    def offline(s: Snapshot) -> None:
+        _dry_run(s)
+        _bed_trv_offline(s)
+
+    acts, _ = run(st, 0, 120, cold, offline)
+    assert st.rooms["bed"].calling and not st.rooms["bed"].offline_stalled
+    assert "valve.offline_no_warming" not in codes(acts[-1])
+
+    # With the burner metered and firing, heat is known again and the rule applies.
+    st = EngineState.new(CFG)
+
+    def metered(s: Snapshot) -> None:
+        offline(s)
+        s.heating_burner = s.heating_relay
+
+    acts, _ = run(st, 0, 90, cold, metered)
+    assert "valve.offline_no_warming" in codes(acts[-1], "bed")
+
+
 # --- C: restart readings ----------------------------------------------------------------
 
 

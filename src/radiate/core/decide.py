@@ -642,7 +642,9 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             offline_ok = True
             if rs.calling:
                 start, heat_s = rs.offline_call or (temp, 0.0)
-                heat_s += min(dt, MAX_TICK_S) if flowing else 0.0
+                # Only heat the relay or burner shows counts (`heat_known`): a dry run's
+                # unsent call would otherwise drop the room for not warming.
+                heat_s += min(dt, MAX_TICK_S) if flowing and heat_known else 0.0
                 rs.offline_call = (start, heat_s)
                 if heat_s >= OFFLINE_FLOW_S and temp < start + OFFLINE_RISE_K:
                     rs.offline_stalled, offline_ok = True, False
@@ -910,7 +912,10 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
 
     # --- 6: openings ---------------------------------------------------------------------
     firing = guard.state in (BoilerState.LEAD, BoilerState.FIRING)
-    burning = guard.state is BoilerState.FIRING and flowing  # heat reaching the radiators
+    # Heat reaching the radiators. Only when the relay or burner shows it (`heat_known`):
+    # in a dry run without metering the relay is Radiate's own unsent command, so a TRV
+    # idling then is not disagreeing with any heat.
+    burning = guard.state is BoilerState.FIRING and flowing and heat_known
     valves: dict[str, ValveAction] = {}
     for rc in cfg.rooms:
         if not rc.controllable:
