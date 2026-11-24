@@ -9,7 +9,7 @@ from radiate.export.elastic import (
     bulk_body,
     index_templates,
 )
-from radiate.server.demo import DemoDriver
+from radiate.server.demo import DEMO_FIRST_DAY, DemoDriver
 from radiate.server.runtime import Runtime
 from radiate.sim.reference import house_config
 
@@ -110,7 +110,7 @@ async def test_runtime_exports_the_closed_day_and_describes_accounting():
         def record(self, state, decisions=()):
             pass
 
-        def record_daily(self, summary):
+        def record_daily(self, summary, estimate=None):
             self.daily.append(summary)
 
     rt = Runtime(house_config(), DemoDriver(start_hour=23.8))  # 23:48 in the demo house
@@ -119,12 +119,13 @@ async def test_runtime_exports_the_closed_day_and_describes_accounting():
         await rt.step()
     assert rt.exporter.daily == []
     acc = rt.describe()["accounting"]
-    assert acc["today"]["day"] == 0 and acc["yesterday"] is None
+    first = DEMO_FIRST_DAY  # the demo's days are calendar days
+    assert acc["today"]["day"] == first and acc["yesterday"] is None
     for _ in range(10):
         await rt.step()  # past midnight
-    assert [s["day"] for s in rt.exporter.daily] == [0]
+    assert [s["day"] for s in rt.exporter.daily] == [first]
     acc = rt.describe()["accounting"]
-    assert acc["today"]["day"] == 1 and acc["yesterday"]["day"] == 0
+    assert acc["today"]["day"] == first + 1 and acc["yesterday"]["day"] == first
     assert {"burner_hours", "starts", "litres", "balance"} <= set(acc["today"])
     # Radiate started at 23:48, so day 0 was not seen in full: no balance score.
     assert acc["yesterday"]["partial"] is True

@@ -586,11 +586,11 @@ _Avoid_: DHW priority.
 
 ## Savings
 
-Planned ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.9](spec.md#59-savings)). The core (`radiate.core.savings`) is built; the API and view are not.
+Built ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.9](spec.md#59-savings)): the core (`radiate.core.savings`), the API (`radiate.server.savings`) and the Savings view (`web/savings.js`).
 
 **Savings**:
 The oil Radiate estimates it saved against the savings baseline, from measured temperatures and measured oil, with the comfort it cost shown beside it. In litres, per day and in total, and as a percentage of the baseline's litres. A day's saving can be negative.
-Code: `radiate.core.savings` (`SavingsMeter`, `report`), API `GET /api/v1/savings`, UI "Savings".
+Code: `radiate.core.savings` (`SavingsMeter`, `report`), `radiate.server.savings` (`savings_view`), API `GET /api/v1/savings`, UI "Savings" tab (`web/savings.js`).
 _Avoid_: "up to" figures, and "savings" for a simulated or projected figure.
 
 **Savings baseline**:
@@ -625,6 +625,15 @@ _Avoid_: comfort minutes below, which is the ledger's older count of minutes bel
 **Warm share**:
 The share of minutes rooms were in use (or occasional) that they were at or above their setpoint less 0.5 K. The headline's "rooms in use warm 98 % of the time".
 Code: `RoomDay.warm_ok_min / RoomDay.warm_min`, API `warm_share`.
+
+**Daily history**:
+The closed day summaries kept for savings, oldest first, one per day, for 730 days. Savings are worked out from it at report time, so changing room weights applies to every kept day.
+Code: `DailyHistory` in `radiate.server.savings`, state database key `daily_history`, `Runtime.daily`.
+_Avoid_: tick history, which is the per-tick record kept for replay.
+
+**Not counted**:
+The UI's words for a closed day that isn't an eligible day. Shown as an empty slot with its reason, never as zero.
+Code: API `days[].eligible` false with `days[].why`.
 
 **Litres basis**:
 What litres are worked out from: `relay` (heating relay time, an upper bound, the only basis today) or `firing` (burner firing seen in the Shelly's channel 1 power, planned). A house signature uses days of one basis only.

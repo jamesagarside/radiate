@@ -12,6 +12,7 @@ import { createSetup } from "./setup.js";
 import { weekView } from "./week.js";
 import { createDevices } from "./devices.js";
 import { createSuggestions } from "./suggestions.js";
+import { createSavings, houseLine } from "./savings.js";
 import { createHouse } from "./house.js";
 import { createGuide, guideNote } from "./guide.js";
 
@@ -1023,6 +1024,7 @@ const setup = createSetup({
     try { house = await transport.house(); } catch { /* the next render retries */ }
     renderSetupEntry();
     refresh();
+    savings.refresh();
   },
 });
 
@@ -1098,6 +1100,36 @@ function renderSuggestionCount(n) {
   else tab.removeAttribute("aria-label");
 }
 
+// Savings view (savings.js): the oil saved against the baseline, with comfort beside
+// it, at #savings. Its tab shows once the server answers `GET savings`. Once there are
+// figures, the headline also sits on the House view as one line linking to the view.
+let savingsWhy = null;
+const savings = createSavings({
+  transport,
+  isAuthError: (err) => err instanceof AuthError,
+  onAuth: () => askForToken(),
+  onView: (v) => {
+    const line = houseLine(v);
+    $("savings-line").hidden = !line;
+    if ($("savings-line-link").textContent !== line) $("savings-line-link").textContent = line;
+    savingsWhy = v.status === "unavailable" ? v.why : null;
+    renderSavingsSetup();
+  },
+});
+let savingsOffered = null;
+
+// Without a household, the Savings view offers the setup, where the server has one.
+async function renderSavingsSetup() {
+  const offered = savingsWhy === "no household" && setupOffered ? await setupOffered : false;
+  $("savings-setup").hidden = !offered;
+}
+// The setup replaces the House view, so go there first; Back then returns to it.
+$("savings-setup").addEventListener("click", (e) => {
+  history.replaceState(null, "", "#");
+  route(false);
+  openSetup(e);
+});
+
 // Guide view (guide.js): how to read and work Radiate, at #guide, with each section
 // at #guide/<name>. Static text, so it is always offered.
 const guide = createGuide({ root: $("guide") });
@@ -1107,6 +1139,7 @@ guideNote({ note: $("guide-note"), tab: document.querySelector('.view-tab[data-v
 const VIEWS = {
   devices: { offered: () => devicesOffered === true, module: devices },
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
+  savings: { offered: () => savingsOffered === true, module: savings },
   guide: { offered: () => true, module: guide },
 };
 
@@ -1160,12 +1193,14 @@ function renderTabs() {
 }
 
 async function offerViews() {
-  const [d, s] = await Promise.all([
+  const [d, s, v] = await Promise.all([
     devicesOffered === true ? true : devices.available(),
     suggestionsOffered === true ? true : suggestions.available(),
+    savingsOffered === true ? true : savings.available(),
   ]);
   devicesOffered = d;
   suggestionsOffered = s;
+  savingsOffered = v;
   renderTabs();
   renderDeviceCount(last?.alert_details);
   route(false);

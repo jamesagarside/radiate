@@ -32,6 +32,8 @@ def test_expected_files(site):
         "static/setup.js",
         "static/devices.js",
         "static/suggestions.js",
+        "static/savings.js",
+        "static/savings.css",
         "static/house.js",
         "static/house.css",
         "static/guide.js",
@@ -60,6 +62,7 @@ def test_static_assets_have_no_root_relative_urls(site):
         "setup.js",
         "devices.js",
         "suggestions.js",
+        "savings.js",
         "demo.js",
         "demo-worker.js",
     ):
@@ -102,6 +105,8 @@ raw = dict(people=dict(sam=dict(weekdays=dict(up="07:00", bed="23:00"))),
            rooms=dict(lounge=dict(use="in_use")))
 saved = json.loads(s.request("PUT", "household", json.dumps(dict(household=raw))))
 assert saved["status"] == 200 and saved["body"]["source"] == "saved", saved
+savings = json.loads(s.request("GET", "savings"))
+assert savings["status"] == 200 and savings["body"]["status"] == "learning", savings
 assert "yaml" not in sys.modules
 leaked = [m for m, mod in sys.modules.items()
           if m.startswith("radiate") and {str(zip_path)!r} not in (getattr(mod, "__file__", "") or "")]

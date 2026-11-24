@@ -7,7 +7,9 @@ house. `demo_site` describes the simulated house as a `SiteConfig` for that setu
 
 from __future__ import annotations
 
+import dataclasses
 import math
+from datetime import date
 
 from radiate.config.schedule import DaySchedule, WeekSchedule
 from radiate.config.site import RoomDevices, SiteConfig
@@ -87,6 +89,7 @@ class DemoDriver:
         while h.now < end:
             day = int(h.now // 86400)
             minute = int((h.now % 86400) // 60)
+            h.outdoor_mean = demo_outdoor_mean(h.now / 86400)
             draw = _apply_disturbances(h, self.dist, day, minute, self._dist_state)
             h.step(STEP_S, draw)
             for rid, room in h.rooms.items():
@@ -101,6 +104,8 @@ class DemoDriver:
         minute = self.wall_minutes()
         weekday = self.wall_weekday()
         snap = _snapshot(self.house, self._reports, minute)
+        # Real dates, so closed days and savings read as calendar days.
+        snap.day = DEMO_FIRST_DAY + int(self.house.now // 86400)
         snap.mode = mode
         snap.store_boost = store_boost
         for spec in ROOMS:
@@ -306,14 +311,66 @@ def _demo_map(now: float) -> NetworkMap:
     return NetworkMap(routes=routes)
 
 
-def demo_runtime(start_hour: float = 5.5, seed: int = 7):
-    """The demo's runtime: the simulated house, with a household setup kept in memory."""
+# Simulated day 0 is Monday 2 November 2026, so closed days carry real dates.
+DEMO_FIRST_DAY = date(2026, 11, 2).toordinal()
+# The demo boiler's nozzle rating, so its days have litres (spec 5.6).
+DEMO_NOZZLE_LPH = 1.4
+# The example household (examples/household.yaml), for `demo_runtime(days=...)`.
+DEMO_HOUSEHOLD: dict = {
+    "temperatures": {"in_use": 19, "occasional": 16, "unused": 14, "night": 14},
+    "people": {
+        "early_riser": {
+            "name": "Early riser",
+            "weekdays": {"up": "06:30", "out": "07:30-18:00", "bed": "22:30"},
+            "weekend": {"up": "08:30", "out": "10:00-18:00", "bed": "22:30"},
+        },
+        "home_worker": {
+            "name": "Home worker",
+            "weekdays": {"up": "08:00", "work": "08:00-18:00", "bed": "22:30"},
+            "weekend": {"up": "08:30", "out": "10:00-18:00", "bed": "22:30"},
+        },
+    },
+    "rooms": {
+        "bedroom_1": {"use": "in_use", "kind": "bedroom", "people": ["early_riser", "home_worker"]},
+        "bedroom_3": {"use": "in_use", "kind": "office", "people": ["home_worker"]},
+        "dining": {"use": "in_use"},
+        "kitchen": {"use": "in_use"},
+        "bathroom": {"use": "occasional"},
+        "bedroom_2": {"use": "unused"},
+        "lounge": {"use": "unused"},
+        "toilet": {
+            "use": {"weekdays": "unused", "weekend": "occasional"},
+            "kind": "all_day",
+            "temperature": 15,
+        },
+    },
+}
+
+
+def demo_outdoor_mean(day: float) -> float:
+    """The demo's daily mean outdoor temperature, °C, `day` days in: mild and cold
+    spells over about a fortnight, so the weather varies as savings need (spec 5.9).
+    The simulator's own runs keep a fixed mean."""
+    return 4.0 + 3.5 * math.sin(2 * math.pi * day / 11.0)
+
+
+def demo_runtime(start_hour: float = 5.5, seed: int = 7, days: int = 0):
+    """The demo's runtime: the simulated house, with a household setup kept in memory.
+
+    With `days`, the demo starts that many simulated days in, with the example
+    household set up, so closed days, savings and learning already have a history.
+    """
+    from .bridge import run_sync
     from .runtime import Runtime
     from .setup import HouseholdSetup, SavedMemory
 
     site = demo_site()
     rt = Runtime(site.house, DemoDriver(start_hour=start_hour, seed=seed))
     rt.setup = HouseholdSetup(site, SavedMemory())
+    if days > 0:
+        rt.setup.save(rt, {"household": DEMO_HOUSEHOLD})
+        for _ in range(int(days * 1440)):
+            run_sync(rt.step())
     return rt
 
 
@@ -324,8 +381,12 @@ def demo_site() -> SiteConfig:
     from radiate.sim.reference import house_config
 
     weeks = {s.id: _week(s) for s in ROOMS if s.trv}
+    house = house_config()
+    house = dataclasses.replace(
+        house, boiler=dataclasses.replace(house.boiler, nozzle_lph=DEMO_NOZZLE_LPH)
+    )
     return SiteConfig(
-        house=house_config(),
+        house=house,
         devices={s.id: RoomDevices(schedule=s.id if s.trv else None) for s in ROOMS},
         schedules=weeks,
         room_schedules={rid: rid for rid in weeks},

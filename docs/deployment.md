@@ -57,6 +57,7 @@ Run your own house. Draft the file from Zigbee2MQTT's device list, then check it
 | `--dry-run` | off | Force dry run whatever the file says |
 | `--data-dir DIR` | `house.data_dir` | Keep `radiate.db` in `DIR` instead |
 | `--speed N` | 60 | Demo only: simulated minutes per real minute |
+| `--demo-days N` | 0 | Demo only: start N simulated days in, with the example household set up, so closed days, savings and learning already have a history. Takes about half a second per day before the server starts |
 | `--host HOST` | `0.0.0.0` | Address to listen on |
 | `--port PORT` | 8099 | Port to listen on |
 
@@ -323,6 +324,7 @@ done
 - The house ID used by Elastic and the Home Assistant integration.
 - The heating mode, the demand mode setting, setpoint overrides, and away state: who is away until when, and the presence Home Assistant last reported.
 - The Elastic export queue.
+- The closed day summaries savings are worked out from (`daily_history`), one per day for 730 days, a few kilobytes each.
 - The tick history: each tick's snapshot and decisions for the last `house.history_days` days (14 by default), about 1.2 MB a day for a 9-room house. See [configuration](configuration.md#tick-history-and-replay).
 
 `<data_dir>/household.yaml` holds the household set up in the web UI, if any. It replaces the house file's `household` section, so pass the same data directory to `radiate check-config` and `radiate schedules` with `--data-dir` to see what the server uses. See [set up in the web UI](configuration.md#set-up-in-the-web-ui).

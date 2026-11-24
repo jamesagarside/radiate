@@ -22,6 +22,7 @@ from radiate.drivers.devices import ScanRefused
 
 from .layout import LayoutError
 from .runtime import Runtime
+from .savings import savings_view
 from .schedules import schedules_view
 from .setup import HouseholdSetup, SetupError
 from .suggestions import suggestions_view
@@ -325,6 +326,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return devices(rt)
         if parts == ["suggestions"]:
             return suggestions_view(rt)
+        if parts == ["savings"]:
+            return savings_view(rt)
     elif method == "POST":
         if parts == ["devices", "scan"]:
             return scan_network(rt, body)

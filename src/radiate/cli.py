@@ -37,7 +37,9 @@ def _serve(args: argparse.Namespace) -> None:
         if site is None:
             from radiate.server.demo import demo_runtime
 
-            runtime = demo_runtime()
+            if args.demo_days:
+                print(f"Running the demo house for {args.demo_days} simulated days…")
+            runtime = demo_runtime(days=max(0, args.demo_days))
             queue = None
             interval = 60.0 / args.speed  # one simulated minute per 1/speed real minutes
             banner = f"Radiate demo ({args.speed:g}x)"
@@ -519,6 +521,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8099)
     s.add_argument("--speed", type=float, default=60.0, help="demo speed-up factor")
+    s.add_argument(
+        "--demo-days",
+        type=int,
+        default=0,
+        help="start the demo this many simulated days in, with the example household",
+    )
     s.set_defaults(func=_serve)
     m = sub.add_parser("sim", help="compare Radiate with smart TRVs in the simulator")
     m.add_argument("--days", type=int, default=5)
