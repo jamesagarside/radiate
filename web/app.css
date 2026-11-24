@@ -90,7 +90,7 @@ h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em;
 }
 .status { flex: 1; min-width: 280px; color: var(--muted); font-size: 0.95rem; }
 .right { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 12px; }
-.outdoor { font-family: var(--readout); font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; color: var(--text); }
+.outdoor { white-space: nowrap; font-family: var(--readout); font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; color: var(--text); }
 /* One line under the controls explaining the demand mode in effect. */
 .demand-note { flex-basis: 100%; margin-top: -10px; text-align: right; font-size: 0.8rem; color: var(--muted); }
 .demand-note[data-error="true"] { color: var(--warn); }
@@ -143,6 +143,64 @@ h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em;
   border: 1.5px solid var(--text); background: var(--bg); color: var(--text);
 }
 .signin-error { color: var(--warn); font-size: 0.9rem; }
+/* Account menu, shown when someone is signed in with a login session (ADR-0006). */
+.account { position: relative; }
+.account-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 16ch; }
+.account-btn #account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-btn svg { flex: none; }
+.account-btn[aria-expanded="true"] { background: var(--text); color: var(--bg); }
+/* It floats over the page, so unlike other plates it has an ink outline (no shadows). */
+.card.account-menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 3;
+  width: min(300px, calc(100vw - 32px)); padding: 14px 16px 16px;
+  display: grid; gap: 8px; border: 1.5px solid var(--text); border-top: var(--rule); font-size: 0.9rem;
+  transition: opacity 150ms ease, transform 200ms var(--ease-out);
+  transform-origin: top right;
+}
+@starting-style { .account-menu { opacity: 0; transform: scale(0.95); } }
+.account-menu #account-who { overflow-wrap: anywhere; }
+.account-menu #account-role { font-size: 0.84rem; }
+.account-menu .btn { justify-self: start; margin-top: 4px; }
+.account-error { color: var(--warn); font-size: 0.84rem; }
+
+/* Login page (web/login.html): one plate on the concrete ground. */
+.login-page { min-height: 100vh; min-height: 100dvh; }
+.login {
+  max-width: 440px; margin: 0 auto; padding: 48px 16px 32px;
+  display: grid; gap: 16px;
+}
+.login-brand { padding-bottom: 12px; border-bottom: var(--rule); }
+.login-plate {
+  padding: 20px 22px 22px; display: grid; gap: 14px;
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+@starting-style { .login-plate { opacity: 0; transform: scale(0.98); } }
+.login-plate h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 1.35rem; letter-spacing: -0.02em; }
+.login-plate p { font-size: 0.9rem; }
+.login-form { display: grid; gap: 6px; }
+.login-form label { font-size: 0.85rem; font-weight: 600; margin-top: 6px; }
+.login-form label:first-child { margin-top: 0; }
+.login-form input {
+  width: 100%; font: inherit; font-size: 1rem; padding: 7px 10px; border-radius: 0;
+  border: 1.5px solid var(--text); background: var(--bg); color: var(--text);
+}
+.login-form input[aria-invalid="true"] { border-color: var(--warn); }
+.login-form .btn { justify-self: start; margin-top: 10px; padding-inline: 18px; }
+.login-error { padding: 8px 12px; background: var(--surface-2); border-left: 4px solid var(--warn); color: var(--warn); font-size: 0.9rem; }
+.login-or {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px;
+  color: var(--muted); font-size: 0.8rem;
+}
+.login-or::before, .login-or::after { content: ""; border-top: 1.5px solid var(--line); }
+.login-sso { display: grid; gap: 8px; }
+.login-sso .btn { display: block; text-align: center; text-decoration: none; }
+.login-first { display: grid; gap: 10px; padding: 12px 14px; background: var(--surface-2); border-left: 4px solid var(--cool); }
+.login-first pre {
+  margin: 0; padding: 8px 10px; background: var(--bg); border: 1.5px solid var(--text);
+  font-size: 0.82rem; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.login-foot { font-size: 0.82rem; }
+
 body[data-auth="needed"] main,
 body[data-auth="needed"] .right,
 body[data-auth="needed"] .demand-note,
@@ -689,8 +747,8 @@ body[data-link="stale"] .status { color: var(--warn); }
 @media (prefers-reduced-motion: reduce) {
   .fill, .guard-fill, .btn, .seg button, .step, .link { transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease; }
   .btn:active, .seg button:active, .step:active, .link:active { transform: none; }
-  .signin { transition: opacity 150ms ease; }
-  @starting-style { .signin { transform: none; } }
+  .signin, .login-plate, .card.account-menu { transition: opacity 150ms ease; }
+  @starting-style { .signin, .login-plate, .account-menu { transform: none; } }
   .setup-step { transition: opacity 150ms ease; }
   @starting-style { .setup-step { transform: none; } }
   .meter-fill { transition: background-color 150ms ease; }
@@ -700,7 +758,7 @@ body[data-link="stale"] .status { color: var(--warn); }
 
 /* Touch: every control at least 44 px, without bulking up the desktop layout. */
 @media (pointer: coarse) {
-  .btn, .seg button, .signin-row input, .away-fields input { min-height: 44px; }
+  .btn, .seg button, .signin-row input, .away-fields input, .login-form input { min-height: 44px; }
   .view-tab { min-height: 44px; }
   .alerts-devices, .attention-link { padding-block: 12px; margin-block: -12px; }
   .setup input[type="text"], .setup input[type="number"], .setup select { min-height: 44px; }
@@ -721,10 +779,14 @@ body[data-link="stale"] .status { color: var(--warn); }
   .setup-form { padding: 14px; }
   .temp .now { font-size: 1.7rem; }
   /* Four rows: brand and outdoor; heating and demand modes; the demand note; status. */
-  .top { display: grid; grid-template-columns: 1fr auto; gap: 10px 12px; }
+  .top { display: grid; grid-template-columns: 1fr auto auto; gap: 10px 12px; }
   .right { display: contents; }
   .brand, #mode { grid-column: 1; justify-self: start; }
-  .outdoor, #demand { grid-column: 2; justify-self: end; }
+  .outdoor { grid-column: 2; justify-self: end; }
+  #demand { grid-column: 2 / -1; justify-self: end; }
+  /* The account button sits on the brand row, after the outdoor temperature. */
+  .account { grid-column: 3; grid-row: 1; justify-self: end; }
+  .outdoor { grid-row: 1; }
   #mode, #demand { order: 1; }
   .demand-note { order: 2; grid-column: 1 / -1; margin-top: -4px; text-align: left; }
   .status { grid-column: 1 / -1; min-width: 0; }

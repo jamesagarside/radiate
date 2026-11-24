@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Sign in to Radiate</title>
+  <link rel="preload" href="static/fonts/funnel-display-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="static/app.css">
+</head>
+<body class="login-page">
+  <main class="login">
+    <div class="brand login-brand">
+      <svg class="brand-mark" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="4" width="4" height="17" fill="var(--t12)"/><rect x="7" y="4" width="4" height="17" fill="var(--t17)"/><rect x="13" y="4" width="4" height="17" fill="var(--t19)"/><rect x="19" y="4" width="2" height="17" fill="var(--t22)"/><rect x="0" y="1" width="22" height="2" fill="var(--text)"/></svg>
+      <span>radiate</span>
+    </div>
+
+    <section class="card login-plate" aria-labelledby="login-h">
+      <h1 id="login-h">Sign in</h1>
+      <p class="muted" id="login-intro">Sign in to see the house and change the heating.</p>
+      <p class="login-error" id="login-error" role="alert" hidden></p>
+
+      <form id="login-form" class="login-form" hidden novalidate>
+        <label for="login-user">Username</label>
+        <input id="login-user" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+        <label for="login-pass">Password</label>
+        <input id="login-pass" name="password" type="password" autocomplete="current-password" required>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+      </form>
+
+      <p class="login-or" id="login-or" hidden><span>or</span></p>
+      <div class="login-sso" id="login-sso" hidden></div>
+
+      <div class="login-first" id="login-first" hidden>
+        <p><strong>No one can sign in yet.</strong> Add the first person where Radiate runs, with the same <code>--config</code> or <code>--data-dir</code> as the server:</p>
+        <pre><code>radiate users add NAME --role admin --config radiate.yaml</code></pre>
+        <p class="muted">This page never creates the first account, so whoever reaches it first can't take over the heating.</p>
+      </div>
+    </section>
+
+    <p class="login-foot muted" id="login-foot">Forgotten your password? Whoever runs Radiate can reset it with <code>radiate users reset-password</code>.</p>
+  </main>
+  <script type="module" src="static/login.js"></script>
+</body>
+</html>

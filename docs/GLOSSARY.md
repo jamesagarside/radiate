@@ -856,6 +856,26 @@ Code: `EngineState`, `RoomState`; saved by `dump_state` and `load_state`.
 One run of the control loop, every 60 seconds in live mode.
 Code: `Runtime.step`, `Runtime.run`.
 
+**API token**:
+The one shared secret in `RADIATE_TOKEN`, sent as `Authorization: Bearer`. Used by the Home Assistant integration and scripts. Counts as admin. Avoid: password, key.
+Code: `TOKEN` in `radiate.server.app`.
+
+**Login**:
+Signing in to the web UI as a person, with a password (local user), OIDC or SAML. Off unless `auth.enabled`. See ADR-0006.
+Code: `radiate.server.auth`, `AuthConfig`.
+
+**Local user**:
+A person with a username and password kept in `radiate.db`, managed with `radiate users`.
+Code: `Accounts`, `User`.
+
+**Session**:
+A sign-in that lasts until it expires, goes idle or is signed out. Kept on the server; the browser holds only its random ID in the `radiate_session` cookie. Avoid: token (that is the API token).
+Code: `Session`, `Accounts.create_session`.
+
+**Role**:
+What a signed-in person may do: admin (everything) or viewer (read only). The API token and ingress count as admin.
+Code: `ROLES`, `Identity.role`, `RoleMap`.
+
 **Snapshot**:
 All inputs to one tick, timestamped and checked for staleness.
 Code: `Snapshot`, `RoomInput`.

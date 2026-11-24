@@ -58,15 +58,20 @@ function storeToken(value) {
 
 function httpTransport() {
   let token = loadToken();
+  let csrf = ""; // with a login session, sent on every change (ADR-0006)
   let ws = null;
   let timer = null;
   let retryMs = 2000;
   let onState = null;
   let onLink = null;
 
-  const headers = (extra = {}) => (token ? { ...extra, Authorization: `Bearer ${token}` } : extra);
+  const headers = (extra = {}, method = "GET") => {
+    const out = token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
+    if (csrf && method !== "GET" && method !== "HEAD") out["X-CSRF-Token"] = csrf;
+    return out;
+  };
   const send = async (path, init = {}) => {
-    const res = await fetch(api(path), { ...init, headers: headers(init.headers) });
+    const res = await fetch(api(path), { ...init, headers: headers(init.headers, init.method) });
     if (res.status === 401) throw new AuthError(path);
     if (!res.ok) throw new Error(`${path}: HTTP ${res.status} ${await res.text()}`);
     return res;
@@ -105,6 +110,7 @@ function httpTransport() {
 
   return {
     hasToken: () => Boolean(token),
+    setCsrf(value) { csrf = value || ""; },
     setToken(value) {
       token = value;
       storeToken(value);
@@ -123,7 +129,7 @@ function httpTransport() {
     // Any method, answering { status, body } instead of throwing on 4xx and 5xx, so
     // field errors from the household setup can be shown. 401 still asks to sign in.
     async call(method, path, body) {
-      const init = { method, headers: headers(body === undefined ? {} : { "Content-Type": "application/json" }) };
+      const init = { method, headers: headers(body === undefined ? {} : { "Content-Type": "application/json" }, method) };
       if (body !== undefined) init.body = JSON.stringify(body);
       const res = await fetch(api(path), init);
       if (res.status === 401) throw new AuthError(path);
@@ -1294,8 +1300,79 @@ async function offerViews() {
   route(false);
 }
 
+// Login (ADR-0006): when the server has it on, someone without a session goes to the
+// login page, and someone signed in gets the account menu. Token and ingress users don't.
+let loginOn = false;
+const loginUrl = () => new URL("login", document.baseURI).toString();
+
+async function checkLogin() {
+  if (document.documentElement.dataset.transport === "demo") return true;
+  try {
+    const res = await fetch(api("auth/config"));
+    loginOn = res.ok && (await res.json()).login === true;
+  } catch { loginOn = false; }
+  if (!loginOn) return true;
+  let me;
+  try {
+    me = await transport.get("auth/me");
+  } catch (err) {
+    if (err instanceof AuthError) { window.location.assign(loginUrl()); return false; }
+    return true;
+  }
+  if (me.via === "session") showAccount(me);
+  return true;
+}
+
+function showAccount(me) {
+  transport.setCsrf(me.csrf);
+  const how = me.method === "local" ? "a password" : "single sign-on";
+  $("account-name").textContent = me.user;
+  $("account-who").textContent = `Signed in as ${me.user} with ${how}.`;
+  $("account-role").textContent = me.role === "admin"
+    ? "Admin: you can change anything here."
+    : "View only: you can see the house but not change it.";
+  document.body.dataset.role = me.role;
+  $("account").hidden = false;
+}
+
+function closeAccountMenu(focusButton) {
+  if ($("account-menu").hidden) return;
+  $("account-menu").hidden = true;
+  $("account-btn").setAttribute("aria-expanded", "false");
+  if (focusButton) $("account-btn").focus();
+}
+
+$("account-btn").addEventListener("click", () => {
+  const open = $("account-menu").hidden;
+  $("account-menu").hidden = !open;
+  $("account-btn").setAttribute("aria-expanded", String(open));
+  if (open) $("account-out").focus();
+});
+$("account").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeAccountMenu(true);
+});
+document.addEventListener("pointerdown", (e) => {
+  if (!$("account").contains(e.target)) closeAccountMenu(false);
+});
+$("account-out").addEventListener("click", async () => {
+  const button = $("account-out");
+  button.disabled = true;
+  $("account-error").hidden = true;
+  try {
+    await transport.post("auth/logout", {});
+  } catch (err) {
+    if (!(err instanceof AuthError)) {
+      button.disabled = false;
+      $("account-error").hidden = false;
+      return;
+    }
+  }
+  window.location.assign(loginUrl());
+});
+
 async function start() {
   offerViews();
+  if (!(await checkLogin())) return;
   try {
     house = await transport.house();
     renderSetupEntry();
@@ -1309,6 +1386,7 @@ async function start() {
 // Sign-in: only reachable when the server has RADIATE_TOKEN set and the request did
 // not come through Home Assistant ingress. The demo never gets here.
 function askForToken() {
+  if (loginOn) { window.location.assign(loginUrl()); return; }
   if (document.body.dataset.auth === "needed") return;
   const rejected = transport.hasToken();
   transport.setToken("");

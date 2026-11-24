@@ -53,6 +53,16 @@ def every_section() -> dict:
     data = yaml.safe_load(EXAMPLE.read_text())
     for key in ("trv", "learning", "monitoring", "suggestions", "store", "boiler"):
         data.setdefault(key, {})
+    # Login's subsections are only checked when present.
+    data.setdefault(
+        "auth",
+        {
+            "enabled": False,
+            "public_url": "https://radiate.example.org",
+            "oidc": {"issuer": "https://id.example.org", "client_id": "radiate", "admins": ["a"]},
+            "saml": {"idp_metadata_file": "idp.xml", "admins": ["a"]},
+        },
+    )
     return data
 
 
