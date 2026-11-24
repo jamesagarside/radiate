@@ -2,7 +2,8 @@
 
 Pure: no I/O, no clock. The Raw data view (`radiate.server.data`) and the OpenTelemetry
 export (`radiate.export.otlp`) both read a tick through `tick_values`, so the same
-metric means the same thing in both.
+metric means the same thing in both. Each series' OpenTelemetry name and unit are in
+the telemetry schema, `radiate.export.telemetry`.
 
 A series is one metric for one room, or for the house. Its key is the metric ID, with
 `@` and the room ID for a room metric: `room.temperature@lounge`, `boiler.relay`.
@@ -38,8 +39,6 @@ class Metric:
     kind: str  # GAUGE, STATE or LEVEL
     scope: str  # ROOM or HOUSE
     description: str
-    otel_name: str  # the OpenTelemetry metric name (radiate.* namespace)
-    otel_unit: str  # UCUM, as OpenTelemetry expects: "Cel", "%", "W", "1"
     levels: tuple[str, ...] = ()
 
 
@@ -53,8 +52,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         ROOM,
         "The room sensor's reading.",
-        "radiate.room.temperature",
-        "Cel",
     ),
     Metric(
         "room.humidity",
@@ -63,8 +60,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         ROOM,
         "Relative humidity from the room sensor.",
-        "radiate.room.humidity",
-        "%",
     ),
     Metric(
         "room.setpoint",
@@ -73,8 +68,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         ROOM,
         "The temperature the schedule, or a hold, asks for.",
-        "radiate.room.setpoint",
-        "Cel",
     ),
     Metric(
         "room.target",
@@ -83,8 +76,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         ROOM,
         "The temperature Radiate is heating the room to now, after preheating and room use.",
-        "radiate.room.target",
-        "Cel",
     ),
     Metric(
         "room.calling",
@@ -93,8 +84,6 @@ METRICS: tuple[Metric, ...] = (
         STATE,
         ROOM,
         "1 while the room wants heat from the boiler.",
-        "radiate.room.demand.calling",
-        "1",
     ),
     Metric(
         "room.window",
@@ -103,8 +92,6 @@ METRICS: tuple[Metric, ...] = (
         STATE,
         ROOM,
         "1 while the room's window sensor reads open.",
-        "radiate.room.window.open",
-        "1",
     ),
     Metric(
         "valve.temperature",
@@ -113,8 +100,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         ROOM,
         "The TRV's own sensor, at the radiator.",
-        "radiate.valve.temperature",
-        "Cel",
     ),
     Metric(
         "valve.opening",
@@ -123,8 +108,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         ROOM,
         "The opening limit Radiate set on the valve.",
-        "radiate.valve.opening",
-        "%",
     ),
     Metric(
         "valve.reported",
@@ -133,8 +116,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         ROOM,
         "The opening limit the valve says it holds.",
-        "radiate.valve.opening.reported",
-        "%",
     ),
     Metric(
         "outdoor.temperature",
@@ -143,8 +124,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         HOUSE,
         "The outdoor sensor's reading.",
-        "radiate.outdoor.temperature",
-        "Cel",
     ),
     Metric(
         "boiler.relay",
@@ -153,8 +132,6 @@ METRICS: tuple[Metric, ...] = (
         STATE,
         HOUSE,
         "1 while the heating relay reads on.",
-        "radiate.boiler.relay",
-        "1",
     ),
     Metric(
         "boiler.demand",
@@ -163,8 +140,6 @@ METRICS: tuple[Metric, ...] = (
         STATE,
         HOUSE,
         "1 while Radiate asks for the heating relay to be on.",
-        "radiate.boiler.demand",
-        "1",
     ),
     Metric(
         "boiler.state",
@@ -173,10 +148,6 @@ METRICS: tuple[Metric, ...] = (
         LEVEL,
         HOUSE,
         "Idle, opening valves (lead), firing or resting, as the boiler guard has it.",
-        # OpenTelemetry's state-set pattern (as `hw.status`): one point per state, 1 for
-        # the current one, with the state in `radiate.boiler.state`.
-        "radiate.boiler.status",
-        "1",
         BOILER_LEVELS,
     ),
     Metric(
@@ -186,8 +157,6 @@ METRICS: tuple[Metric, ...] = (
         STATE,
         HOUSE,
         "1 while the burner fires, where the boiler reports it.",
-        "radiate.boiler.burner",
-        "1",
     ),
     Metric(
         "boiler.power",
@@ -196,8 +165,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         HOUSE,
         "Power through the heating relay, where the relay measures it.",
-        "radiate.boiler.power",
-        "W",
     ),
     Metric(
         "store.relay",
@@ -206,8 +173,6 @@ METRICS: tuple[Metric, ...] = (
         STATE,
         HOUSE,
         "1 while the hot-water store relay reads on.",
-        "radiate.store.relay",
-        "1",
     ),
     Metric(
         "people.home",
@@ -216,8 +181,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         HOUSE,
         "How many of the household's people count as home.",
-        "radiate.people.home",
-        "{person}",
     ),
     Metric(
         "people.away",
@@ -226,8 +189,6 @@ METRICS: tuple[Metric, ...] = (
         GAUGE,
         HOUSE,
         "How many of the household's people count as away.",
-        "radiate.people.away",
-        "{person}",
     ),
 )
 
