@@ -52,6 +52,10 @@ BASIS_TEXT = {
         "Oil is worked out from the time the boiler was called, so these litres are an upper bound."
     ),
     "firing": "Oil is worked out from the time the burner was firing.",
+    "mixed": (
+        "Oil is worked out from the time the burner was firing where it was metered, and "
+        "from the time the boiler was called otherwise, so these litres may be high."
+    ),
 }
 
 
@@ -282,7 +286,10 @@ def why_not_eligible(
         return "no savings record"
     if _num(summary.get("litres")) is None:
         return "no nozzle rating"
-    if summary.get("basis", "relay") != basis:
+    day_basis = summary.get("basis", "relay")
+    if day_basis == "mixed":
+        return "litres part metered, part from relay time"
+    if day_basis != basis:
         return "a different litres basis"
     share = _num(rec.get("baseline_share")) or 0.0
     if share < params.min_share:
@@ -347,7 +354,10 @@ def report(
         if isinstance(d, Mapping) and isinstance(d.get("day"), int):
             by_day[d["day"]] = d  # a repeated day: the later summary wins
     kept = [by_day[k] for k in sorted(by_day)]
-    basis = str(kept[-1].get("basis", "relay")) if kept else "relay"
+    # The fit uses one litres basis: the latest day's, passing over "mixed" days (part
+    # metered, part relay time, spec 5.6, 5.9), which are never eligible.
+    bases = [str(d.get("basis", "relay")) for d in kept]
+    basis = next((b for b in reversed(bases) if b != "mixed"), bases[-1] if bases else "relay")
     weights = dict(weights)
     latest = kept[-1].get("savings") if kept else None
     if isinstance(latest, Mapping) and isinstance(latest.get("rooms"), Mapping):
@@ -504,7 +514,7 @@ def report(
         "baseline": {"id": BASELINE_ID, "text": BASELINE_TEXT},
         "basis": basis,
         "basis_text": BASIS_TEXT.get(basis),
-        "litres_upper_bound": basis == "relay",
+        "litres_upper_bound": basis != "firing",
         "fit": fit,
         "totals": totals,
         "days": listed,

@@ -483,6 +483,29 @@ def test_fit_uses_one_basis_only():
     assert body["status"] == "learning" and body["why"] == "5 of 14 days"
 
 
+def test_a_mixed_basis_day_counts_for_neither_basis():
+    # Burner metering (spec 5.6): a day with both metered firing and unmetered relay
+    # time has basis "mixed". It fits neither basis, so it isn't eligible, and it
+    # doesn't make the firing days before it ineligible either.
+    days = month(20)
+    for d in days[-6:]:
+        d["basis"] = "firing"
+    days[-1]["basis"] = "mixed"
+    body = rep(days)
+    assert body["basis"] == "firing" and body["litres_upper_bound"] is False
+    assert body["why"] == "5 of 14 days"
+    assert body["days"][-1]["why"] == "litres part metered, part from relay time"
+    assert all(d["eligible"] for d in body["days"][-6:-1])
+    # Only mixed days so far (metering that keeps dropping out): none is eligible, and
+    # the litres shown are flagged as possibly high.
+    for d in days:
+        d["basis"] = "mixed"
+    body = rep(days)
+    assert body["basis"] == "mixed" and body["litres_upper_bound"] is True
+    assert "may be high" in body["basis_text"]
+    assert body["progress"]["eligible_days"] == 0
+
+
 def test_report_is_deterministic():
     days = month(30)
     assert rep(days) == rep([dict(d) for d in days])
