@@ -17,6 +17,7 @@ import { createData } from "./data.js";
 import { createHouse } from "./house.js";
 import { createGuide, guideNote } from "./guide.js";
 import { createSettings } from "./settings.js";
+import { createSecurity } from "./security.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -1243,6 +1244,18 @@ const rawData = createData({
 });
 let dataOffered = null;
 
+// Security log (security.js): at the foot of the Raw data view, for admins only. The
+// server answers GET audit only for an admin, so the section stays hidden for others.
+const security = createSecurity({
+  transport,
+  isAuthError: (err) => err instanceof AuthError,
+  onAuth: () => askForToken(),
+});
+const rawDataView = {
+  show() { rawData.show(); security.show(); },
+  hide() { rawData.hide(); security.hide(); },
+};
+
 // Guide view (guide.js): how to read and work Radiate, at #guide, with each section
 // at #guide/<name>. Static text, so it is always offered.
 const guide = createGuide({ root: $("guide") });
@@ -1279,7 +1292,7 @@ const VIEWS = {
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
   savings: { offered: () => savingsOffered === true, module: savings },
   settings: { offered: () => settingsOffered === true, module: settings },
-  data: { offered: () => dataOffered === true, module: rawData },
+  data: { offered: () => dataOffered === true, module: rawDataView },
   guide: { offered: () => true, module: guide },
 };
 
@@ -1340,6 +1353,7 @@ async function offerViews() {
     savingsOffered === true ? true : savings.available(),
     settingsOffered === true ? true : settings.available(),
     dataOffered === true ? true : rawData.available(),
+    security.available(),
   ]);
   devicesOffered = d;
   suggestionsOffered = s;

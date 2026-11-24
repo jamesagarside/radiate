@@ -421,6 +421,34 @@
         <dl class="rd-export-list" id="data-export-list" hidden></dl>
       </section>
     </div>
+
+    <section class="card rd-plate rd-security" id="security" aria-labelledby="security-h" hidden>
+      <div class="rd-toolbar">
+        <h3 class="rd-h" id="security-h">Security log</h3>
+        <button type="button" class="btn" id="security-refresh">Refresh</button>
+      </div>
+      <p class="rd-help">Who signed in, from where, what was refused and who changed the settings. Only admins see this. <a class="help-link" href="#guide/raw-data">About the security log</a></p>
+      <div class="sl-filters">
+        <div class="rd-field">
+          <span class="rd-label" id="security-outcome-l">Show</span>
+          <div class="seg" role="radiogroup" aria-labelledby="security-outcome-l" id="security-outcome">
+            <button type="button" role="radio" data-outcome="" aria-checked="true">Everything</button>
+            <button type="button" role="radio" data-outcome="failure" aria-checked="false">Refused</button>
+            <button type="button" role="radio" data-outcome="success" aria-checked="false">Allowed</button>
+          </div>
+        </div>
+        <div class="rd-field"><label for="security-user">User</label><select id="security-user"><option value="">Everyone</option></select></div>
+      </div>
+      <p class="rd-meta" id="security-summary" aria-live="polite"></p>
+      <p class="rd-note" id="security-error" data-kind="warn" role="status" hidden>Couldn't load the security log. Try Refresh.</p>
+      <div class="rd-table-wrap sl-wrap" id="security-table" hidden>
+        <table class="rd-table sl-table">
+          <thead><tr><th scope="col">Time</th><th scope="col">What</th><th scope="col">Who</th><th scope="col">From</th><th scope="col">Detail</th></tr></thead>
+          <tbody id="security-body"></tbody>
+        </table>
+      </div>
+      <div><button type="button" class="btn" id="security-more" hidden>Show older</button></div>
+    </section>
   </section>
 
   <section class="guide-view" id="guide" aria-labelledby="guide-h" hidden>
@@ -687,6 +715,7 @@
             <div><dt>People home and away</dt><dd>How many people count as home or away. Only the counts are kept, never who.</dd></div>
           </dl>
           <p>Radiate can also send these readings, and every decision and alert, to an OpenTelemetry collector over OTLP/HTTP, such as Elastic's managed OTLP endpoint. Add an <code>export.otlp</code> section to the house file with the endpoint and an API key. The OpenTelemetry export plate on the Raw data tab says when it last sent, what is waiting, and any error. While the collector can't be reached, Radiate keeps up to 7 days of readings and sends them once it can; if the queue fills, the oldest go first and the plate counts them.</p>
+          <p>Admins also see the Security log at the foot of the Raw data tab: every sign-in and sign-out, every refused sign-in or request with the reason, lockouts after too many wrong passwords, users added or changed with <code>radiate users</code>, and who changed the settings, the household, the layout or learning. Each entry says who and from which address, and never holds a password, token or other secret. Radiate keeps it for 90 days (<code>auth.audit_days</code>), whether or not login is on, and sends it to the OpenTelemetry collector too when the export is on.</p>
         </section>
 
         <section class="g-sec" id="g-settings" aria-labelledby="g-settings-h">
