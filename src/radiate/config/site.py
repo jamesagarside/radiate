@@ -159,6 +159,10 @@ class SiteConfig:
     # mirror and the Shelly watchdog's windows) use these and never the weeks compiled
     # for people away: they heat the house when Radiate cannot, so they fail warm.
     household_fallback: dict[str, WeekSchedule] = field(default_factory=dict)
+    # Per household room, Monday first: the use level of its warm periods in those weeks
+    # (`CompiledHousehold.warm_levels`), or unused on a day without any, so the watchdog
+    # knows whether a flat day is warm.
+    household_fallback_levels: dict[str, tuple[UseLevel, ...]] = field(default_factory=dict)
     # The schedule each controllable room follows when no household covers it: its own
     # `schedule`, or `default` when that exists. None: the house file gives it none.
     room_schedules: dict[str, str | None] = field(default_factory=dict)
@@ -200,6 +204,17 @@ class SiteConfig:
         if room_id in self.household_fallback:
             return self.household_fallback[room_id]
         return self.schedule_for(room_id)
+
+    def fallback_level(self, room_id: str, weekday: int) -> UseLevel | None:
+        """The room's use level on `weekday` in its fallback week: from the household
+        for everyone at home, else its hand-written `use`, else None."""
+        day = weekday % 7
+        if room_id in self.household_fallback_levels:
+            return self.household_fallback_levels[room_id][day]
+        levels = self.schedule_use.get(room_id)
+        if levels is None:
+            return None
+        return levels[1] if day in DAY_ALIASES["weekend"] else levels[0]
 
     def mirror_payload(self, room_id: str) -> dict[str, str]:
         """The room's week as written to its TRVZB, in the frame the TRV compares with.
@@ -1242,10 +1257,18 @@ def apply_household(site: SiteConfig, household: Household | None, source: str) 
     notes: list[str] = []
     schedules: dict[str, WeekSchedule] = {}
     live: dict[str, WeekSchedule] = {}
+    levels: dict[str, tuple[UseLevel, ...]] = {}
     if household is not None:
         notes.extend(f"{path} {text}" for path, text in household_advice(household))
         compiled = compile_household(household)
         schedules, live = compiled.schedules, compiled.live
+        levels = {
+            rid: tuple(
+                level if compiled.periods[rid][day] else UseLevel.UNUSED
+                for day, level in enumerate(days)
+            )
+            for rid, days in compiled.warm_levels.items()
+        }
         notes.extend(compiled.notes)
     return replace(
         site,
@@ -1254,6 +1277,7 @@ def apply_household(site: SiteConfig, household: Household | None, source: str) 
         household_schedules=schedules,
         household_live=live,
         household_fallback=dict(schedules),
+        household_fallback_levels=dict(levels),
         household_source=source if household is not None else None,
         household_notes=tuple(notes),
         notes=base + tuple(notes),

@@ -1,10 +1,14 @@
 import hashlib
+from pathlib import Path
 
 import aiohttp
 import pytest
+import yaml
 from aiohttp.test_utils import TestServer
 
-from radiate.config import ShellyConfig, parse_week
+from radiate.config import ShellyConfig, parse_site, parse_week
+from radiate.config.household import UseLevel
+from radiate.drivers.live import LiveDriver
 from radiate.drivers.shelly import (
     DEFAULT_HEATING_WINDOWS,
     HEARTBEAT_KEY,
@@ -20,6 +24,8 @@ from radiate.drivers.shelly import (
 )
 
 from .fake_shelly import FakeShelly
+
+HOUSEHOLD = Path(__file__).resolve().parents[2] / "examples" / "household.yaml"
 
 
 @pytest.fixture
@@ -74,6 +80,43 @@ def test_fallback_windows_heat_all_day_for_a_flat_warm_day():
     # but it still wants heat: the fallback heats all day rather than never.
     flat = parse_week("00:00/19")
     assert fallback_heating_windows([flat], 0) == [[0, 1440]]
+
+
+def test_a_flat_day_is_warm_only_at_a_warm_use_level():
+    flat14 = parse_week("00:00/14")
+    # An unused room held at its unused temperature wants no heat of its own.
+    assert fallback_heating_windows([flat14], 0, levels=[UseLevel.UNUSED]) == (
+        DEFAULT_HEATING_WINDOWS
+    )
+    # No use level known: warm only above the unused temperature and the damp floor.
+    assert fallback_heating_windows([flat14], 0) == DEFAULT_HEATING_WINDOWS
+    assert fallback_heating_windows([flat14], 0, unused_c=13.0) == [[0, 1440]]
+    # In use or occasional all day: heat all day.
+    for level in (UseLevel.IN_USE, UseLevel.OCCASIONAL):
+        assert fallback_heating_windows([flat14], 0, levels=[level]) == [[0, 1440]]
+
+
+def test_every_room_flat_in_use_still_heats_all_day():
+    flat = parse_week("00:00/19")
+    levels = [UseLevel.IN_USE] * 3
+    assert fallback_heating_windows([flat] * 3, 0, levels=levels) == [[0, 1440]]
+
+
+def test_unused_rooms_flat_at_14_do_not_hold_the_relay_on_all_day():
+    data = yaml.safe_load(HOUSEHOLD.read_text())
+    site = parse_site(data, env={"RADIATE_MQTT_PASSWORD": "m", "RADIATE_SHELLY_PASSWORD": "s"})
+    for rid in ("bedroom_2", "lounge", "toilet"):
+        day = site.fallback_schedule_for(rid).days[2]
+        assert len(day.transitions) == 1 and day.transitions[0][1] == 14.0, rid
+    drv = LiveDriver(site, _publish)
+    for weekday in range(5):
+        windows = drv.fallback_windows(weekday)
+        assert windows != [[0, 1440]], weekday
+        assert sum(b - a for a, b in windows) < 18 * 60, (weekday, windows)
+
+
+async def _publish(topic, payload):
+    return True
 
 
 def test_fallback_windows_are_never_empty():

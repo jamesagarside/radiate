@@ -23,11 +23,14 @@ import json
 import logging
 import re
 import secrets
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from radiate.config import ShellyConfig, WeekSchedule
+from radiate.config.household import Temperatures, UseLevel
+from radiate.core.types import DAMP_FLOOR_C
 
 LOG = logging.getLogger(__name__)
 
@@ -99,18 +102,28 @@ def chunks(code: str, size: int = SCRIPT_CHUNK) -> list[str]:
     return [code[i : i + size] for i in range(0, len(code), size)] or [""]
 
 
+DEFAULT_UNUSED_C = Temperatures().unused_c  # the household's default unused temperature
+
+
 def fallback_heating_windows(
     schedules: list[WeekSchedule],
     weekday: int,
     lead_min: int = FALLBACK_LEAD_MIN,
     frost_c: float = FROST_C,
+    levels: Sequence[UseLevel | None] | None = None,
+    unused_c: float = DEFAULT_UNUSED_C,
 ) -> list[list[int]]:
     """Daily windows for the watchdog's heating channel, from the room schedules.
 
     A window is any time some room wants more than its lowest setpoint of the day,
-    started `lead_min` early because the fallback cannot do optimum start. A room held
-    at one setpoint above `frost_c` all day wants heat all day. Merged and capped at 4
-    windows so it fits a KVS value.
+    started `lead_min` early because the fallback cannot do optimum start. Merged and
+    capped at 4 windows so it fits a KVS value.
+
+    A room held at one setpoint all day wants heat all day only if it is warm that day:
+    its use level (`levels`, one per schedule, for `weekday`) is in use or occasional,
+    as for room use. A room with no use level counts as warm only above the unused
+    temperature and the damp floor. An unused room held at its unused temperature has
+    nothing to heat for, so it must not hold the relay on all day.
 
     Never empty (fail warm, spec 7): with no window from the schedules, the watchdog's
     own default windows are returned, since the watchdog takes an empty list as
@@ -118,11 +131,16 @@ def fallback_heating_windows(
     weeks.
     """
     spans: list[list[int]] = []
-    for week in schedules:
+    for i, week in enumerate(schedules):
         day = week.days[weekday % 7]
         low = min(sp for _, sp in day.transitions)
         if all(sp == low for _, sp in day.transitions):
-            if low > frost_c:
+            level = levels[i] if levels is not None else None
+            if level is None:
+                warm = low > max(frost_c, unused_c, DAMP_FLOOR_C)
+            else:
+                warm = level in (UseLevel.IN_USE, UseLevel.OCCASIONAL) and low > frost_c
+            if warm:
                 spans.append([0, 1440])
             continue
         bounds = [*day.transitions, (1440, low)]

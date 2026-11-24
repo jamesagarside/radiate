@@ -24,7 +24,7 @@ from radiate.core.types import RoomRole
 
 from . import devices as health
 from .devices import DeviceHealth, HealthLimits, NetworkScan, ScanRefused
-from .shelly import ShellyBoiler, fallback_heating_windows
+from .shelly import DEFAULT_UNUSED_C, ShellyBoiler, fallback_heating_windows
 from .z2m import DeviceStore, TrvWriter, Write, is_available, reading_age, trv_get_payload
 
 LOG = logging.getLogger(__name__)
@@ -154,6 +154,7 @@ class LiveDriver:
             household_schedules=dict(site.household_schedules),
             household_live=dict(site.household_live),
             household_fallback=dict(site.household_fallback),
+            household_fallback_levels=dict(site.household_fallback_levels),
         )
 
     def set_household_schedules(
@@ -377,10 +378,14 @@ class LiveDriver:
     def fallback_windows(self, weekday: int) -> list[list[int]]:
         """The Shelly watchdog's heating windows for `weekday`: from every room's week
         with everyone at home, and never empty (spec 7, fail warm)."""
+        rooms = [r.id for r in self.cfg.rooms if r.controllable]
+        household = self.site.household
         return fallback_heating_windows(
-            [self.site.fallback_schedule_for(r.id) for r in self.cfg.rooms if r.controllable],
+            [self.site.fallback_schedule_for(rid) for rid in rooms],
             weekday,
             frost_c=self.cfg.boiler.frost_c,
+            levels=[self.site.fallback_level(rid, weekday) for rid in rooms],
+            unused_c=household.temperatures.unused_c if household else DEFAULT_UNUSED_C,
         )
 
     def _mirror(self, room_id: str) -> dict[str, str]:
