@@ -364,6 +364,25 @@ async def test_post_presence_takes_source_type_and_battery(client):
         assert r.status == 400, bad
 
 
+async def test_battery_is_cleared_by_a_report_without_it():
+    rt, _, clocks = make()
+    rt.report_presence("home_worker", "not_home", None, evidence_at=clocks.wall, battery=4)
+    assert rt.presence["home_worker"].battery == 4
+    # The phone left the person (a laptop tracker now): an old low battery would keep
+    # them home for the weak source delay.
+    rt.report_presence("home_worker", "not_home", None, evidence_at=clocks.wall)
+    assert rt.presence["home_worker"].battery is None
+
+
+async def test_forgetting_presence_clears_said_home_so_the_person_is_pruned():
+    rt, _, clocks = make()
+    rt.report_presence("home_worker", "not_home", None, evidence_at=clocks.wall)
+    rt.say_home("home_worker")
+    assert rt.presence["home_worker"].home_at is not None
+    rt.report_presence("home_worker", None, None)
+    assert "home_worker" not in rt.presence
+
+
 async def test_a_router_tracker_waits_the_weak_source_delay():
     rt, _, clocks = make()
     left = clocks.wall

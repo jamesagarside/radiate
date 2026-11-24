@@ -550,8 +550,10 @@ class Runtime:
         repeat of the current state keeps its time and a new state starts now.
         `evidence_at` is the newest report from the person's trackers themselves (fail
         warm), `source_type` their kind and `battery` the phone's charge in per cent.
-        Each is optional and kept from the last report that gave it. `evidence_at` is
-        never later than now.
+        `evidence_at` and `source_type` are optional and kept from the last report that
+        gave them; `battery` is what this report says, so one without it clears it.
+        `evidence_at` is never later than now. Forgetting the presence also forgets an
+        "I'm home", so a person no longer mapped is pruned.
         """
         p = self._person(person_id)
         if state is None:
@@ -564,6 +566,7 @@ class Runtime:
                 source_type=None,
                 battery=None,
                 home_evidence_at=None,
+                home_at=None,
             )
             self._put_presence(person_id, gone)
             return
@@ -578,8 +581,8 @@ class Runtime:
             fresh = replace(fresh, evidence_at=min(evidence_at, now))
         if source_type is not None:
             fresh = replace(fresh, source_type=source_type)
-        if battery is not None:
-            fresh = replace(fresh, battery=battery)
+        # Not kept: an old low battery would hold a person home for the weak source delay.
+        fresh = replace(fresh, battery=battery)
         self._put_presence(person_id, fresh)
 
     def say_home(self, person_id: str) -> None:
