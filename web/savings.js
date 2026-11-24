@@ -87,7 +87,7 @@ const UNAVAILABLE = {
   ],
   "no outdoor sensor": [
     "Savings need an outdoor sensor",
-    "Cold days use more oil than mild ones, so Radiate compares like with like using the outdoor temperature. Add an outdoor sensor as house.outdoor_sensor in the house file.",
+    "Cold days use more oil than mild ones, so Radiate compares like with like using the outdoor temperature. Add a Zigbee outdoor sensor as house.outdoor_sensor in the house file, or set house.outdoor_source to home_assistant and pick an outdoor entity in the Radiate integration's options.",
   ],
   "no nozzle rating": [
     "Savings need the nozzle rating",
@@ -103,10 +103,13 @@ export function unavailableText(v) {
   return (UNAVAILABLE[v.why] ?? ["", `Radiate can't measure savings yet: ${v.why ?? "no reason given"}.`])[1];
 }
 
-// Whether litres come from relay time, and so read high.
+// Whether litres come from relay time, and so read high, and where the outdoor
+// temperature comes from (older servers don't say).
 export function basisLine(v) {
-  if (v.litres_upper_bound) return "Litres are an upper bound until the burner itself is measured.";
-  return v.basis_text ?? "";
+  const basis = v.litres_upper_bound
+    ? "Litres are an upper bound until the burner itself is measured."
+    : (v.basis_text ?? "");
+  return [basis, v.outdoor?.text ?? ""].filter(Boolean).join(" ");
 }
 
 // --- slots: days or weeks ----------------------------------------------------------------

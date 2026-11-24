@@ -5,6 +5,7 @@ import yaml
 
 from radiate.config import ConfigError, load_site, parse_day, parse_site, parse_week
 from radiate.config.schedule import ScheduleError
+from radiate.core.outdoor import OutdoorSource
 from radiate.core.types import DemandMode, HeatSource, RoomRole
 from radiate.sim.reference import ROOMS, setpoint
 
@@ -167,6 +168,40 @@ def test_history_days_default_range_and_off():
     assert parse_site(minimal(house={"history_days": 3.5})).history_days == 3.5
     with pytest.raises(ConfigError, match="house.history_days: must be 0 to 90"):
         parse_site(minimal(house={"history_days": 120}))
+
+
+def test_outdoor_source_defaults_to_zigbee():
+    site = parse_site(minimal())
+    assert site.outdoor_source is OutdoorSource.ZIGBEE
+    assert site.outdoor_stale_after_s == 3 * 3600
+
+
+def test_outdoor_source_home_assistant_and_stale_limit():
+    site = parse_site(
+        minimal(house={"outdoor_source": "home_assistant", "outdoor_stale_after_min": 90})
+    )
+    assert site.outdoor_source is OutdoorSource.HOME_ASSISTANT
+    assert site.outdoor_stale_after_s == 90 * 60
+    assert not any("outdoor_sensor is not used" in n for n in site.notes)
+    site = parse_site(minimal(house={"outdoor_source": "home_assistant", "outdoor_sensor": "o"}))
+    assert any("outdoor_sensor is not used" in n for n in site.notes)
+
+
+def test_outdoor_source_both_needs_a_zigbee_sensor():
+    site = parse_site(minimal(house={"outdoor_source": "both", "outdoor_sensor": "garden"}))
+    assert site.outdoor_source is OutdoorSource.BOTH
+    with pytest.raises(ConfigError) as exc:
+        parse_site(minimal(house={"outdoor_source": "both"}))
+    assert any(p.startswith("house.outdoor_source: both needs") for p in exc.value.problems)
+
+
+def test_outdoor_source_problems():
+    with pytest.raises(ConfigError) as exc:
+        parse_site(minimal(house={"outdoor_source": "met_office", "outdoor_stale_after_min": 5}))
+    assert exc.value.problems == [
+        "house.outdoor_source: must be zigbee, home_assistant or both",
+        "house.outdoor_stale_after_min: must be 30 to 1440",
+    ]
 
 
 def test_monitoring_defaults_and_ranges():

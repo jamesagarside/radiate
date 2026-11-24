@@ -190,6 +190,7 @@ async def test_the_api_answers_with_the_report(client):
         "basis",
         "basis_text",
         "litres_upper_bound",
+        "outdoor",
         "fit",
         "totals",
         "days",

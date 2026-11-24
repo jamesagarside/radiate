@@ -69,8 +69,12 @@ Heat in a room that does not come from its radiator. Two kinds:
 Code: `HeatSource`, config key `rooms[].heat_source`.
 
 **Outdoor temperature**:
-Temperature outside the house, from an optional sensor. The core assumes 5 °C when there is no reading.
+Temperature outside the house, from an optional Zigbee sensor or from Home Assistant. The core assumes 5 °C when there is no reading.
 Symbol `T_out`, °C. Code: `Snapshot.outdoor`, config key `house.outdoor_sensor`.
+
+**Outdoor source**:
+Where the outdoor temperature comes from: the Zigbee sensor, Home Assistant, or both with the Zigbee sensor first. A Home Assistant reading older than the stale limit counts as missing.
+Code: `OutdoorSource`, `choose_outdoor` (`radiate.core.outdoor`), config keys `house.outdoor_source` and `house.outdoor_stale_after_min`, API `POST /api/v1/outdoor`.
 
 ## Household
 

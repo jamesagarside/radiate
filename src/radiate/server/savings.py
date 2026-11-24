@@ -4,7 +4,7 @@ The figures, the gate and every word of the body come from the pure core
 (`radiate.core.savings.report`). This module keeps the closed day summaries they are
 worked out from, in the state database under `daily_history`, and gathers what
 `report` needs from the runtime: the room weights from the learned models, the room
-names, and whether there is a household and an outdoor sensor.
+names, whether there is a household and an outdoor temperature source, and which one.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from radiate.config.site import SiteConfig
+from radiate.core.outdoor import OutdoorSource
 from radiate.core.savings import report, room_weights
 
 if TYPE_CHECKING:
@@ -93,6 +94,7 @@ def savings_view(rt: Runtime) -> dict:
         {rc.id: rc.name for rc in rooms},
         household=has_baseline_source(rt),
         outdoor_sensor=has_outdoor_sensor(rt),
+        outdoor_source=outdoor_source(rt),
     )
 
 
@@ -103,12 +105,25 @@ def has_baseline_source(rt: Runtime) -> bool:
 
 
 def has_outdoor_sensor(rt: Runtime) -> bool:
-    """Whether the house has an outdoor sensor. The simulator and the demo always have
-    an outdoor temperature; a live house has one only when the house file names it."""
+    """Whether the house has an outdoor temperature source. The simulator and the demo
+    always have one; a live house has one when the house file names a Zigbee sensor or
+    takes the outdoor temperature from Home Assistant (`house.outdoor_source`)."""
+    if rt.outdoor_source is not OutdoorSource.ZIGBEE:
+        return True
     site = getattr(rt.driver, "site", None)
     if isinstance(site, SiteConfig):
         return bool(site.outdoor_sensor)
     return True
+
+
+def outdoor_source(rt: Runtime) -> str | None:
+    """The outdoor source the report names: `zigbee`, `home_assistant`, `both`, or
+    `simulated` for the demo and the simulator. None without one."""
+    if not has_outdoor_sensor(rt):
+        return None
+    if rt.driver.name != "live":
+        return "simulated"
+    return rt.outdoor_source.value
 
 
 def day_estimate(view: Mapping[str, Any], summary: Mapping[str, Any]) -> dict | None:

@@ -26,6 +26,7 @@ from .health import (
     ShortCycle,
     ValveCheck,
 )
+from .outdoor import DEFAULT_OUTDOOR_C
 from .savings import MAX_TICK_S as SAVINGS_TICK_S
 from .savings import RoomSample, SavingsMeter
 from .types import (
@@ -400,7 +401,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
 
     out = snap.outdoor
     if out is None:
-        out = 5.0  # conservative default when no outdoor reading
+        out = DEFAULT_OUTDOOR_C  # conservative default when no outdoor reading
     sunny = _sun_shaped(st, snap)
     any_trv = False
     frost = hard_frost = False

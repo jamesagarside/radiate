@@ -10,7 +10,7 @@ Last audit: November 2026, against `main` at `c4657fe`. On 19 November 2026 the 
 
 | Status | At audit | Now |
 |---|---|---|
-| Done | 82 | 153 |
+| Done | 82 | 155 |
 | Partial | 26 | 20 |
 | Missing | 37 | 20 |
 
@@ -43,7 +43,7 @@ Top remaining gaps, most important first:
 | Room temperature and humidity | done | `drivers/live.py`, `drivers/z2m.py` | |
 | TRV internal temperature, valve echo, availability | done | `drivers/live.py` | |
 | TRV battery | done | `drivers/live.py`, `drivers/devices.py` | Battery, link quality and last seen for every TRV and sensor, shown in `GET /devices` and the Devices view. At or below `monitoring.low_battery_pct` (20 %) it alerts `device.low_battery`. Not fed to the core, which needs only availability |
-| Outdoor temperature | done | `drivers/live.py` | Local Z2M sensor only, no weather provider; 5 °C assumed without one |
+| Outdoor temperature | done | `drivers/live.py`, `core/outdoor.py`, `server/runtime.py` | Local Z2M sensor, or Home Assistant through `POST /api/v1/outdoor` (a weather or temperature entity, picked in radiate-ha's options), chosen by `house.outdoor_source` (`zigbee` by default, `home_assistant` or `both`). Readings outside -40 to 50 °C or older than `house.outdoor_stale_after_min` count as missing; 5 °C assumed without one, with alert `outdoor.stale` when Home Assistant is the source. No weather provider of Radiate's own. Untested against a real Home Assistant |
 | Heating and store relay state | done | `drivers/shelly.py` | |
 | Relay power (burner firing) | done | `drivers/shelly.py` `BurnerMeter`, `drivers/live.py`, `core/types.py` `Snapshot.heating_burner`, `store_burner`, `relay_observed` | Threshold with hysteresis per channel, trusted once a channel has read at or above it; `shelly.burner_metering`, `burner_threshold_w`, `burner_hysteresis_w`. Tested in `tests/drivers/test_shelly.py`, `test_live.py` |
 | Flow pipe temperature (optional) | missing | | |
@@ -170,6 +170,7 @@ Rows starting "HA:" are in the [radiate-ha](https://github.com/jamesagarside/rad
 | `POST /rooms/{id}/fire`, `/store/boost`, `/mode` | done | `server/app.py` | Manual fire flag is not persisted and expires after `house.fire_flag_hours` (6) or at local midnight; `fire_switch` and `fire_switch_expires_in_min` in `describe()` |
 | `POST /learning/reset` | done | `server/app.py`, `server/bridge.py` | |
 | `GET /people`, `POST /people/{id}/away`, `/people/{id}/presence` | done | `server/app.py`, `server/bridge.py`, `server/runtime.py` | Away until and Home Assistant presence per person; saved in SQLite; `away` in `describe()`, `people` in `house()` |
+| `POST /outdoor` | done | `server/bridge.py` `set_outdoor`, `server/app.py`, `server/runtime.py` `report_outdoor` | Outdoor temperature from Home Assistant, kept in the state database with when it was measured; `outdoor_reading` in `describe()` gives the source in use and its age. Also through the browser demo's bridge, where the simulation stays the source |
 | `POST /ha/persons` | done | `server/bridge.py`, `server/app.py`, `server/runtime.py` | The `person` entities Home Assistant has, kept in memory with when they were reported; offered as `ha_persons` in `GET /household` |
 | `GET /schedules` | done | `server/schedules.py`, `server/bridge.py`, `drivers/live.py`, `server/demo.py` | Each room's week as used now, in minutes and in words, with away and dropped-period notes. Household rooms add their warm periods (the edges the week view drags), what room adjustments changed, the adjustments in words and the week without them. Drivers report their weeks through an optional `schedules()` |
 | `GET /devices`, `POST /devices/scan` | done | `drivers/devices.py`, `drivers/live.py`, `server/bridge.py`, `server/app.py`, `server/demo.py` | Device health and a user-started network scan (one at a time, at most every 10 minutes; 409 and 429 otherwise). The live driver reads Zigbee2MQTT state, `bridge/devices` for routers and firmware, and publishes only `bridge/request/networkmap`, also in dry run. Untested against a real broker |
@@ -190,6 +191,7 @@ Rows starting "HA:" are in the [radiate-ha](https://github.com/jamesagarside/rad
 | HA: demand mode select, pooled demand | done | `radiate-ha: custom_components/radiate/select.py`, `sensor.py` | `select.radiate_demand_mode` (eco or comfort) posts `settings`, sending null for the configured default; `sensor.radiate_pooled_demand` is diagnostic. Neither is created for a server without the keys |
 | HA: heating mode select, hot-water store and boost | done | `radiate-ha: custom_components/radiate/select.py`, `binary_sensor.py` | Select posts `mode`; binary sensors from `store.relay` and `store.boost`, no device class. The server reports no boost end time |
 | HA: presence, away sensors, `set_away`, `clear_away` | done | `radiate-ha: custom_components/radiate/presence.py`, `options_flow.py` | Options step maps Radiate people to `person` entities and wins; otherwise `ha_person` from `house` (linked in the household setup). State changes posted to `people/{id}/presence`, and every state again every 15 minutes as a heartbeat; an away binary sensor per person, with `person_entity` and `presence_stale`. Every `person` entity posted to `ha/persons` at setup and with the heartbeat, which also reloads the entry when the server's people or links change |
+| HA: outdoor temperature from an entity | done | `radiate-ha: custom_components/radiate/outdoor.py`, `options_flow.py` | Options pick a `weather` entity or a temperature `sensor` (none by default); posted to `outdoor` on change and with the 15 minute heartbeat, with `measured_at` from `last_reported`. °F converted to °C |
 | HA services `boost_store`, `set_mode` | done | `radiate-ha: custom_components/radiate/__init__.py` | |
 | HA services `set_override`, `clear_override` | done | `radiate-ha: custom_components/radiate/climate.py` | Entity services on Radiate climate entities; `until` and `duration_min` as in `POST /rooms/{id}/setpoint` |
 | HA service `recalibrate_valve` | missing | | Blocked: no TRVZB calibration command to send (see "Manual recalibration service") |

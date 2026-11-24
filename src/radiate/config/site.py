@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from radiate.core.estimator import MEMORY_DAYS_MAX, MEMORY_DAYS_MIN
+from radiate.core.outdoor import DEFAULT_STALE_AFTER_S, OutdoorSource
 from radiate.core.types import (
     BoilerConfig,
     DemandMode,
@@ -142,6 +143,11 @@ class SiteConfig:
     timezone: str = "Europe/London"
     dry_run: bool = True
     outdoor_sensor: str | None = None
+    # Where the outdoor temperature comes from (radiate.core.outdoor): the Zigbee sensor
+    # (the default), Home Assistant (`POST /api/v1/outdoor`), or both, Zigbee first.
+    outdoor_source: OutdoorSource = OutdoorSource.ZIGBEE
+    # A Home Assistant outdoor reading older than this counts as missing.
+    outdoor_stale_after_s: float = DEFAULT_STALE_AFTER_S
     mqtt: MqttConfig | None = None
     shelly: ShellyConfig | None = None
     trv: TrvOptions = field(default_factory=TrvOptions)
@@ -1157,6 +1163,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "timezone",
             "dry_run",
             "outdoor_sensor",
+            "outdoor_source",
+            "outdoor_stale_after_min",
             "data_dir",
             "sensor_max_silence_min",
             "history_days",
@@ -1206,6 +1214,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     trv = _trv(ctx, ctx.section(data, "trv"))
     monitoring = _monitoring(ctx, ctx.section(data, "monitoring"))
     outdoor = ctx.get(house, "outdoor_sensor", str, None, "house.") or None
+    outdoor_source, outdoor_stale_min = _outdoor_source(ctx, house, outdoor, notes)
     if any(d.trv or d.sensor or d.window for d in devices.values()) or outdoor:
         if mqtt is None:
             ctx.err("mqtt", "required: rooms use Zigbee2MQTT devices")
@@ -1228,6 +1237,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         timezone=tz,
         dry_run=dry_run,
         outdoor_sensor=outdoor,
+        outdoor_source=outdoor_source,
+        outdoor_stale_after_s=outdoor_stale_min * 60,
         mqtt=mqtt,
         shelly=shelly,
         trv=trv,
@@ -1242,6 +1253,36 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         file_household=household,
     )
     return apply_household(site, household, "house_file")
+
+
+OUTDOOR_STALE_MIN = (30, 1440)
+
+
+def _outdoor_source(
+    ctx: _Ctx, house: dict, sensor: str | None, notes: list[str]
+) -> tuple[OutdoorSource, float]:
+    """`house.outdoor_source` and `house.outdoor_stale_after_min`."""
+    raw = ctx.get(house, "outdoor_source", str, OutdoorSource.ZIGBEE.value, "house.")
+    try:
+        source = OutdoorSource(raw)
+    except ValueError:
+        ctx.err("house.outdoor_source", "must be zigbee, home_assistant or both")
+        source = OutdoorSource.ZIGBEE
+    lo, hi = OUTDOOR_STALE_MIN
+    stale_min = ctx.number(
+        house, "outdoor_stale_after_min", DEFAULT_STALE_AFTER_S / 60, lo, hi, "house."
+    )
+    if source is OutdoorSource.BOTH and not sensor:
+        ctx.err(
+            "house.outdoor_source",
+            "both needs house.outdoor_sensor; use home_assistant without a Zigbee sensor",
+        )
+    if source is OutdoorSource.HOME_ASSISTANT and sensor:
+        notes.append(
+            "house.outdoor_sensor is not used: house.outdoor_source is home_assistant. "
+            "Use both to prefer the Zigbee sensor."
+        )
+    return source, stale_min
 
 
 def parse_household(raw: Any, site: SiteConfig) -> Household:

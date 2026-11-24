@@ -664,6 +664,14 @@ def test_every_closed_day_in_the_simulator_has_a_savings_record():
     assert all("savings" in s for s in res.day_summaries)
 
 
+def test_report_names_the_outdoor_source():
+    body = report([], WEIGHTS, NAMES, household=True, outdoor_sensor=True, outdoor_source="both")
+    assert body["outdoor"]["source"] == "both"
+    assert "Home Assistant" in body["outdoor"]["text"]
+    body = report([], WEIGHTS, NAMES, household=True, outdoor_sensor=False)
+    assert body["outdoor"] == {"source": None, "text": None}
+
+
 def test_record_day_constant():
     assert DAY_S == 86400.0
     assert RoomDay().read_s == 0.0

@@ -105,7 +105,10 @@ def test_the_headline_for_a_house_with_figures(bodies, tmp_path):
         "About 3.5 litres of oil saved since 1 November, with rooms in use warm 98% of the time."
     )
     assert out["house"] == out["headline"]
-    assert out["basis"] == "Litres are an upper bound until the burner itself is measured."
+    assert out["basis"] == (
+        "Litres are an upper bound until the burner itself is measured. "
+        "Outdoor temperature from the simulation."
+    )
     assert [s[0] for s in out["stats"]] == [
         "Oil saved",
         "Oil used",

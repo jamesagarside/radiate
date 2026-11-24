@@ -156,6 +156,8 @@ mqtt:
 | `timezone` | `Europe/London` | Time zone for schedules and the store windows |
 | `dry_run` | `true` | Read devices, write nothing |
 | `outdoor_sensor` | none | Zigbee2MQTT name of an outdoor temperature sensor. Without one, the model assumes 5 °C |
+| `outdoor_source` | `zigbee` | Where the outdoor temperature comes from. `zigbee`: the `outdoor_sensor`, as before. `home_assistant`: the reading the Radiate integration posts from the outdoor entity picked in its options (a weather entity's temperature, or a temperature sensor). `both`: the Zigbee sensor while it has a reading, otherwise Home Assistant; needs `outdoor_sensor` |
+| `outdoor_stale_after_min` | 180 | A Home Assistant outdoor reading measured longer ago than this counts as missing: the model assumes 5 °C and the alert `outdoor.stale` shows. 30 to 1440 |
 | `data_dir` | `./data` | Folder for `radiate.db`, and for `household.yaml` when you set up the household in the web UI |
 | `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale. Room sensor readings are saved with the time they were taken, so after a restart a reading stands until this long after the sensor last reported, not after Radiate started |
 | `history_days` | 14 | Days of tick history kept in `radiate.db`, 0 to 90. Set 0 to turn recording off |

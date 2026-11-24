@@ -66,6 +66,15 @@ from radiate.core import (
 )
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.decide import reset_learned
+from radiate.core.outdoor import (
+    DEFAULT_STALE_AFTER_S,
+    OutdoorChoice,
+    OutdoorReading,
+    OutdoorSource,
+    choose_outdoor,
+    plausible,
+    reading_age,
+)
 from radiate.core.persist import dump_state, first_start_state, load_state
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.server import layout
@@ -107,6 +116,8 @@ class Driver(Protocol):
     # back at start (spec 7, fail warm).
     # Optional: `history_days`, days of ticks to record in the state database. Only the
     # live driver sets it, so the demo never records.
+    # Optional: `outdoor_age_s()`, the age in seconds of the outdoor reading in the last
+    # snapshot, or None.
 
 
 OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
@@ -176,6 +187,13 @@ class Runtime:
     ha_persons: list[dict] | None = None
     ha_persons_at: float | None = None
     setup: object | None = None  # radiate.server.setup.HouseholdSetup; None: not offered
+    # Outdoor temperature source (radiate.core.outdoor, `house.outdoor_source`). The
+    # Home Assistant reading is the last `POST /api/v1/outdoor`, kept in the state
+    # database so a restart does not lose it; its age still counts.
+    outdoor_source: OutdoorSource = OutdoorSource.ZIGBEE
+    outdoor_stale_after_s: float = DEFAULT_STALE_AFTER_S
+    ha_outdoor: OutdoorReading | None = None
+    outdoor: OutdoorChoice | None = None  # what the core got on the last tick
     layout: dict | None = None  # where rooms sit, for the web UI's model (server.layout)
     # The use level of each room on a hand-written schedule that gives one, as
     # (weekdays, weekend): `SiteConfig.schedule_use`. Household rooms ignore it.
@@ -233,6 +251,9 @@ class Runtime:
         restore_sensors = getattr(self.driver, "restore_sensor_memory", None)
         if saved_sensors is not None and callable(restore_sensors):
             restore_sensors(saved_sensors[0])
+        saved_outdoor = self.store.get(OUTDOOR_KEY)
+        if saved_outdoor is not None:
+            self.ha_outdoor = _restore_outdoor(saved_outdoor[0])
         saved_layout = self.store.get("layout")
         if saved_layout is not None:
             self.layout = layout.restore(saved_layout[0], {r.id for r in self.cfg.rooms})
@@ -328,6 +349,70 @@ class Runtime:
         if self.store is not None:
             self.store.put("layout", self.layout)
         return {"layout": self.layout}
+
+    # --- outdoor temperature -------------------------------------------------------------
+
+    def report_outdoor(
+        self, temperature_c: float | None, measured_at: float | None, source: str | None
+    ) -> None:
+        """An outdoor temperature from Home Assistant, or None to forget it.
+
+        `measured_at` is wall-clock seconds, or None for now; a time in the future counts
+        as now. Raises ValueError for an implausible temperature.
+        """
+        if temperature_c is None:
+            self.ha_outdoor = None
+            if self.store is not None:
+                self.store.put(OUTDOOR_KEY, None)
+            return
+        if not plausible(temperature_c):
+            raise ValueError("implausible outdoor temperature")
+        now = self.wall()
+        at = now if measured_at is None else min(measured_at, now)
+        self.ha_outdoor = OutdoorReading(float(temperature_c), at, source)
+        if self.store is not None:
+            self.store.put(
+                OUTDOOR_KEY,
+                {"temperature_c": float(temperature_c), "measured_at": at, "source": source},
+            )
+
+    def _apply_outdoor(self, snap: Snapshot) -> None:
+        """Choose the outdoor temperature the core gets (radiate.core.outdoor). With the
+        default `zigbee` source the driver's reading passes through unchanged."""
+        age = getattr(self.driver, "outdoor_age_s", None)
+        local_age = age() if callable(age) else None
+        label = "zigbee" if self.driver.name == "live" else "simulated"
+        self.outdoor = choose_outdoor(
+            self.outdoor_source,
+            snap.outdoor,
+            local_age,
+            self.ha_outdoor,
+            self.wall(),
+            self.outdoor_stale_after_s,
+            label,
+        )
+        snap.outdoor = self.outdoor.temperature_c
+
+    def outdoor_view(self) -> dict:
+        """Where the outdoor temperature comes from, for `state` and `POST outdoor`."""
+        choice = self.outdoor
+        ha = self.ha_outdoor
+        wall = self.wall()
+        return {
+            "setting": self.outdoor_source.value,
+            "source": choice.source if choice else None,
+            "age_s": round(choice.age_s) if choice and choice.age_s is not None else None,
+            "stale": choice.stale if choice else False,
+            "stale_after_min": round(self.outdoor_stale_after_s / 60),
+            "home_assistant": None
+            if ha is None
+            else {
+                "temperature_c": ha.temperature_c,
+                "measured_at": local_iso(ha.measured_at, self.timezone),
+                "age_s": round(reading_age(ha, wall)),
+                "source": ha.source,
+            },
+        }
 
     # --- settings ------------------------------------------------------------------------
 
@@ -1116,6 +1201,7 @@ class Runtime:
         snap = await self.driver.snapshot(
             Mode.AUTO if held else mode, self.overrides, now < self.store_boost_until, self.fire
         )
+        self._apply_outdoor(snap)
         if held:
             self._hold_with_overrides(snap)
         self._apply_return(snap)
@@ -1131,6 +1217,8 @@ class Runtime:
         await self.driver.apply(actions)
         driver_alerts = getattr(self.driver, "alerts", None)
         extra = driver_alerts() if callable(driver_alerts) else []
+        if self.outdoor is not None and self.outdoor.alert is not None:
+            extra.append(self.outdoor.alert)
         actions.alerts.extend(extra)
         if recorder is not None:
             recorder.record(self.wall(), snap, compact, extra, self.state, snap.now)
@@ -1343,6 +1431,9 @@ class Runtime:
             "mode": self.mode.value,  # the user's choice; `away.frost` says if it is held
             "away": self.away_view(),
             "outdoor": snap.outdoor if snap else None,
+            # Where `outdoor` came from: `source` (`zigbee`, `home_assistant`, `simulated`
+            # or null when 5 °C is assumed), its age, and the last Home Assistant report.
+            "outdoor_reading": self.outdoor_view(),
             "boiler": {
                 "state": guard.state.value,
                 "relay": acts.heating_relay if acts else False,
@@ -1396,6 +1487,19 @@ class Runtime:
             "telemetry": self.driver.telemetry(),
             "settings": self.settings(),
         }
+
+
+OUTDOOR_KEY = "outdoor_ha"
+
+
+def _restore_outdoor(data: object) -> OutdoorReading | None:
+    """The saved Home Assistant outdoor reading, or None if there is none or it is bad."""
+    if not isinstance(data, dict):
+        return None
+    t, at, source = data.get("temperature_c"), data.get("measured_at"), data.get("source")
+    if not plausible(t) or isinstance(at, bool) or not isinstance(at, (int, float)):
+        return None
+    return OutdoorReading(float(t), float(at), source if isinstance(source, str) else None)
 
 
 def _intervals(history: deque[tuple[float, bool, bool]], now: float) -> tuple[list, list]:

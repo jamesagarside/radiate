@@ -215,6 +215,10 @@ async def set_ha_persons(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_ha_persons)
 
 
+async def set_outdoor(request: web.Request) -> web.Response:
+    return await _post(request, bridge.set_outdoor)
+
+
 async def settings(request: web.Request) -> web.Response:
     return web.json_response(_rt(request).settings())
 
@@ -320,6 +324,7 @@ def create_app(
             web.post("/api/v1/people/{person_id}/presence", set_presence),
             web.post("/api/v1/people/{person_id}/home", say_home),
             web.post("/api/v1/ha/persons", set_ha_persons),
+            web.post("/api/v1/outdoor", set_outdoor),
             web.get("/api/v1/settings", settings),
             web.post("/api/v1/settings", set_settings),
             web.get("/api/v1/layout", get_layout),
