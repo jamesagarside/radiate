@@ -14,7 +14,7 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -65,8 +65,20 @@ from radiate.core import (
     decide,
 )
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
+from radiate.core.decide import reset_learned
 from radiate.core.history import compact_actions, tick_data
-from radiate.core.persist import dump_state, first_start_state, load_state
+from radiate.core.outdoor import (
+    DEFAULT_STALE_AFTER_S,
+    OutdoorChoice,
+    OutdoorReading,
+    OutdoorSource,
+    choose_outdoor,
+    plausible,
+    reading_age,
+)
+from radiate.core.persist import VERSION as ENGINE_VERSION
+from radiate.core.persist import dump_state, first_start_state, load_state, saved_version
+from radiate.core.provenance import Provenance
 from radiate.core.series import observed_values, tick_values
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.server import layout
@@ -105,12 +117,20 @@ class Driver(Protocol):
     # Optional: `devices_view()`, the `GET /api/v1/devices` body (radiate.drivers.devices),
     # and `request_network_scan()`, which starts a network scan and returns its state or
     # raises `ScanRefused`.
+    # Optional: `sensor_memory()` and `restore_sensor_memory(data)`, the room sensors'
+    # last readings with when they were taken, saved with the engine state and given
+    # back at start (spec 7, fail warm).
     # Optional: `history_days`, days of ticks to record in the state database. Only the
     # live driver sets it, so the demo never records.
+    # Optional: `outdoor_age_s()`, the age in seconds of the outdoor reading in the last
+    # snapshot, or None.
 
 
 OVERRIDE_UNTIL = ("next_change", "duration", "cleared")
 OVERRIDE_MAX_MIN = 7 * 24 * 60
+# The manual fire flag lasts this long, and until local midnight at the latest (spec 7,
+# fail warm): a forgotten flag must not leave a room unheated for days.
+FIRE_FLAG_DEFAULT_S = 6 * 3600.0
 
 
 @dataclass
@@ -130,6 +150,16 @@ class DecisionRecord:
     room_id: str | None
 
 
+# Learning notes (ADR-0007): what happened to learned state that a person should see, such
+# as a model dropped, migrated or reset. Kept in the state database this long, at most
+# LEARNING_NOTES_MAX of them.
+LEARNING_NOTES_S = 14 * 86400.0
+LEARNING_NOTES_MAX = 50
+LEARNING_NOTES_KEY = "learning_notes"
+# Learning reasons that become notes: reasons from `decide`, and the manual reset.
+LEARNING_NOTE_CODES = ("learning.invalidated", "learning.reset")
+
+
 @dataclass
 class Runtime:
     cfg: HouseConfig
@@ -143,7 +173,9 @@ class Runtime:
     demand_mode: DemandMode | None = None
     overrides: dict[str, float] = field(default_factory=dict)  # setpoints the driver applies
     override_meta: dict[str, Override] = field(default_factory=dict)  # when each one ends
-    fire: set[str] = field(default_factory=set)
+    fire: set[str] = field(default_factory=set)  # manual fire flags the driver applies
+    fire_until: dict[str, float] = field(default_factory=dict)  # when each one ends
+    fire_flag_max_s: float = FIRE_FLAG_DEFAULT_S  # house.fire_flag_hours
     store_boost_until: float = 0.0
     last_actions: Actions | None = None
     last_snapshot: Snapshot | None = None
@@ -172,6 +204,15 @@ class Runtime:
     ha_persons: list[dict] | None = None
     ha_persons_at: float | None = None
     setup: object | None = None  # radiate.server.setup.HouseholdSetup; None: not offered
+    # radiate.server.settings.SettingsEditor, the web UI's Settings view; None: not offered
+    settings_editor: object | None = None
+    # Outdoor temperature source (radiate.core.outdoor, `house.outdoor_source`). The
+    # Home Assistant reading is the last `POST /api/v1/outdoor`, kept in the state
+    # database so a restart does not lose it; its age still counts.
+    outdoor_source: OutdoorSource = OutdoorSource.ZIGBEE
+    outdoor_stale_after_s: float = DEFAULT_STALE_AFTER_S
+    ha_outdoor: OutdoorReading | None = None
+    outdoor: OutdoorChoice | None = None  # what the core got on the last tick
     layout: dict | None = None  # where rooms sit, for the web UI's model (server.layout)
     # The use level of each room on a hand-written schedule that gives one, as
     # (weekdays, weekend): `SiteConfig.schedule_use`. Household rooms ignore it.
@@ -188,11 +229,14 @@ class Runtime:
     _away_log: list[Reason] = field(default_factory=list)  # for the exporter, next tick
     _alert_keys: set[tuple[str, str | None, str]] = field(default_factory=set)
     _task: asyncio.Task | None = None
+    # Learning notes, oldest first: {"at" (Unix s), "code", "message", "room_id"}.
+    learning_notes: list[dict] = field(default_factory=list)
     _index_task: asyncio.Task | None = None
     _otlp_error_at: float | None = None
 
     def __post_init__(self) -> None:
         self.state = EngineState.new(self.cfg)
+        self.state.code_version = __version__
         # Closed day summaries for savings (spec 5.9), kept in the state database.
         self.daily = DailyHistory(self.store)
 
@@ -225,6 +269,15 @@ class Runtime:
         saved_away = self.store.get("away")
         if saved_away is not None:
             self._restore_away(saved_away[0])
+        # Room sensor readings with their true age (spec 7, fail warm): battery sensors
+        # can't be asked, so without these rooms would wait for their next report.
+        saved_sensors = self.store.get("sensors")
+        restore_sensors = getattr(self.driver, "restore_sensor_memory", None)
+        if saved_sensors is not None and callable(restore_sensors):
+            restore_sensors(saved_sensors[0])
+        saved_outdoor = self.store.get(OUTDOOR_KEY)
+        if saved_outdoor is not None:
+            self.ha_outdoor = _restore_outdoor(saved_outdoor[0])
         saved_layout = self.store.get("layout")
         if saved_layout is not None:
             self.layout = layout.restore(saved_layout[0], {r.id for r in self.cfg.rooms})
@@ -235,6 +288,8 @@ class Runtime:
         if saved is not None:
             data, saved_wall = saved
             elapsed = max(0.0, wall - saved_wall)
+            self._keep_newer(data, saved_wall)
+        self.learning_notes = _restore_notes(self.store.get(LEARNING_NOTES_KEY), wall)
         history = self._open_history()
         if history is not None and needs_bootstrap(data):
             data = self._bootstrap(history, data, wall)
@@ -244,6 +299,11 @@ class Runtime:
             self._saved_at = now
         else:
             self.state = first_start_state(self.cfg)
+        self.state.code_version = __version__
+        for problem in problems:
+            self._note(wall, "learning.restore", problem[:1].upper() + problem[1:], None)
+        if problems:
+            self._save_notes()
         if history is not None:
             from radiate.server.history import Recorder
 
@@ -251,6 +311,28 @@ class Runtime:
             self.recorder = Recorder(history, int(wall * 1000), now, wall, data, elapsed)
             self.recorder.index = self._open_index(history)
         return problems
+
+    def _keep_newer(self, data: object, saved_wall: float) -> None:
+        """Downgrade (ADR-0007): engine state saved by a newer Radiate is copied, as it
+        is, to `engine.v<format>` before this version saves its own over `engine`. An
+        earlier copy of the same format is never replaced."""
+        version = saved_version(data)
+        if version is None or version <= ENGINE_VERSION:
+            return
+        key = f"engine.v{version}"
+        if self.store.get(key) is None:
+            self.store.put(key, data, wall=saved_wall)
+            LOG.warning("restore: kept the newer saved state (format %d) as %s", version, key)
+
+    def _note(self, wall: float, code: str, message: str, room_id: str | None) -> None:
+        self.learning_notes = [
+            *(n for n in self.learning_notes if wall - n["at"] <= LEARNING_NOTES_S),
+            {"at": wall, "code": code, "message": message, "room_id": room_id},
+        ][-LEARNING_NOTES_MAX:]
+
+    def _save_notes(self) -> None:
+        if self.store is not None:
+            self.store.put(LEARNING_NOTES_KEY, self.learning_notes, wall=self.wall())
 
     def _open_history(self):
         days = getattr(self.driver, "history_days", None)
@@ -289,8 +371,12 @@ class Runtime:
         if self.store is None:
             return
         now = self.driver.clock()
-        self.store.put("engine", dump_state(self.state, now))
+        # Stamped with the runtime's wall clock, which `restore` measures downtime by.
+        self.store.put("engine", dump_state(self.state, now), wall=self.wall())
         self._save_runtime(now)
+        memory = getattr(self.driver, "sensor_memory", None)
+        if callable(memory):
+            self.store.put("sensors", memory())
         self._saved_at = now
 
     def _save_runtime(self, now: float) -> None:
@@ -313,6 +399,7 @@ class Runtime:
                 "overrides": overrides,
                 "demand_mode": self.demand_mode.value if self.demand_mode else None,
             },
+            wall=self.wall(),
         )
 
     # --- layout --------------------------------------------------------------------------
@@ -326,6 +413,70 @@ class Runtime:
         if self.store is not None:
             self.store.put("layout", self.layout)
         return {"layout": self.layout}
+
+    # --- outdoor temperature -------------------------------------------------------------
+
+    def report_outdoor(
+        self, temperature_c: float | None, measured_at: float | None, source: str | None
+    ) -> None:
+        """An outdoor temperature from Home Assistant, or None to forget it.
+
+        `measured_at` is wall-clock seconds, or None for now; a time in the future counts
+        as now. Raises ValueError for an implausible temperature.
+        """
+        if temperature_c is None:
+            self.ha_outdoor = None
+            if self.store is not None:
+                self.store.put(OUTDOOR_KEY, None)
+            return
+        if not plausible(temperature_c):
+            raise ValueError("implausible outdoor temperature")
+        now = self.wall()
+        at = now if measured_at is None else min(measured_at, now)
+        self.ha_outdoor = OutdoorReading(float(temperature_c), at, source)
+        if self.store is not None:
+            self.store.put(
+                OUTDOOR_KEY,
+                {"temperature_c": float(temperature_c), "measured_at": at, "source": source},
+            )
+
+    def _apply_outdoor(self, snap: Snapshot) -> None:
+        """Choose the outdoor temperature the core gets (radiate.core.outdoor). With the
+        default `zigbee` source the driver's reading passes through unchanged."""
+        age = getattr(self.driver, "outdoor_age_s", None)
+        local_age = age() if callable(age) else None
+        label = "zigbee" if self.driver.name == "live" else "simulated"
+        self.outdoor = choose_outdoor(
+            self.outdoor_source,
+            snap.outdoor,
+            local_age,
+            self.ha_outdoor,
+            self.wall(),
+            self.outdoor_stale_after_s,
+            label,
+        )
+        snap.outdoor = self.outdoor.temperature_c
+
+    def outdoor_view(self) -> dict:
+        """Where the outdoor temperature comes from, for `state` and `POST outdoor`."""
+        choice = self.outdoor
+        ha = self.ha_outdoor
+        wall = self.wall()
+        return {
+            "setting": self.outdoor_source.value,
+            "source": choice.source if choice else None,
+            "age_s": round(choice.age_s) if choice and choice.age_s is not None else None,
+            "stale": choice.stale if choice else False,
+            "stale_after_min": round(self.outdoor_stale_after_s / 60),
+            "home_assistant": None
+            if ha is None
+            else {
+                "temperature_c": ha.temperature_c,
+                "measured_at": local_iso(ha.measured_at, self.timezone),
+                "age_s": round(reading_age(ha, wall)),
+                "source": ha.source,
+            },
+        }
 
     # --- settings ------------------------------------------------------------------------
 
@@ -437,6 +588,40 @@ class Runtime:
             self.override_meta.pop(rid, None)
         if expired:
             self._save_runtime(now)
+
+    def set_fire(self, room_id: str, lit: bool) -> float | None:
+        """Set or clear the manual fire flag. A flag set lasts `fire_flag_max_s`, and
+        ends at local midnight at the latest. Returns when it ends (driver clock), or
+        None when cleared. Not saved: a restart clears it, which fails warm."""
+        if not lit:
+            self.fire.discard(room_id)
+            self.fire_until.pop(room_id, None)
+            return None
+        now, wall = self.driver.clock(), self._wall()
+        local = datetime.fromtimestamp(wall, ZoneInfo(self.timezone))
+        midnight = datetime.combine(local.date() + timedelta(days=1), datetime.min.time())
+        to_midnight = midnight.replace(tzinfo=local.tzinfo).timestamp() - wall
+        self.fire.add(room_id)
+        self.fire_until[room_id] = now + max(60.0, min(self.fire_flag_max_s, to_midnight))
+        return self.fire_until[room_id]
+
+    def _expire_fire(self, now: float) -> None:
+        for rid, until in list(self.fire_until.items()):
+            if now >= until:
+                self.set_fire(rid, False)
+                rc = self.cfg.room(rid)
+                self._log(
+                    now,
+                    Reason(
+                        "room.fire_switch_expired",
+                        f"{rc.name}: fire flag cleared after its time ran out",
+                        rid,
+                    ),
+                )
+
+    def fire_expires_in_min(self, room_id: str, now: float) -> int | None:
+        until = self.fire_until.get(room_id)
+        return None if until is None else max(0, round((until - now) / 60))
 
     def override_view(self, room_id: str, now: float) -> dict | None:
         if room_id not in self.overrides:
@@ -1071,6 +1256,7 @@ class Runtime:
     async def step(self) -> Actions:
         now = self.driver.clock()
         self._expire_overrides(now)
+        self._expire_fire(now)
         self._update_away()
         mode = self.effective_mode()
         # Everyone away holding frost: overrides still win, so with one the core runs
@@ -1079,6 +1265,7 @@ class Runtime:
         snap = await self.driver.snapshot(
             Mode.AUTO if held else mode, self.overrides, now < self.store_boost_until, self.fire
         )
+        self._apply_outdoor(snap)
         if held:
             self._hold_with_overrides(snap)
         self._apply_return(snap)
@@ -1096,6 +1283,8 @@ class Runtime:
         await self.driver.apply(actions)
         driver_alerts = getattr(self.driver, "alerts", None)
         extra = driver_alerts() if callable(driver_alerts) else []
+        if self.outdoor is not None and self.outdoor.alert is not None:
+            extra.append(self.outdoor.alert)
         actions.alerts.extend(extra)
         wall = self.wall()
         observed = self._observed() if compact is not None else None
@@ -1114,10 +1303,19 @@ class Runtime:
                 estimate = self._day_estimate(actions.day_summary)
         logged = [(r.code, r.message, r.room_id) for r in self._away_log]
         self._away_log.clear()
+        noted = False
         for r in actions.reasons:
-            if r.code.startswith(("boiler.", "disturbance.", "safe_mode.", "learning.relearn")):
+            if r.code.startswith(
+                ("boiler.", "disturbance.", "safe_mode.", "learning.relearn", *LEARNING_NOTE_CODES)
+            ):
                 self._log(now, r)
                 logged.append((r.code, r.message, r.room_id))
+            if r.code in LEARNING_NOTE_CODES:
+                LOG.warning("learning: %s", r.message)
+                self._note(self.wall(), r.code, r.message, r.room_id)
+                noted = True
+        if noted:
+            self._save_notes()
         # Alerts repeat every tick while they hold; log each one when it first appears
         # or when its message changes.
         keys = set()
@@ -1199,6 +1397,24 @@ class Runtime:
         except Exception as err:
             LOG.warning("savings: no estimate for the closed day: %s", err)
             return None
+
+    def reset_learning(self, room_ids: list[str] | None = None) -> list[str]:
+        """Put rooms' learned models, arrival lags and lockshield caps back to their
+        priors, log it and save. Every room with a model when `room_ids` is None.
+
+        No device is written: the next ticks decide from the priors. A replay of the
+        recorded ticks across a reset differs from then on, as the reset is not a tick.
+        """
+        now = self.driver.clock()
+        ids = reset_learned(self.cfg, self.state, room_ids)
+        for rid in ids:
+            name = self.cfg.room(rid).name
+            message = f"{name}: learning reset to priors"
+            self._log(now, Reason("learning.reset", message, rid))
+            self._note(self.wall(), "learning.reset", message, rid)
+        self.save()
+        self._save_notes()
+        return ids
 
     def _log(self, now: float, r: Reason) -> None:
         self.decisions.append(DecisionRecord(now, r.code, r.message, r.room_id))
@@ -1305,6 +1521,7 @@ class Runtime:
                 "override": self.override_view(rc.id, now),
                 # The manual fire flag set through the API, as opposed to `fire` (detected).
                 "fire_switch": rc.id in self.fire,
+                "fire_switch_expires_in_min": self.fire_expires_in_min(rc.id, now),
             }
             rs = st.rooms.get(rc.id)
             if rs is not None:
@@ -1319,6 +1536,11 @@ class Runtime:
                     # without it is a heat sink, opened only so the heat has somewhere to go.
                     extend=rs.extend,
                     preheating=rs.preheating,
+                    # Room use this tick (spec 5.8): `in_use`, `occasional`, `setback`
+                    # or null. `solo`: in eco, passed its solo threshold, so it may start
+                    # and keep a burn on its own.
+                    use=rs.use.value if rs.use is not None else None,
+                    solo=rs.solo,
                     fire=rs.dist.fire,
                     learning=rs.learning_gate,
                     model={
@@ -1329,6 +1551,11 @@ class Runtime:
                         "samples": rs.est.samples,
                         "arrival_lag_min": round(rs.arrival_lag_s / 60, 1),
                         "lockshield": rs.lockshield,
+                        # Where it was learned (ADR-0007): learning updates by condition
+                        # (`live_burner`, `live_relay`, `dry_burner`, `dry_relay`,
+                        # `unknown`), the learner version and the dates of the first and
+                        # latest update.
+                        "learned": _learned_view(rs.learned),
                     },
                     reason=reason.message if (reason := reasons_by_room.get(rc.id)) else None,
                     # The code of that reason, such as `demand.pooled` (spec 5.3).
@@ -1356,6 +1583,9 @@ class Runtime:
             "mode": self.mode.value,  # the user's choice; `away.frost` says if it is held
             "away": self.away_view(),
             "outdoor": snap.outdoor if snap else None,
+            # Where `outdoor` came from: `source` (`zigbee`, `home_assistant`, `simulated`
+            # or null when 5 °C is assumed), its age, and the last Home Assistant report.
+            "outdoor_reading": self.outdoor_view(),
             "boiler": {
                 "state": guard.state.value,
                 "relay": acts.heating_relay if acts else False,
@@ -1381,10 +1611,16 @@ class Runtime:
                 }
                 if sc.extra_off_s > 0 and sc.until is not None
                 else None,
+                # The burner firing for heating, from the relay's power metering (None:
+                # not metered). `relay` is Radiate's command; this is the boiler.
+                "burner": snap.heating_burner if snap else None,
+                # False: the relay could not be read this tick (no Shelly, unreachable).
+                "relay_read": snap.relay_observed if snap else False,
             },
             "store": {
                 "relay": acts.store_relay if acts else False,
                 "boost": now < self.store_boost_until,
+                "burner": snap.store_burner if snap else None,
             },
             "rooms": rooms,
             # Burner hours, starts, burns, litres and the balance score per local day.
@@ -1402,7 +1638,65 @@ class Runtime:
             else [],
             "telemetry": self.driver.telemetry(),
             "settings": self.settings(),
+            # Learned state dropped, migrated or reset in the last 14 days (ADR-0007),
+            # oldest first: {"at" (Unix s), "code", "message", "room_id"}.
+            "learning_notes": [
+                n for n in self.learning_notes if self.wall() - n["at"] <= LEARNING_NOTES_S
+            ],
         }
+
+
+OUTDOOR_KEY = "outdoor_ha"
+
+
+def _learned_view(p: Provenance) -> dict:
+    def iso(day: int | None) -> str | None:
+        if day is None or not 1 <= day <= 3652059:
+            return None
+        return datetime.fromordinal(day).date().isoformat()
+
+    return {
+        "learner": p.learner,
+        "code": p.code,
+        "since": iso(p.first_day),
+        "latest": iso(p.last_day),
+        "updates": dict(p.updates),
+    }
+
+
+def _restore_notes(saved: tuple | None, wall: float) -> list[dict]:
+    """Saved learning notes from the last LEARNING_NOTES_S; malformed ones are dropped."""
+    if saved is None or not isinstance(saved[0], list):
+        return []
+    notes = []
+    for n in saved[0]:
+        if not isinstance(n, dict) or not isinstance(n.get("message"), str):
+            continue
+        at = n.get("at")
+        if isinstance(at, bool) or not isinstance(at, (int, float)):
+            continue
+        if wall - at > LEARNING_NOTES_S:
+            continue
+        room = n.get("room_id")
+        notes.append(
+            {
+                "at": float(at),
+                "code": n["code"] if isinstance(n.get("code"), str) else "learning.restore",
+                "message": n["message"],
+                "room_id": room if isinstance(room, str) else None,
+            }
+        )
+    return notes[-LEARNING_NOTES_MAX:]
+
+
+def _restore_outdoor(data: object) -> OutdoorReading | None:
+    """The saved Home Assistant outdoor reading, or None if there is none or it is bad."""
+    if not isinstance(data, dict):
+        return None
+    t, at, source = data.get("temperature_c"), data.get("measured_at"), data.get("source")
+    if not plausible(t) or isinstance(at, bool) or not isinstance(at, (int, float)):
+        return None
+    return OutdoorReading(float(t), float(at), source if isinstance(source, str) else None)
 
 
 def _intervals(history: deque[tuple[float, bool, bool]], now: float) -> tuple[list, list]:

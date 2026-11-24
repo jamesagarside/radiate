@@ -54,6 +54,12 @@ If you change `src/radiate/core` or the simulator, compare the simulator's resul
 .venv/bin/radiate sim --days 5
 ```
 
+For a change to `eco`, room use or the savings baseline, also run the efficiency comparison (about two minutes):
+
+```bash
+.venv/bin/radiate sim-efficiency --days 24 --warmup 3 --seeds 1,2,3 --scenarios fixed,mild,cold,owner,owner_cold
+```
+
 `tests/sim` must pass; it checks that the boiler guards are never violated and that comfort and burn length stay better than plain smart TRVs. If the headline numbers move, update [docs/simulation.md](docs/simulation.md) and explain why in the pull request.
 
 ## Work on a branch

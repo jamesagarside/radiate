@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="static/house.css">
   <link rel="stylesheet" href="static/guide.css">
   <link rel="stylesheet" href="static/savings.css">
+<link rel="stylesheet" href="static/settings.css">
   <link rel="stylesheet" href="static/data.css">
 </head>
 <body>
@@ -39,6 +40,7 @@
     <a href="#devices" class="view-tab" data-view="devices" hidden>Devices<span class="view-count" id="devices-count" hidden></span></a>
     <a href="#suggestions" class="view-tab" data-view="suggestions" hidden>Suggestions<span class="view-count" id="suggestions-count" hidden></span></a>
     <a href="#savings" class="view-tab" data-view="savings" hidden>Savings</a>
+    <a href="#settings" class="view-tab" data-view="settings" hidden>Settings</a>
     <a href="#data" class="view-tab" data-view="data" hidden>Raw data</a>
     <a href="#guide" class="view-tab" data-view="guide" hidden>Guide</a>
   </nav>
@@ -52,6 +54,16 @@
     </div>
     <details class="notice-more" id="dryrun-recent" hidden>
       <summary>Latest held-back writes</summary>
+      <ul></ul>
+    </details>
+  </section>
+
+  <section class="notice" id="learning-notes" aria-labelledby="learning-notes-h" hidden>
+    <div class="notice-copy">
+      <p><strong class="notice-tag" id="learning-notes-h">Learning</strong> <span id="learning-notes-lead"></span></p>
+    </div>
+    <details class="notice-more">
+      <summary>What changed</summary>
       <ul></ul>
     </details>
   </section>
@@ -282,6 +294,27 @@
     </div>
   </section>
 
+  <section class="settings-view" id="settings" aria-labelledby="settings-h" hidden>
+    <div class="devices-head">
+      <h2 id="settings-h" tabindex="-1">Settings</h2>
+      <p class="devices-summary" id="settings-summary" aria-live="polite">Loading settings…</p>
+      <p class="muted devices-network"><span id="settings-where"></span> <a class="help-link" href="#guide/settings">How settings work</a></p>
+    </div>
+    <section class="notice" id="settings-restart" aria-label="Restart needed" hidden>
+      <p><strong class="notice-tag">Restart needed</strong><span id="settings-restart-text"></span></p>
+    </section>
+    <section class="notice" id="settings-problems" aria-label="Saved settings not used" role="alert" hidden>
+      <p><strong class="notice-tag">Not used</strong><span id="settings-problems-text"></span></p>
+    </section>
+    <div class="settings-body">
+      <nav class="card guide-toc settings-toc" aria-label="Settings sections"><ul id="settings-toc"></ul></nav>
+      <div class="settings-sections">
+        <div class="st-all" id="settings-all" hidden></div>
+        <div class="settings-list" id="settings-sections"></div>
+      </div>
+    </div>
+  </section>
+
   <section class="data-view" id="data" aria-labelledby="data-h" hidden>
     <div class="devices-head">
       <h2 id="data-h" tabindex="-1">Raw data</h2>
@@ -390,6 +423,7 @@
           <li><a href="#guide/devices">Devices</a></li>
           <li><a href="#guide/suggestions">Suggestions</a></li>
           <li><a href="#guide/savings">Savings</a></li>
+          <li><a href="#guide/settings">Settings</a></li>
           <li><a href="#guide/raw-data">Raw data and exporting it</a></li>
           <li><a href="#guide/alerts">Alerts</a></li>
           <li><a href="#guide/problems">When something goes wrong</a></li>
@@ -560,6 +594,7 @@
             <div><dt>TRV offline</dt><dd>The room's valve can't be reached.</dd></div>
           </dl>
           <p>Learning counts only the minutes that pass every check. Suggestions about a room start once it has 48 hours of learning and Radiate is sure enough of it. Radiate keeps learning after that, remembers up to two years, and relearns a room that changes, for example after a new radiator.</p>
+          <p>What Radiate has learned carries over when you update it. If an update finds that some rooms learned from data it now knows was wrong, for example a dry run before it could see the burner, it starts just those rooms again and says so in a Learning notice under the header for 14 days.</p>
         </section>
 
         <section class="g-sec" id="g-not-heating" aria-labelledby="g-not-heating-h">
@@ -629,6 +664,20 @@
             <div><dt>People home and away</dt><dd>How many people count as home or away. Only the counts are kept, never who.</dd></div>
           </dl>
           <p>Radiate can also send these readings, and every decision and alert, to an OpenTelemetry collector over OTLP/HTTP, such as Elastic's managed OTLP endpoint. Add an <code>export.otlp</code> section to the house file with the endpoint and an API key. The OpenTelemetry export plate on the Raw data tab says when it last sent, what is waiting, and any error. While the collector can't be reached, Radiate keeps up to 7 days of readings and sends them once it can; if the queue fills, the oldest go first and the plate counts them.</p>
+        </section>
+
+        <section class="g-sec" id="g-settings" aria-labelledby="g-settings-h">
+          <h3 class="section-h" id="g-settings-h" tabindex="-1">Settings</h3>
+          <p>The Settings tab shows every setting in the house file, what each one does and its value now. You can change them there instead of editing the file.</p>
+          <p>Radiate never changes the house file itself, as it may be read-only. A change is saved in Radiate's data directory and replaces the house file's value from then on. Each section saves on its own, and a value that wouldn't load is refused with the reason under it.</p>
+          <dl class="g-terms g-words">
+            <div><dt>House file</dt><dd>The value comes from the house file.</dd></div>
+            <div><dt>Set here</dt><dd>You changed it in Settings. "Use the house file's" goes back to the file's value, or to the default if the file doesn't set it. Each section and each room can go back as a whole.</dd></div>
+            <div><dt>Default</dt><dd>Neither the house file nor Settings sets it, so Radiate uses its own default.</dd></div>
+            <div><dt>Restart to use</dt><dd>Saved, but Radiate uses it only after it restarts. Boiler, hot water, learning, alerts and suggestions settings apply straight away; rooms, devices, the boiler relay and MQTT wait for a restart.</dd></div>
+          </dl>
+          <p>A change that lets Radiate write to the boiler or the valves, such as turning dry run off, giving the relay's address or actuating a room's valve, asks you to confirm first.</p>
+          <p>Passwords are never shown, only whether one is set. Type a new one to replace it. The household and the weekly times have their own places: the household setup and the Schedules section of the House view.</p>
         </section>
 
         <section class="g-sec" id="g-alerts" aria-labelledby="g-alerts-h">

@@ -105,7 +105,10 @@ def test_the_headline_for_a_house_with_figures(bodies, tmp_path):
         "About 3.5 litres of oil saved since 1 November, with rooms in use warm 98% of the time."
     )
     assert out["house"] == out["headline"]
-    assert out["basis"] == "Litres are an upper bound until the burner itself is measured."
+    assert out["basis"] == (
+        "Litres are an upper bound until the burner itself is measured. "
+        "Outdoor temperature from the simulation."
+    )
     assert [s[0] for s in out["stats"]] == [
         "Oil saved",
         "Oil used",
@@ -138,7 +141,7 @@ def test_still_learning_shows_progress_and_the_oil_so_far(bodies, tmp_path):
 
 def test_a_day_not_counted_is_an_empty_slot_with_its_reason(bodies, tmp_path):
     (out,) = run([bodies["ready"]], tmp_path)
-    assert out["days"][4] == "Thu 5 Nov: not counted, outdoor sensor missing for 5 h."
+    assert out["days"][4] == "Thu 5 Nov: not counted, no fresh outdoor temperature for 5 h."
     assert out["slots"] == 20 and out["empty"] == 1 and out["outlines"] == 19
     assert out["focusable"] == 1  # one tab stop; arrow keys move between slots
     assert "about 0.2 L saved" in out["days"][3]
@@ -155,7 +158,7 @@ def test_the_table_has_the_same_numbers_as_the_days(bodies, tmp_path):
     first = out["rows"][0]
     assert first[0] == "Sun 1 Nov" and first[1] == "Yes"
     assert first[2] == f"{days[0]['litres']:.1f}" and first[4] == "0.2"
-    assert out["rows"][4][1] == "No, outdoor sensor missing for 5 h"
+    assert out["rows"][4][1] == "No, no fresh outdoor temperature for 5 h"
     assert out["rows"][4][3] == "–"  # the one placeholder for a missing value
     assert out["rows"][7][4] == "−0.1"  # a real minus sign
 

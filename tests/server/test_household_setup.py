@@ -19,7 +19,7 @@ from radiate.cli import main
 from radiate.config import load_site, parse_site
 from radiate.config.household import household_section
 from radiate.config.saved import read_saved, saved_path, write_saved
-from radiate.config.site import apply_household, parse_household
+from radiate.config.site import apply_household, parse_household, shadowed_household_keys
 from radiate.drivers.live import LiveDriver
 from radiate.server.app import create_app
 from radiate.server.bridge import DemoSession, RequestError, handle, run_sync
@@ -191,6 +191,37 @@ def test_cli_agrees_with_the_server_given_the_data_dir(tmp_path, capsys):
     assert "20°" in out
     main(["check-config", str(path), "--data-dir", str(tmp_path / "elsewhere")])
     assert "household: from the house file" in capsys.readouterr().out
+
+
+def test_a_saved_household_says_which_house_file_settings_it_hides(tmp_path, capsys):
+    # The trap: fixing everyone_away in the house file does nothing while a household
+    # saved from the web UI replaces the whole section, away settings included.
+    data = house_data()
+    data["household"]["away"] = {"everyone_away": "unused", "presence_delay_min": 30}
+    path = write_house(tmp_path, data)
+    write_saved(tmp_path / "data", draft())
+    site = load_site(path, data_dir=tmp_path / "data")
+    hidden = shadowed_household_keys(site)
+    assert "away.everyone_away" in hidden and "away.presence_delay_min" in hidden
+    assert "people" in hidden and "temperatures.in_use" in hidden
+    main(["check-config", str(path), "--data-dir", str(tmp_path / "data")])
+    out = capsys.readouterr().out
+    assert "warning: the household saved from the web UI replaces" in out
+    assert "away.everyone_away" in out
+    # From the house file, or with no house file section, there is nothing to hide.
+    assert shadowed_household_keys(load_site(path, data_dir=tmp_path / "none")) == []
+
+
+def test_the_setup_view_warns_when_the_saved_household_wins(tmp_path):
+    rt = make(tmp_path)
+    view = rt.setup.view()
+    assert view["source_warning"] is None and view["house_file_ignored"] == []
+    saved = handle(rt, "PUT", "household", {"household": draft()})
+    assert saved["source"] == "saved"
+    assert "away settings included" in saved["source_warning"]
+    assert "people" in saved["house_file_ignored"]
+    reverted = handle(rt, "DELETE", "household")
+    assert reverted["source_warning"] is None
 
 
 # --- the setup: view, preview, save, revert ---------------------------------------------

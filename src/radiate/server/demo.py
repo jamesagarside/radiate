@@ -64,6 +64,14 @@ class DemoDriver:
     def replace_household(self, site: SiteConfig) -> None:
         self.household_live = dict(site.household_live)
 
+    def replace_settings(self, cfg, site: SiteConfig) -> None:
+        """Settings changed in the Settings view that apply live: device alert limits."""
+        self.limits = dataclasses.replace(
+            self.limits,
+            low_battery_pct=site.monitoring.low_battery_pct,
+            weak_signal_lqi=site.monitoring.weak_signal_lqi,
+        )
+
     def set_household_schedules(
         self, schedules: dict[str, WeekSchedule], live: dict[str, WeekSchedule] | None = None
     ) -> None:
@@ -365,11 +373,13 @@ def demo_runtime(start_hour: float = 5.5, seed: int = 7, days: int = 0, record: 
     """
     from .bridge import run_sync
     from .runtime import Runtime
+    from .settings import SettingsEditor, SettingsMemory
     from .setup import HouseholdSetup, SavedMemory
 
     site = demo_site()
     rt = Runtime(site.house, DemoDriver(start_hour=start_hour, seed=seed))
     rt.setup = HouseholdSetup(site, SavedMemory())
+    rt.settings_editor = SettingsEditor.start(demo_house_file(), SettingsMemory())
     if record:
         _record(rt, days)
     if days > 0:
@@ -423,6 +433,34 @@ def demo_site() -> SiteConfig:
         schedules=weeks,
         room_schedules={rid: rid for rid in weeks},
     )
+
+
+def demo_house_file() -> dict:
+    """The simulated house as a house file, for the Settings view to show and check
+    changes against. Device names are made up; the simulator has no devices."""
+    rooms = []
+    for s in ROOMS:
+        item: dict = {"id": s.id, "name": s.name}
+        if s.role is not RoomRole.NORMAL:
+            item["role"] = s.role.value
+        if s.heat_source is not None:
+            item["heat_source"] = s.heat_source.value
+        if s.trv:
+            item["trv"] = f"trv_{s.id}"
+            item["schedule"] = s.id
+            item["actuate"] = True
+        if s.role is not RoomRole.INTERNAL_SENSOR_ONLY:
+            item["sensor"] = f"temp_{s.id}"
+        if s.humidity:
+            item["humidity"] = True
+        rooms.append(item)
+    return {
+        "house": {"timezone": "Europe/London", "dry_run": True, "outdoor_sensor": "temp_outdoor"},
+        "mqtt": {"host": "localhost", "port": 1883},
+        "boiler": {"nozzle_lph": DEMO_NOZZLE_LPH},
+        "schedules": {s.id: {"daily": _week(s).days[0].trvzb()} for s in ROOMS if s.trv},
+        "rooms": rooms,
+    }
 
 
 def _week(spec: RoomSpec) -> WeekSchedule:

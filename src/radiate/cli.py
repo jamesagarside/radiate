@@ -1,4 +1,4 @@
-"""Command line: `radiate serve`, `sim`, `check-config`, `discover`, `schedules`, `dashboard`,
+"""Command line: `radiate serve`, `sim`, `sim-efficiency`, `check-config`, `discover`, `schedules`, `dashboard`,
 `replay`, `bootstrap` and `shelly`."""
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ def _serve(args: argparse.Namespace) -> None:
             banner = f"Radiate demo ({args.speed:g}x)"
         else:
             runtime, queue, cleanup = await _start_live(site, session)
+            runtime.settings_editor = _settings_editor(args, site)
             interval = 60.0
             banner = f"Radiate {'DRY RUN' if site.dry_run else 'LIVE'}"
         if os.environ.get("RADIATE_ELASTIC_URL"):
@@ -83,6 +84,28 @@ def _serve(args: argparse.Namespace) -> None:
 
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
+
+
+def _settings_editor(args: argparse.Namespace, site):
+    """The web UI's Settings view: the house file as read, and the settings saved over
+    it in the data directory."""
+    from radiate.config import ConfigError
+    from radiate.config.saved import read_settings
+    from radiate.config.site import read_house_file
+    from radiate.server.settings import SettingsEditor, SettingsFile
+
+    try:
+        saved = read_settings(site.data_dir)
+    except ConfigError:
+        saved = None  # site.settings_problems says why
+    locked = {"house.dry_run": "Set by --dry-run on the command line."} if args.dry_run else {}
+    return SettingsEditor.start(
+        read_house_file(args.config),
+        SettingsFile(site.data_dir),
+        saved,
+        locked=locked,
+        problems=site.settings_problems,
+    )
 
 
 def _otlp_config(site):
@@ -165,8 +188,16 @@ async def _start_live(site, session):
     from radiate.server.store import SqliteQueue, Store
 
     log = logging.getLogger("radiate")
+    if site.saved_settings:
+        log.info(
+            "settings: saved from the web UI, in %s: %s",
+            Path(site.data_dir),
+            ", ".join(site.saved_settings),
+        )
     if site.household_source == "saved":
         log.info("household: saved from the web UI, in %s", Path(site.data_dir))
+    for warning in _household_warnings(site):
+        log.warning("household: %s", warning)
     for note in site.notes:
         log.info("config: %s", note)
     store = Store(Path(site.data_dir) / "radiate.db")
@@ -219,6 +250,9 @@ async def _start_live(site, session):
         household=site.household,
         timezone=site.timezone,
         schedule_use=site.schedule_use,
+        fire_flag_max_s=site.fire_flag_s,
+        outdoor_source=site.outdoor_source,
+        outdoor_stale_after_s=site.outdoor_stale_after_s,
     )
     runtime.setup = HouseholdSetup(site, SavedFile(site.data_dir))
     for problem in runtime.restore():
@@ -254,6 +288,12 @@ def _sim(args: argparse.Namespace) -> None:
         print(f"{k:{width}}  {b[k]:>11}  {r[k]:>8}")
 
 
+def _sim_efficiency(args: argparse.Namespace) -> None:
+    from radiate.sim.compare import main
+
+    main(args)
+
+
 def _household_line(site) -> str | None:
     from radiate.config.saved import saved_path
 
@@ -267,12 +307,32 @@ def _household_line(site) -> str | None:
     return None
 
 
+def _household_warnings(site) -> list[str]:
+    """The config-source trap: a saved household hides the house file's section."""
+    from radiate.config.site import SAVED_SOURCE_WARNING, shadowed_household_keys
+
+    if site.household_source != "saved" or site.file_household is None:
+        return []
+    out = [SAVED_SOURCE_WARNING[0].lower() + SAVED_SOURCE_WARNING[1:]]
+    hidden = shadowed_household_keys(site)
+    if hidden:
+        out.append("house file household settings not in effect: " + ", ".join(hidden))
+    return out
+
+
 def _check_config(args: argparse.Namespace) -> None:
     site = _load(args.path, args.data_dir)
     print(f"{args.path}: OK")
+    if site.saved_settings:
+        from radiate.config.saved import settings_path
+
+        print(f"  settings saved from the web UI in {settings_path(site.data_dir)}:")
+        print(f"    {', '.join(site.saved_settings)}")
     line = _household_line(site)
     if line:
         print(f"  {line}")
+    for warning in _household_warnings(site):
+        print(f"  warning: {warning}")
     for r in site.house.rooms:
         dev = site.devices[r.id]
         parts = [f"role={r.role.value}"]
@@ -608,6 +668,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="how calling rooms fire the boiler (default eco)",
     )
     m.set_defaults(func=_sim)
+    e = sub.add_parser(
+        "sim-efficiency",
+        help="compare eco with and without room use, comfort and a plain timer in the simulator",
+    )
+    e.add_argument("--days", type=int, default=24)
+    e.add_argument("--warmup", type=int, default=3)
+    e.add_argument("--seeds", default="1,2,3", help="comma-separated seeds (default 1,2,3)")
+    e.add_argument(
+        "--scenarios",
+        default="fixed,mild,cold",
+        help="comma-separated: fixed, mild, cold, owner, owner_cold (default fixed,mild,cold)",
+    )
+    e.add_argument("--workers", type=int, default=None, help="parallel runs (default: CPUs)")
+    e.set_defaults(func=_sim_efficiency)
     c = sub.add_parser("check-config", help="validate a house configuration file")
     c.add_argument("path")
     c.add_argument("--data-dir", help=DATA_DIR_HELP)

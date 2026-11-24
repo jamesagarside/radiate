@@ -23,11 +23,14 @@ import json
 import logging
 import re
 import secrets
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from radiate.config import ShellyConfig, WeekSchedule
+from radiate.config.household import Temperatures, UseLevel
+from radiate.core.types import DAMP_FLOOR_C
 
 LOG = logging.getLogger(__name__)
 
@@ -42,6 +45,9 @@ _REPO_SCRIPT = Path(__file__).resolve().parents[3] / "shelly" / "radiate-watchdo
 WATCHDOG_PATH = _PKG_SCRIPT if _PKG_SCRIPT.exists() else _REPO_SCRIPT
 FALLBACK_LEAD_MIN = 60
 MAX_WINDOWS = 4
+FROST_C = 7.0  # a room held this low all day wants no fallback heat
+# The watchdog script's own `HEATING` windows, used when the schedules give none.
+DEFAULT_HEATING_WINDOWS = [[330, 510], [960, 1350]]
 
 
 class ShellyError(RuntimeError):
@@ -96,23 +102,53 @@ def chunks(code: str, size: int = SCRIPT_CHUNK) -> list[str]:
     return [code[i : i + size] for i in range(0, len(code), size)] or [""]
 
 
+DEFAULT_UNUSED_C = Temperatures().unused_c  # the household's default unused temperature
+
+
 def fallback_heating_windows(
-    schedules: list[WeekSchedule], weekday: int, lead_min: int = FALLBACK_LEAD_MIN
+    schedules: list[WeekSchedule],
+    weekday: int,
+    lead_min: int = FALLBACK_LEAD_MIN,
+    frost_c: float = FROST_C,
+    levels: Sequence[UseLevel | None] | None = None,
+    unused_c: float = DEFAULT_UNUSED_C,
 ) -> list[list[int]]:
     """Daily windows for the watchdog's heating channel, from the room schedules.
 
     A window is any time some room wants more than its lowest setpoint of the day,
     started `lead_min` early because the fallback cannot do optimum start. Merged and
     capped at 4 windows so it fits a KVS value.
+
+    A room held at one setpoint all day wants heat all day only if it is warm that day:
+    its use level (`levels`, one per schedule, for `weekday`) is in use or occasional,
+    as for room use. A room with no use level counts as warm only above the unused
+    temperature and the damp floor. An unused room held at its unused temperature has
+    nothing to heat for, so it must not hold the relay on all day.
+
+    Never empty (fail warm, spec 7): with no window from the schedules, the watchdog's
+    own default windows are returned, since the watchdog takes an empty list as
+    "never heat". The caller passes the weeks for everyone at home, never the away
+    weeks.
     """
     spans: list[list[int]] = []
-    for week in schedules:
+    for i, week in enumerate(schedules):
         day = week.days[weekday % 7]
         low = min(sp for _, sp in day.transitions)
+        if all(sp == low for _, sp in day.transitions):
+            level = levels[i] if levels is not None else None
+            if level is None:
+                warm = low > max(frost_c, unused_c, DAMP_FLOOR_C)
+            else:
+                warm = level in (UseLevel.IN_USE, UseLevel.OCCASIONAL) and low > frost_c
+            if warm:
+                spans.append([0, 1440])
+            continue
         bounds = [*day.transitions, (1440, low)]
         for (start, sp), (end, _) in zip(bounds, bounds[1:], strict=False):
             if sp > low:
                 spans.append([max(0, start - lead_min), end])
+    if not spans:
+        return [list(w) for w in DEFAULT_HEATING_WINDOWS]
     spans.sort()
     merged: list[list[int]] = []
     for s in spans:
@@ -140,6 +176,38 @@ class SwitchStatus:
     output: bool
     apower: float | None = None
     timer_duration: float | None = None
+
+
+@dataclass(slots=True)
+class BurnerMeter:
+    """Whether the burner fires, from one channel's power reading (`apower`).
+
+    On the reference boiler the heating channel reads about 185 W while the burner
+    fires, 52 to 60 W with the relay on and the burner held off by the boiler's own
+    thermostat (the pump only), and 0 W with the relay off; the store channel reads
+    about 125 W while the store burner runs and 0 W once the store is satisfied, relay
+    on or not. So: firing at or above `threshold_w`, stopped below `threshold_w -
+    hysteresis_w`, unchanged in between (a relight's single high reading or a dip).
+
+    Only trusted once the channel has read at or above the threshold since Radiate
+    started: where the relay switches a low-current demand line, the burner's load
+    never passes through it and a low reading proves nothing. Until then, None.
+    """
+
+    threshold_w: float = 100.0
+    hysteresis_w: float = 20.0
+    proven: bool = False
+    firing: bool = False
+
+    def update(self, status: SwitchStatus | None) -> bool | None:
+        """The burner as of this reading, or None when the channel is not metered."""
+        if status is None or status.apower is None:
+            return None
+        if status.apower >= self.threshold_w:
+            self.proven = self.firing = True
+        elif not status.output or status.apower < self.threshold_w - self.hysteresis_w:
+            self.firing = False
+        return self.firing if self.proven else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +286,17 @@ class ShellyBoiler:
         self.store: SwitchStatus | None = None
         self.reachable = False
         self.errors = 0
+        # The burner firing on each channel, from its power reading (None: not metered).
+        self.heating_burner: bool | None = None
+        self.store_burner: bool | None = None
+        self._meters = (
+            (
+                BurnerMeter(cfg.burner_threshold_w, cfg.burner_hysteresis_w),
+                BurnerMeter(cfg.burner_threshold_w, cfg.burner_hysteresis_w),
+            )
+            if cfg.burner_metering
+            else None
+        )
         self._kvs_sent: dict[str, str] = {}
         self.intended: list[tuple[str, dict]] = []  # dry run: what would have been sent
 
@@ -235,12 +314,16 @@ class ShellyBoiler:
             s = await self.rpc.call("Switch.GetStatus", {"id": self.cfg.store_switch})
         except Exception as err:
             self.reachable = False
+            self.heating_burner = self.store_burner = None
             self.errors += 1
             LOG.warning("Shelly %s unreachable: %r", self.cfg.host, err)
             return
         self.heating = _switch(h)
         self.store = _switch(s)
         self.reachable = True
+        if self._meters is not None:
+            self.heating_burner = self._meters[0].update(self.heating)
+            self.store_burner = self._meters[1].update(self.store)
 
     async def command(
         self, heating: bool, store: bool, unix_now: int, heartbeat: bool = True
@@ -333,6 +416,10 @@ class ShellyBoiler:
             "heating_output": self.heating.output if self.heating else None,
             "heating_power_w": self.heating.apower if self.heating else None,
             "store_output": self.store.output if self.store else None,
+            "store_power_w": self.store.apower if self.store else None,
+            # The burner firing, from the power reading (None: not metered).
+            "heating_burner": self.heating_burner,
+            "store_burner": self.store_burner,
             "shelly_errors": self.errors,
         }
 

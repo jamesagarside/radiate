@@ -5,6 +5,7 @@ import yaml
 
 from radiate.config import ConfigError, load_site, parse_day, parse_site, parse_week
 from radiate.config.schedule import ScheduleError
+from radiate.core.outdoor import OutdoorSource
 from radiate.core.types import DemandMode, HeatSource, RoomRole
 from radiate.sim.reference import ROOMS, setpoint
 
@@ -169,6 +170,40 @@ def test_history_days_default_range_and_off():
         parse_site(minimal(house={"history_days": 120}))
 
 
+def test_outdoor_source_defaults_to_zigbee():
+    site = parse_site(minimal())
+    assert site.outdoor_source is OutdoorSource.ZIGBEE
+    assert site.outdoor_stale_after_s == 3 * 3600
+
+
+def test_outdoor_source_home_assistant_and_stale_limit():
+    site = parse_site(
+        minimal(house={"outdoor_source": "home_assistant", "outdoor_stale_after_min": 90})
+    )
+    assert site.outdoor_source is OutdoorSource.HOME_ASSISTANT
+    assert site.outdoor_stale_after_s == 90 * 60
+    assert not any("outdoor_sensor is not used" in n for n in site.notes)
+    site = parse_site(minimal(house={"outdoor_source": "home_assistant", "outdoor_sensor": "o"}))
+    assert any("outdoor_sensor is not used" in n for n in site.notes)
+
+
+def test_outdoor_source_both_needs_a_zigbee_sensor():
+    site = parse_site(minimal(house={"outdoor_source": "both", "outdoor_sensor": "garden"}))
+    assert site.outdoor_source is OutdoorSource.BOTH
+    with pytest.raises(ConfigError) as exc:
+        parse_site(minimal(house={"outdoor_source": "both"}))
+    assert any(p.startswith("house.outdoor_source: both needs") for p in exc.value.problems)
+
+
+def test_outdoor_source_problems():
+    with pytest.raises(ConfigError) as exc:
+        parse_site(minimal(house={"outdoor_source": "met_office", "outdoor_stale_after_min": 5}))
+    assert exc.value.problems == [
+        "house.outdoor_source: must be zigbee, home_assistant or both",
+        "house.outdoor_stale_after_min: must be 30 to 1440",
+    ]
+
+
 def test_monitoring_defaults_and_ranges():
     m = parse_site(minimal()).monitoring
     assert (m.low_battery_pct, m.weak_signal_lqi) == (20, 40)
@@ -228,6 +263,14 @@ def test_demand_mode():
     assert "boiler.eco_limit_k: must be 0.5 to 3" in err.value.problems
     with pytest.raises(ConfigError, match="eco_limit_k: must be at least comfort_limit_k"):
         parse_site(minimal(boiler={"comfort_limit_k": 1.2, "eco_limit_k": 1.0}))
+
+
+def test_damp_margin():
+    assert parse_site(minimal()).house.boiler.damp_margin_k == 0.3
+    boiler = parse_site(minimal(boiler={"damp_margin_k": 0})).house.boiler
+    assert boiler.damp_margin_k == 0.0
+    with pytest.raises(ConfigError, match="boiler.damp_margin_k: must be 0 to 1"):
+        parse_site(minimal(boiler={"damp_margin_k": 1.5}))
 
 
 def test_learning_memory():
@@ -327,3 +370,27 @@ def test_unheated_room_problems():
         "rooms[8].role: must be normal, passive, internal_sensor_only or unheated",
     ):
         assert expected in problems, expected
+
+
+def test_shelly_burner_metering_defaults_and_settings():
+    site = parse_site(minimal(shelly={"host": "192.0.2.10"}))
+    s = site.shelly
+    assert (s.burner_metering, s.burner_threshold_w, s.burner_hysteresis_w) == (True, 100, 20)
+    site = parse_site(
+        minimal(
+            shelly={
+                "host": "192.0.2.10",
+                "burner_metering": False,
+                "burner_threshold_w": 80,
+                "burner_hysteresis_w": 10,
+            }
+        )
+    )
+    s = site.shelly
+    assert (s.burner_metering, s.burner_threshold_w, s.burner_hysteresis_w) == (False, 80, 10)
+
+
+def test_shelly_burner_hysteresis_below_the_threshold():
+    shelly = {"host": "192.0.2.10", "burner_threshold_w": 50, "burner_hysteresis_w": 60}
+    with pytest.raises(ConfigError, match="burner_hysteresis_w: must be less than"):
+        parse_site(minimal(shelly=shelly))

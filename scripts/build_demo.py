@@ -45,6 +45,8 @@ STATIC_FILES = (
     "house.css",
     "guide.js",
     "guide.css",
+    "settings.js",
+    "settings.css",
     "demo.js",
     "demo.css",
     "demo-worker.js",

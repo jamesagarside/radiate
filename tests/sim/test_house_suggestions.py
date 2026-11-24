@@ -29,7 +29,9 @@ def found(view: dict) -> set[tuple[str, str | None]]:
 
 
 def test_a_healthy_house_gets_no_room_suggestions():
-    view = run(4, faults=False)
+    # Five days, as for the faults: with burner metering and the demo's changing
+    # weather, the dining room's model is still settling on day 4 and reads as leaky.
+    view = run(5, faults=False)
     assert view["summary"]["rooms_ready"] == 6  # not the toilet or the kitchen
     # Only the demo's weak bathroom sensor, which is about the mesh, not the rooms.
     assert found(view) == {("zigbee.weak_link", "bathroom")}

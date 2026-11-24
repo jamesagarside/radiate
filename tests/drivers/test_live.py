@@ -367,3 +367,102 @@ async def test_internal_sensor_room_mirrors_schedule_in_trv_frame():
         toilet["weekly_schedule_monday"] == "00:00/17.5 06:30/19.5 08:30/17.5 17:00/19.5 22:30/17.5"
     )
     assert bedroom["weekly_schedule_monday"] == "00:00/16 06:30/20 08:30/16 17:00/20 22:30/16"
+
+
+# --- restart readings (spec 7, fail warm) ------------------------------------------------
+
+
+async def test_room_sensor_readings_are_remembered_across_a_restart(tmp_path):
+    from radiate.server.store import Store
+
+    store = Store(tmp_path / "radiate.db")
+    wall = [WALL]
+    clock, bus = Clock(), Bus()
+    drv = LiveDriver(site(), bus.publish, clock=clock, wall=lambda: wall[0])
+    feed(drv, room_temp=19.2)
+    clock.t += 600
+    wall[0] += 600
+    rt = Runtime(drv.cfg, drv, store=store, wall=lambda: wall[0])
+    rt.save()
+
+    # Restarted 5 minutes later: the bedroom sensor has not reported since. Its
+    # reading comes back with its true age (15 min), not as missing.
+    wall[0] += 300
+    clock2 = Clock()
+    drv2 = LiveDriver(site(), bus.publish, clock=clock2, wall=lambda: wall[0])
+    rt2 = Runtime(drv2.cfg, drv2, store=store, wall=lambda: wall[0])
+    rt2.restore()
+    snap = await drv2.snapshot(Mode.AUTO, {}, False, set())
+    bed = snap.rooms["bedroom_1"]
+    assert bed.temperature == 19.2 and bed.temperature_restored
+    assert bed.temperature_age_s == 0.0  # within the sensor's reporting interval
+    assert bed.sensor_missing_s is None
+    assert drv2.devices.get("temp_bedroom_1").age("temperature", clock2()) == 900
+
+    # Still subject to the silence limit, counted from the sensor's own last report.
+    clock2.t += 3000
+    wall[0] += 3000
+    snap = await drv2.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.rooms["bedroom_1"].temperature_age_s == pytest.approx(3900)
+
+    # A live report replaces it.
+    drv2.handle_message("zigbee2mqtt/temp_bedroom_1", b'{"temperature": 18.4}')
+    snap = await drv2.snapshot(Mode.AUTO, {}, False, set())
+    bed = snap.rooms["bedroom_1"]
+    assert bed.temperature == 18.4 and not bed.temperature_restored
+    store.close()
+
+
+def test_remembered_readings_never_replace_a_newer_one_or_come_from_long_ago():
+    drv, _, _ = make()
+    feed(drv, room_temp=18.0)
+    drv.restore_sensor_memory({"temp_bedroom_1": {"temperature": 21.0, "at": WALL - 60}})
+    assert drv.devices.get("temp_bedroom_1").number("temperature") == 18.0
+    drv2, _, _ = make()
+    drv2.restore_sensor_memory(
+        {
+            "temp_bedroom_1": {"temperature": 21.0, "at": WALL - 2 * 86400},
+            "temp_lounge": {"temperature": "warm", "at": WALL - 60},
+            "temp_kitchen": {"temperature": 20.0, "at": WALL + 600},  # from the future
+            "unknown_sensor": {"temperature": 20.0, "at": WALL - 60},
+        }
+    )
+    for name in ("temp_bedroom_1", "temp_lounge", "temp_kitchen"):
+        assert drv2.devices.get(name).number("temperature") is None
+    assert drv2.devices.get("unknown_sensor") is None
+    drv2.restore_sensor_memory(["not", "a", "mapping"])  # ignored, never raises
+
+
+async def test_a_sensor_not_heard_since_start_is_reported_missing():
+    drv, clock, _ = make()
+    clock.t += 300
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    bed = snap.rooms["bedroom_1"]
+    assert bed.temperature is None and bed.sensor_missing_s == 300
+    # A room without a sensor of its own has nothing to wait for.
+    assert snap.rooms["toilet"].sensor_missing_s is None
+
+
+async def test_snapshot_without_a_relay_reading_says_so():
+    # No Shelly: the relay in the snapshot is Radiate's own last command, which in dry
+    # run was never sent. Learning and accounting must not take it as the boiler.
+    drv, _, _ = make(dry_run=True)
+    feed(drv)
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.relay_observed is False
+    assert snap.heating_burner is None and snap.store_burner is None
+
+
+async def test_snapshot_carries_the_relay_and_burner_as_read(fake_shelly):
+    s = site(dry_run=True)
+    s = dataclasses.replace(s, shelly=dataclasses.replace(s.shelly, host=fake_shelly.host))
+    boiler = ShellyBoiler(s.shelly, ShellyRpc(fake_shelly.host, "pw", fake_shelly.session))
+    drv = LiveDriver(s, Bus().publish, boiler, clock=Clock(), wall=lambda: WALL)
+    feed(drv)
+    fake_shelly.switches[0] = {"output": True, "apower": 186.0}
+    fake_shelly.switches[1] = {"output": True, "apower": 0.0}
+    snap = await drv.snapshot(Mode.AUTO, {}, False, set())
+    assert snap.relay_observed is True and snap.heating_relay is True
+    assert snap.heating_burner is True
+    assert snap.store_burner is None  # the store channel has not shown its burner yet
+    assert snap.relay_follows_commands is False
