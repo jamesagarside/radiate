@@ -321,6 +321,7 @@ done
 `<data_dir>/radiate.db` is a SQLite database in WAL mode, so you also see `radiate.db-wal` and `radiate.db-shm` next to it. It holds:
 
 - Learned room models, arrival lags, lockshield caps, disturbance hold-offs, stuck and leaking valve verdicts, the short-cycle adaptation, the day's accounting and the boiler guard. A restart in the middle of a burn still honours minimum burn.
+- Where each room's learning came from (its provenance), and the learning notes of the last 14 days.
 - The house ID used by Elastic and the Home Assistant integration.
 - The heating mode, the demand mode setting, setpoint overrides, and away state: who is away until when, and the presence Home Assistant last reported.
 - The Elastic export queue.
@@ -372,7 +373,7 @@ The command replaces each room's model, arrival lags and lockshield cap with the
 
 Recorded dry-run ticks teach nothing unless the Shelly showed the burner firing (spec 4.1, `heat_unknown`), so a bootstrap after a dry run without metering learns from the live days only.
 
-To put room models back to their priors without stopping the server, for example models learned in a dry run before Radiate stopped learning from one, post to the learning reset. It writes no device:
+Models learned in a dry run without metering, or saved by a version before Radiate recorded how each model was learned, are reset on their own once the Shelly shows the burner (spec 4.3, ADR-0007). To put room models back to their priors for any other reason without stopping the server, post to the learning reset. It writes no device:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $RADIATE_TOKEN" -H "Content-Type: application/json" \
@@ -390,7 +391,9 @@ A replay across a reset differs from then on, because the reset is not a recorde
 - Home Assistant App: the App version does not change with each commit yet, so Home Assistant won't offer updates. Select **Rebuild** on the App page to build it again from `main`.
 - HACS integration: update it in HACS and restart Home Assistant.
 
-Saved state carries a format version. If a new release cannot read it, Radiate logs the problem and starts from priors rather than refusing to start.
+Learned state survives an upgrade ([ADR-0007](adr/0007-learned-state-across-upgrades.md)). Saved engine state carries a format version, and a new release brings an older save forward rather than starting again. A release that knows some learning is wrong, such as models learned in a dry run without burner metering, resets only the rooms concerned. Each change is logged and shown for 14 days in the web UI's Learning notice and in `learning_notes` in `GET /api/v1/state`.
+
+Going back to an older release: it does not read state saved by a newer one. It keeps that state untouched in the database under `engine.v<N>`, starts from priors or the tick history, and says so. To return to the newer release with its state, restore the database from a backup taken before the downgrade.
 
 ## Shelly watchdog
 

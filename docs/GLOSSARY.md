@@ -319,6 +319,28 @@ Putting rooms' learned parts (room model, arrival lags, lockshield histogram) ba
 Code: `reset_learned` in `radiate.core.decide`, `Runtime.reset_learning`, API `POST /api/v1/learning/reset`, decision `learning.reset`.
 _Avoid_: re-learn, which is change detection's partial forgetting.
 
+**Provenance**:
+Where a room's learned parts (room model, arrival lags, lockshield histogram) came from: learning updates counted by condition (`live_burner`, `live_relay`, `dry_burner`, `dry_relay`, and `unknown` for updates carried over from a save that did not record them), the local days of the first and latest update, the learner version and the Radiate version that last learned. Saved with the model (ADR-0007).
+Code: `Provenance` and `Conditions` in `radiate.core.provenance`, `RoomState.learned`, state field `model.learned`.
+
+**Learner version**:
+A number bumped when what a learning update means changes, so an invalidation rule can name models learned before it. 1: saves from before provenance. 2: learning sees only heat Radiate can see (`heat_unknown`, burner metering).
+Code: `LEARNER_VERSION`, `Provenance.learner`.
+_Avoid_: schema version, which is the saved format (`persist.VERSION`).
+
+**Invalidation rule**:
+A rule, shipped with a release, that declares some learned values invalid, such as learning from a dry run without burner metering once the burner is metered (`dry_run_unmetered`). Checked for every room each tick; a room it names goes back to its priors, and no other room does.
+Code: `Invalidation`, `RULES`, `invalid` in `radiate.core.provenance`, decision `learning.invalidated`.
+_Avoid_: learning reset, which a person asks for.
+
+**Migration**:
+A function that brings saved engine state from one format version to the next, so learning survives an upgrade. Tested from a fixture of what the older version wrote.
+Code: `MIGRATIONS`, `migrate` in `radiate.core.persist`, fixtures in `tests/core/fixtures`.
+
+**Learning note**:
+A line the web UI shows for 14 days when learned state was dropped, brought forward or reset: on restart, by an invalidation rule or by a person.
+Code: `Runtime.learning_notes`, state field `learning_notes`, codes `learning.restore`, `learning.invalidated`, `learning.reset`.
+
 **Flow fraction**:
 The share of full flow a valve passes at a given opening limit.
 Symbol `f(o)`, 0 to 1. Code: `flow_fraction` in `radiate.core.valve` (inverse `opening_for`).
@@ -864,7 +886,7 @@ Learning room models from the tick history by replaying it from priors with a th
 Code: `radiate.core.bootstrap`, `Runtime.restore`, `radiate bootstrap`.
 
 **Decision log**:
-The last 500 boiler, disturbance, safe mode and `learning.relearn` reasons, with the time they happened.
+The last 500 boiler, disturbance, safe mode, `learning.relearn`, `learning.invalidated` and `learning.reset` reasons, with the time they happened.
 Code: `Runtime.decisions`, `DecisionRecord`, API `GET /api/v1/decisions`.
 
 **Driver**:
