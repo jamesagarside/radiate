@@ -100,7 +100,7 @@ h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em;
 .seg button {
   border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 0.9rem; font-weight: 500;
   padding: 6px 12px; border-radius: 0; cursor: pointer;
-  transition: transform 160ms var(--ease-out), background-color 150ms ease, color 150ms ease;
+  transition: transform 160ms var(--ease-out), background-color 150ms ease, color 150ms ease, opacity 150ms ease;
 }
 .seg button + button { border-left: 1.5px solid var(--text); }
 .seg button[aria-checked="true"] { background: var(--text); color: var(--bg); font-weight: 600; }
@@ -227,12 +227,16 @@ main { max-width: 1340px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .btn {
   font: inherit; font-size: 0.9rem; font-weight: 500; border: 1.5px solid var(--text); background: transparent; color: var(--text);
   padding: 7px 12px; border-radius: 0; cursor: pointer;
-  transition: transform 160ms var(--ease-out), background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  transition: transform 160ms var(--ease-out), background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
 }
 .btn:active { transform: scale(0.97); }
 .btn[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
 .btn-primary { background: var(--cool); border-color: var(--cool); color: var(--on-cool); font-weight: 600; }
 .btn:disabled { opacity: 0.6; cursor: progress; }
+/* A change on its way to the server: the press shows at once, a little faded until
+   the server has it. The control stays usable, so a second press can follow. */
+.btn[aria-busy="true"], .seg[aria-busy="true"] button[aria-checked="true"] { opacity: 0.75; cursor: progress; }
+.action-error { color: var(--warn); font-size: 0.84rem; }
 @media (hover: hover) and (pointer: fine) {
   .btn:not(.btn-primary):not([aria-pressed="true"]):hover { background: var(--surface-2); }
   .btn-primary:hover { border-color: var(--text); }
