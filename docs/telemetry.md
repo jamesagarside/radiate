@@ -67,7 +67,7 @@ A record's time is when it happened. A mode or settings change made through the 
 | `radiate.presence.changed` | INFO | `away.*`. | Who counts as home or away changed what the house does. People only as counts. |
 | `radiate.learning.invalidated` | WARN | `learning.invalidated`, `learning.reset`. | A room's learned model was dropped, invalidated by a release, or reset. |
 | `radiate.settings.changed` | INFO | `settings.saved`, `settings.reverted`, `household.setup`. | Settings were saved or reverted in the web UI, or the household setup changed. |
-| `radiate.auth.denied` | WARN | `auth.denied`. | API requests or stream connections were refused for a missing or wrong token. At most one record a tick, with the count. |
+| `radiate.auth.denied` | WARN | `auth.denied`. | API requests, stream connections or sign-ins were refused. At most one record a tick, with the count. |
 | `radiate.export.dropped` | WARN | `export.dropped`. | The OpenTelemetry export lost data: a full queue dropped its oldest records, or the collector rejected some. At most one record an hour for each signal and cause, with the count since the last. |
 <!-- end generated: events -->
 
@@ -169,13 +169,13 @@ Settings were saved or reverted in the web UI, or the household setup changed. S
 
 #### `radiate.auth.denied`
 
-API requests or stream connections were refused for a missing or wrong token. At most one record a tick, with the count. Severity WARN (13). Body: `<n> requests refused: missing or wrong token`.
+API requests, stream connections or sign-ins were refused. At most one record a tick, with the count. Severity WARN (13). Body: `<n> requests refused: not signed in or wrong credentials`.
 
 | Attribute | Type | | Description |
 |---|---|---|---|
 | `event.name` (OpenTelemetry) | string | required | The event name, repeated from the log record's event name field for backends that do not read it. |
 | `event.action` (ECS) | string | required | The reason code, such as `boiler.lead`, or the action for events without one. |
-| `radiate.auth.failures` | int, `{request}` | required | Requests refused for a missing or wrong token since the last record. Never the client's address. |
+| `radiate.auth.failures` | int, `{request}` | required | Requests refused since the last record: a missing or wrong token or session, or a wrong username or password. Never the client's address or the username. |
 
 #### `radiate.export.dropped`
 
