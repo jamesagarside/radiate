@@ -362,7 +362,7 @@ def test_why_not_eligible():
     assert "basis" in why_not_eligible(summary(0, 100, 120, litres=2.0), "firing")
     assert why_not_eligible(
         summary(0, 100, 120, litres=2.0, outdoor_share=1 - 4 / 24), "relay"
-    ) == ("outdoor sensor missing for 4 h")
+    ) == ("no fresh outdoor temperature for 4 h")
     assert "baseline" in why_not_eligible(
         summary(0, 100, 120, litres=2.0, baseline_share=0.5), "relay"
     )
@@ -662,6 +662,14 @@ def test_every_closed_day_in_the_simulator_has_a_savings_record():
     res = sim_run("radiate", days=2, warmup_days=0, seed=1)
     assert res.day_summaries
     assert all("savings" in s for s in res.day_summaries)
+
+
+def test_report_names_the_outdoor_source():
+    body = report([], WEIGHTS, NAMES, household=True, outdoor_sensor=True, outdoor_source="both")
+    assert body["outdoor"]["source"] == "both"
+    assert "Home Assistant" in body["outdoor"]["text"]
+    body = report([], WEIGHTS, NAMES, household=True, outdoor_sensor=False)
+    assert body["outdoor"] == {"source": None, "text": None}
 
 
 def test_record_day_constant():

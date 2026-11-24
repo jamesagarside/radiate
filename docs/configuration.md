@@ -147,6 +147,23 @@ mqtt:
   password: ${RADIATE_MQTT_PASSWORD}
 ```
 
+## Change settings in the web UI
+
+The web UI's Settings tab shows every key on this page except the `household` and `schedules` sections, which have the household setup and the Schedules section. It doesn't add or remove rooms; list them here.
+
+A change made there is saved to `<data_dir>/settings.yaml`, never to this file, and replaces this file's value for that key from then on. Each key shows where its value comes from: the house file, set in the web UI, or the default. The file looks like this, with `rooms` keyed by room id:
+
+```yaml
+settings:
+  boiler:
+    min_burn_min: 9
+  rooms:
+    lounge:
+      actuate: true
+```
+
+Changes are checked with the same rules as this file and refused if the house wouldn't load. Boiler, hot water, balancing, suggestions, device alert limits, the outdoor source and the fire switch's length apply straight away; everything else after a restart, and the tab says which are waiting. Turning dry run off, changing the relay's host or channels, the schedule mirror, or a room's role, valve or `actuate` asks for confirmation first. Passwords set in the web UI are saved in the file in plain text, like the state database; the API never returns them. See [deployment](deployment.md#what-radiate-stores) for backups and going back to this file.
+
 ## Sections
 
 ### house
@@ -156,6 +173,8 @@ mqtt:
 | `timezone` | `Europe/London` | Time zone for schedules and the store windows |
 | `dry_run` | `true` | Read devices, write nothing |
 | `outdoor_sensor` | none | Zigbee2MQTT name of an outdoor temperature sensor. Without one, the model assumes 5 °C |
+| `outdoor_source` | `zigbee` | Where the outdoor temperature comes from. `zigbee`: the `outdoor_sensor`, as before. `home_assistant`: the reading the Radiate integration posts from the outdoor entity picked in its options (a weather entity's temperature, or a temperature sensor). `both`: the Zigbee sensor while it has a reading, otherwise Home Assistant; needs `outdoor_sensor` |
+| `outdoor_stale_after_min` | 180 | A Home Assistant outdoor reading measured longer ago than this counts as missing: the model assumes 5 °C and the alert `outdoor.stale` shows. 30 to 1440 |
 | `data_dir` | `./data` | Folder for `radiate.db`, and for `household.yaml` when you set up the household in the web UI |
 | `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale. Room sensor readings are saved with the time they were taken, so after a restart a reading stands until this long after the sensor last reported, not after Radiate started |
 | `history_days` | 14 | Days of tick history kept in `radiate.db`, 0 to 90. Set 0 to turn recording off |
@@ -184,7 +203,7 @@ The watchdog script assumes switch 0 is heating and switch 1 is the store. Keep 
 
 With metering, Radiate counts litres from firing time rather than relay time, ends store recovery when the store burner stops, and takes heat as available only once the burner has fired. It also learns during a dry run: without metering it does not, because the boiler's own timer, not the relay, decides when the radiators get heat. Without a `shelly` section Radiate cannot read the relay at all and does not learn.
 
-**Models learned in a dry run without metering.** Earlier versions learned from a dry run as if the relay ran the boiler, which can leave confident models that are far off (a heating gain of a fraction of a K/h). They now correct themselves over a few burns, but to start them again from priors, use `POST /api/v1/learning/reset` with `{}` for every room or `{"rooms": [...]}` for some. With the server stopped, `radiate bootstrap` re-learns every model from the tick history instead, leaving out the dry run. See [deployment](deployment.md#replay-and-bootstrap).
+**Models learned in a dry run without metering.** Earlier versions learned from a dry run as if the relay ran the boiler, which can leave confident models that are far off (a heating gain of a fraction of a K/h). Once the burner is metered, Radiate resets those models to their priors on its own, and treats models saved by a version that did not record how they were learned the same way (ADR-0007). Each reset shows in the web UI's Learning notice. Without metering they are kept and correct themselves over a few burns. To start any models again from priors yourself, use `POST /api/v1/learning/reset` with `{}` for every room or `{"rooms": [...]}` for some. With the server stopped, `radiate bootstrap` re-learns every model from the tick history instead, leaving out the dry run. See [deployment](deployment.md#replay-and-bootstrap).
 
 ### boiler
 

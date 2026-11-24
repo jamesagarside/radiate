@@ -18,12 +18,19 @@ is kept in its own versioned section. Dropped: short-lived signals (reading wind
 latches, the no-heat check), which rebuild within a few ticks. Sections added after
 version 1 are optional, so older saves still load.
 
-Corrupt or out-of-range room data resets that room to priors (spec 7).
+Learned state survives upgrades (ADR-0007). Each room's learned parts carry their
+provenance (`learned`). A save of an older version is brought forward by the migrations
+in `MIGRATIONS`, one version at a time, and each one is reported. A save from a newer
+version is not read: the caller keeps it as it is and starts from priors. A room model
+parameter outside its bounds goes back to its prior on its own, keeping the others;
+only a model that cannot be read at all resets the whole room to priors (spec 7).
 """
 
 from __future__ import annotations
 
+import copy
 import math
+from collections.abc import Callable
 from typing import Any
 
 from .accounting import HISTORY_DAYS
@@ -32,10 +39,19 @@ from .decide import EngineState, RoomState, new_estimator
 from .disturbance import DisturbanceState
 from .estimator import RoomEstimator
 from .health import LEAK_WINDOW
+from .provenance import UNKNOWN, Provenance
 from .savings import SAVINGS_VERSION, RoomDay, SavingsMeter
 from .types import BoilerState, HouseConfig
 
-VERSION = 1
+# The saved shape. Bump it when the shape changes, and add a migration from the
+# version before to `MIGRATIONS`, with a fixture of the old format in tests/core/fixtures.
+# 1: before provenance. 2: each room's `learned` provenance.
+VERSION = 2
+# Models carried over by a migration that cannot say how they were learned are trusted
+# less: this share of the prior variance goes back (as a re-learn adds, `relearn`).
+CARRY_OVER_DISCOUNT = 0.3
+# The room model's parameters, for problems: (name, unit).
+_PARAMS = (("heating gain a", "K/h"), ("loss rate b", "1/h"), ("steady heat d", "K/h"))
 _DIST_TIMES = ("window_until", "shower_until", "fire_since", "fire_holdoff_until", "spike_until")
 _CHANGE_FLOATS = ("gain_eu", "gain_uu", "gain_ee", "level_e", "level_ee")
 _CHANGE_COUNTS = ("since_reset", "relearns")
@@ -72,6 +88,7 @@ def dump_state(st: EngineState, now: float) -> dict[str, Any]:
                     "doubt": e.doubt,
                 },
             },
+            "learned": rs.learned.to_dict(),
             "lag_samples": list(rs.lag_samples),
             "lockshield_hist": list(rs.lockshield_hist),
             "dist": {
@@ -223,7 +240,13 @@ def _load_health(st: EngineState, raw: Any, now: float, elapsed: float) -> None:
         sc.raised_at = _at(sc_raw.get("raised_at"), now, elapsed)
 
 
-def _valid_estimator(data: Any, est: RoomEstimator) -> bool:
+def _load_estimator(data: Any, est: RoomEstimator, name: str, problems: list[str]) -> bool:
+    """Read a saved room model into `est`. False when it cannot be read at all (wrong
+    shape, not numbers); `est` is then left at its priors.
+
+    Plausibility is judged per parameter: one outside its bounds, not finite, or with a
+    negative variance goes back to its prior mean and variance, and the others are kept.
+    """
     try:
         theta = [float(v) for v in data["theta"]]
         p = [[float(v) for v in row] for row in data["p"]]
@@ -232,12 +255,28 @@ def _valid_estimator(data: Any, est: RoomEstimator) -> bool:
         return False
     if len(theta) != 3 or len(p) != 3 or any(len(row) != 3 for row in p):
         return False
-    flat = [*theta, *(v for row in p for v in row), var]
-    if not all(math.isfinite(v) for v in flat) or var <= 0:
-        return False
-    if any(not lo <= v <= hi for v, (lo, hi) in zip(theta, est.bounds, strict=True)):
-        return False
-    return all(p[i][i] >= 0 for i in range(3))
+    prior_theta = list(est.theta)
+    bad = []
+    for i, (lo, hi) in enumerate(est.bounds):
+        param, unit = _PARAMS[i]
+        row = [p[i][j] for j in range(3)] + [p[j][i] for j in range(3)]
+        if not (math.isfinite(theta[i]) and lo <= theta[i] <= hi):
+            why = f"{theta[i]:g} {unit} is outside {lo:g} to {hi:g}"
+        elif not (all(math.isfinite(v) for v in row) and p[i][i] >= 0):
+            why = "has an invalid variance"
+        else:
+            continue
+        problems.append(f"{name}: saved {param} {why}, back to its prior")
+        bad.append(i)
+    for i in bad:
+        theta[i] = prior_theta[i]
+        for j in range(3):
+            p[i][j] = p[j][i] = 0.0
+        p[i][i] = est.p0_diag[i]
+    est.theta = theta
+    est.p = p
+    est.residual_var = var if math.isfinite(var) and var > 0 else est.residual_var
+    return True
 
 
 def _load_change(est: RoomEstimator, raw: Any) -> None:
@@ -278,9 +317,17 @@ def load_state(
     """Rebuild engine state. Returns the state and a list of problems found."""
     st = EngineState.new(cfg)
     problems: list[str] = []
-    if not isinstance(data, dict) or data.get("version") != VERSION:
+    version = saved_version(data)
+    if version is None or version > VERSION:
         st.relay_unseen_s = math.inf  # no saved guard: the relay's history is unknown
-        return st, ["saved state missing or from another version: starting from priors"]
+        if version is None:
+            return st, ["saved state missing or unreadable: starting from priors"]
+        return st, [
+            f"saved state is from a newer Radiate (format {version}, this one reads up "
+            f"to {VERSION}): kept as it is, starting from priors"
+        ]
+    data, notes = migrate(data)
+    problems.extend(notes)
     elapsed = max(0.0, float(elapsed_s))
     rooms = data.get("rooms") if isinstance(data.get("rooms"), dict) else {}
     for rc in cfg.rooms:
@@ -289,17 +336,15 @@ def load_state(
         raw = rooms[rc.id]
         rs: RoomState = st.rooms[rc.id]
         est = new_estimator(rc, cfg)
-        if not isinstance(raw, dict) or not _valid_estimator(raw.get("est"), est):
-            problems.append(f"{rc.id}: saved model invalid, reset to priors")
+        if not isinstance(raw, dict) or not _load_estimator(raw.get("est"), est, rc.name, problems):
+            problems.append(f"{rc.name}: saved model unreadable, reset to priors")
             continue
         e = raw["est"]
-        est.theta = [float(v) for v in e["theta"]]
-        est.p = [[float(v) for v in row] for row in e["p"]]
-        est.samples = int(e.get("samples", 0))
-        est.rejected = int(e.get("rejected", 0))
-        est.residual_var = float(e["residual_var"])
+        est.samples = _int(e.get("samples"))
+        est.rejected = _int(e.get("rejected"))
         _load_change(est, e.get("change"))
         rs.est = est
+        rs.learned = _load_provenance(raw.get("learned"), est, rc.name, problems)
         lags = raw.get("lag_samples", [])
         if isinstance(lags, list):
             rs.lag_samples = [float(v) for v in lags if isinstance(v, (int, float)) and v > 0][-15:]
@@ -364,6 +409,84 @@ def load_state(
     _load_ledger(st, data.get("accounting"), now, elapsed)
     _load_savings(st, data.get("savings"), elapsed, problems)
     return st, problems
+
+
+def _int(v: Any) -> int:
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+
+
+def _load_provenance(raw: Any, est: RoomEstimator, name: str, problems: list[str]) -> Provenance:
+    """A room's saved provenance. Unreadable: its updates count as unknown, as from a
+    save before provenance. A migration's `discount` is applied here, once: it is never
+    saved again."""
+    prov = Provenance.from_dict(raw)
+    if prov is None:
+        problems.append(f"{name}: saved learning record unreadable, counted as unknown")
+        prov = Provenance(learner=1, updates={UNKNOWN: est.samples} if est.samples else {})
+    discount = raw.get("discount") if isinstance(raw, dict) else None
+    if isinstance(discount, float) and 0 < discount <= 1:
+        est.discount(discount)
+    return prov
+
+
+def saved_version(data: Any) -> int | None:
+    """The format version of saved engine data, or None when it has none we can use."""
+    if not isinstance(data, dict):
+        return None
+    v = data.get("version")
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        return None
+    return v
+
+
+def readable(data: Any) -> bool:
+    """Saved engine data this version can load, migrating it if older."""
+    v = saved_version(data)
+    return v is not None and v <= VERSION
+
+
+def _from_v1(data: dict[str, Any]) -> dict[str, Any]:
+    """Version 1 to 2: provenance with each room's learned parts. Version 1 did not
+    record how a model was learned, so its updates count as unknown, under learner
+    version 1, and the model is discounted once on load (`CARRY_OVER_DISCOUNT`)."""
+    out = copy.deepcopy(data)
+    rooms = out.get("rooms")
+    for room in rooms.values() if isinstance(rooms, dict) else ():
+        if not isinstance(room, dict):
+            continue
+        est = room.get("est")
+        samples = _int(est.get("samples")) if isinstance(est, dict) else 0
+        room["learned"] = {
+            "learner": 1,
+            "code": None,
+            "first_day": None,
+            "last_day": None,
+            "updates": {UNKNOWN: samples} if samples else {},
+            "discount": CARRY_OVER_DISCOUNT,
+        }
+    out["version"] = 2
+    return out
+
+
+# Saved version to (a function that returns the next version's shape, what it means for
+# the house). Each is tested from a fixture of what that version wrote
+# (tests/core/fixtures/engine_v<N>*.json).
+MIGRATIONS: dict[int, tuple[Callable[[dict[str, Any]], dict[str, Any]], str]] = {
+    1: (_from_v1, "models learned before Radiate recorded how are trusted less"),
+}
+
+
+def migrate(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Readable saved engine data in the current format, and a note per migration.
+    Never changes `data` itself, so the caller can keep the original."""
+    version = saved_version(data)
+    notes = []
+    while version is not None and version < VERSION:
+        step, means = MIGRATIONS[version]
+        data = step(data)
+        notes.append(f"saved state brought forward from format {version} to {version + 1}: {means}")
+        version = saved_version(data)
+    return data, notes
 
 
 def _finite(v: Any, low: float | None = 0.0) -> float | None:

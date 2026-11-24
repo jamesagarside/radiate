@@ -11,7 +11,7 @@ import dataclasses
 import math
 from dataclasses import dataclass, field
 
-from . import disturbance
+from . import disturbance, provenance
 from .accounting import Ledger
 from .allocator import Allocation, AllocRoom, allocate
 from .boiler import HIDDEN_RELAY_S, BoilerGuard
@@ -26,6 +26,8 @@ from .health import (
     ShortCycle,
     ValveCheck,
 )
+from .outdoor import DEFAULT_OUTDOOR_C
+from .provenance import Conditions, Provenance
 from .savings import MAX_TICK_S as SAVINGS_TICK_S
 from .savings import RoomSample, SavingsMeter
 from .types import (
@@ -135,6 +137,8 @@ class RoomState:
     lag_samples: list[float] = field(default_factory=list)
     lag_probe: tuple[float, float] | None = None
     lockshield_hist: list[float] = field(default_factory=lambda: [0.0] * 101)
+    # Where the model, lags and lockshield histogram were learned (ADR-0007).
+    learned: Provenance = field(default_factory=Provenance)
     last_setpoint: float | None = None
     setpoint_changed_at: float = -1e12
     written: ValveAction | None = None
@@ -220,6 +224,8 @@ class EngineState:
     # last updated (a smaller minute is a new day): for the sun-shaped check.
     outdoor_low_c: float | None = None
     outdoor_minute: int | None = None
+    # The Radiate version running, set by the caller: recorded with what is learned.
+    code_version: str | None = None
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -255,6 +261,7 @@ def reset_learned(
         rs.lag_samples = []
         rs.lag_probe = None
         rs.lockshield_hist = [0.0] * 101
+        rs.learned = Provenance()
     return ids
 
 
@@ -391,6 +398,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     heat_known = snap.relay_observed and (
         snap.relay_follows_commands or snap.heating_burner is not None
     )
+    # How heat is seen now, for the provenance of what is learned (ADR-0007).
+    seen = Conditions(live=snap.relay_follows_commands, metered=snap.heating_burner is not None)
     flow_started = flowing and st.flow_since is None
     if flowing:
         if st.flow_since is None:
@@ -400,7 +409,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
 
     out = snap.outdoor
     if out is None:
-        out = 5.0  # conservative default when no outdoor reading
+        out = DEFAULT_OUTDOOR_C  # conservative default when no outdoor reading
     sunny = _sun_shaped(st, snap)
     any_trv = False
     frost = hard_frost = False
@@ -430,6 +439,18 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 passive_now[rc.id] = inp.temperature
             continue
         rs = st.rooms[rc.id]
+        rule = provenance.invalid(rs.learned, seen, provenance.RULES)
+        if rule is not None:
+            # A release declared what this room learned invalid (ADR-0007): only this
+            # room's learned parts go back to their priors.
+            reset_learned(cfg, st, [rc.id])
+            reasons.append(
+                Reason(
+                    "learning.invalidated",
+                    f"{rc.name}: learning reset to priors, as it was {rule.why}",
+                    rc.id,
+                )
+            )
         inp = snap.rooms.get(rc.id, RoomInput())
         if rc.id in implausible:
             # Treated as missing (spec 7): the TRV fallback, no external input.
@@ -638,7 +659,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         rs.learning_gate = gate
         relearns = rs.est.relearns
         if gate is None:
-            rs.est.update(rs.slope, rs.drive, delta_out, at=(now, snap.minute_of_day))
+            if rs.est.update(rs.slope, rs.drive, delta_out, at=(now, snap.minute_of_day)):
+                rs.learned.note(seen.key, snap.day, st.code_version)
         elif held == WATCHED_GATE and data_gate is None and not sunny:
             # Held back on the model's own say-so. Change detection still sees it, so
             # a model that is wrong is re-learned rather than paused for good, once the

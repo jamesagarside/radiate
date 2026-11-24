@@ -15,6 +15,7 @@ import { createSuggestions } from "./suggestions.js";
 import { createSavings, houseLine } from "./savings.js";
 import { createHouse } from "./house.js";
 import { createGuide, guideNote } from "./guide.js";
+import { createSettings } from "./settings.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -717,6 +718,7 @@ function render(s) {
     $("banner-text").textContent = `Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time. Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
   }
   renderDryRun(s.telemetry);
+  renderLearningNotes(s.learning_notes);
   renderPeople(s.away);
   for (const r of s.rooms) renderRoom(r);
   renderAlerts(s.alerts);
@@ -871,6 +873,36 @@ $("demand").addEventListener("click", async (e) => {
 });
 
 // Dry run: the live driver reads devices but holds back every write.
+// Learning notes (ADR-0007): learned state Radiate dropped, carried over or reset in the
+// last 14 days, newest first.
+let learningKey = "";
+function renderLearningNotes(notes = []) {
+  const key = JSON.stringify(notes);
+  if (key === learningKey) return;
+  learningKey = key;
+  const box = $("learning-notes");
+  box.hidden = !notes.length;
+  if (box.hidden) return;
+  const resets = new Set(notes.filter((n) => n.room_id).map((n) => n.room_id)).size;
+  $("learning-notes-lead").textContent = resets
+    ? `${plural(resets, "room's learning was", "rooms' learning was")} reset recently. Those rooms learn again from their next burns.`
+    : "Radiate changed what it had learned when it last started.";
+  const list = box.querySelector("ul");
+  list.textContent = "";
+  for (const n of [...notes].reverse()) {
+    const li = document.createElement("li");
+    const when = document.createElement("span");
+    when.className = "payload";
+    when.textContent = new Date(n.at * 1000).toLocaleString(undefined, {
+      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+    });
+    const what = document.createElement("span");
+    what.textContent = n.message;
+    li.append(when, what);
+    list.appendChild(li);
+  }
+}
+
 let intendedKey = "";
 function renderDryRun(t) {
   const box = $("dryrun");
@@ -1147,11 +1179,37 @@ $("savings-setup").addEventListener("click", (e) => {
 const guide = createGuide({ root: $("guide") });
 guideNote({ note: $("guide-note"), tab: document.querySelector('.view-tab[data-view="guide"]') });
 
+// Settings view (settings.js): every house-file setting, at #settings, with each
+// section at #settings/<id>. Its tab shows once the server answers
+// `GET settings/config`. The household and the schedules are edited where they
+// already are, so their sections open the setup or show the Schedules section.
+const settings = createSettings({
+  transport,
+  isAuthError: (err) => err instanceof AuthError,
+  onAuth: () => askForToken(),
+  onOpenSetup: (e) => {
+    history.replaceState(null, "", "#");
+    route(false);
+    openSetup(e);
+  },
+  onShowSchedules: () => {
+    history.pushState(null, "", "#");
+    route(false);
+    const h = $("week-h");
+    if ($("week").hidden) return;
+    h.setAttribute("tabindex", "-1");
+    h.focus({ preventScroll: true });
+    h.scrollIntoView({ block: "start" });
+  },
+});
+let settingsOffered = null;
+
 // Each view besides the house: its element, whether the server offers it, and its module.
 const VIEWS = {
   devices: { offered: () => devicesOffered === true, module: devices },
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
   savings: { offered: () => savingsOffered === true, module: savings },
+  settings: { offered: () => settingsOffered === true, module: settings },
   guide: { offered: () => true, module: guide },
 };
 
@@ -1172,8 +1230,9 @@ function route(fromUser) {
     else v.module.hide();
   }
   document.body.dataset.view = current;
-  // A link to a guide section, also when the page opens on one.
+  // A link to a guide or settings section, also when the page opens on one.
   if (current === "guide" && guide.reveal(part)) return;
+  if (current === "settings" && settings.reveal(part)) return;
   // Opening on #devices or #guide, the browser has jumped to the view's element,
   // which leaves its heading under the sticky header. Start at the top instead.
   if (!fromUser && current !== "house") window.scrollTo(0, 0);
@@ -1189,7 +1248,7 @@ window.addEventListener("hashchange", () => route(true));
 document.addEventListener("click", (e) => {
   const a = e.target.closest?.('a[href^="#"]');
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  if (a.hash === location.hash && a.hash.startsWith("#guide")) {
+  if (a.hash === location.hash && (a.hash.startsWith("#guide") || a.hash.startsWith("#settings/"))) {
     e.preventDefault();
     route(true);
   }
@@ -1205,14 +1264,16 @@ function renderTabs() {
 }
 
 async function offerViews() {
-  const [d, s, v] = await Promise.all([
+  const [d, s, v, c] = await Promise.all([
     devicesOffered === true ? true : devices.available(),
     suggestionsOffered === true ? true : suggestions.available(),
     savingsOffered === true ? true : savings.available(),
+    settingsOffered === true ? true : settings.available(),
   ]);
   devicesOffered = d;
   suggestionsOffered = s;
   savingsOffered = v;
+  settingsOffered = c;
   renderTabs();
   renderDeviceCount(last?.alert_details);
   route(false);

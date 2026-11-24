@@ -18,6 +18,7 @@ from typing import Any
 from radiate.config.away import parse_local
 from radiate.config.site import HA_PERSON
 from radiate.core import DemandMode, Mode
+from radiate.core.outdoor import OUTDOOR_MAX_C, OUTDOOR_MIN_C, plausible
 from radiate.core.types import RoomConfig, RoomRole
 from radiate.drivers.devices import ScanRefused
 
@@ -25,6 +26,7 @@ from .layout import LayoutError
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
+from .settings import SettingsEditor, SettingsError
 from .setup import HouseholdSetup, SetupError
 from .suggestions import suggestions_view
 
@@ -142,6 +144,37 @@ def say_home(rt: Runtime, person_id: str, body: Any) -> dict:
     require_object(body)
     rt.say_home(pid)
     return {"ok": True, "person": rt.person_view(pid)}
+
+
+OUTDOOR_SOURCE_MAX = 100
+
+
+def set_outdoor(rt: Runtime, body: Any) -> dict:
+    """An outdoor temperature from Home Assistant.
+
+    `{"temperature_c": 7.5, "measured_at": "2026-11-24T08:10:00+00:00", "source":
+    "weather.forecast_home"}`. `measured_at` (when it was measured, optional, now
+    without it) and `source` (where it came from, optional) are kept with it.
+    `{"temperature_c": null}` forgets it. Used only when `house.outdoor_source` is
+    `home_assistant` or `both`.
+    """
+    body = require_object(body)
+    if "temperature_c" not in body:
+        raise RequestError(400, "temperature_c is required: degrees Celsius, or null to forget")
+    t = body["temperature_c"]
+    if t is not None and (isinstance(t, bool) or not isinstance(t, (int, float))):
+        raise RequestError(400, "temperature_c must be a number or null")
+    if t is not None and not plausible(t):
+        raise RequestError(
+            400, f"temperature_c must be between {OUTDOOR_MIN_C:g} and {OUTDOOR_MAX_C:g} °C"
+        )
+    raw_at = body.get("measured_at")
+    measured_at = None if raw_at is None else _local_time(rt, raw_at, "measured_at")
+    source = body.get("source")
+    if source is not None and (not isinstance(source, str) or len(source) > OUTDOOR_SOURCE_MAX):
+        raise RequestError(400, f"source must be text of at most {OUTDOOR_SOURCE_MAX} characters")
+    rt.report_outdoor(t, measured_at, source or None)
+    return {"ok": True, "outdoor": rt.outdoor_view()}
 
 
 HA_PERSONS_MAX = 200
@@ -292,6 +325,29 @@ def household(rt: Runtime, method: str, body: Any = None) -> dict:
     raise RequestError(405, "method not allowed")
 
 
+def settings_editor(rt: Runtime) -> SettingsEditor:
+    if not isinstance(rt.settings_editor, SettingsEditor):
+        raise RequestError(404, "settings are not available")
+    return rt.settings_editor
+
+
+def config(rt: Runtime, method: str, target: str | None = None, body: Any = None) -> dict:
+    """Every house-file setting (`radiate.server.settings`): GET reads them, PUT saves
+    changes over the house file, DELETE goes back to the house file's value for one
+    setting, a section, a room (`rooms.<id>`) or, without a target, all of them."""
+    editor = settings_editor(rt)
+    try:
+        if method == "GET" and target is None:
+            return editor.view()
+        if method == "PUT" and target is None:
+            return editor.save(rt, body)
+        if method == "DELETE":
+            return editor.revert(rt, target, body)
+    except SettingsError as err:
+        raise RequestError(err.status, str(err) or "invalid settings", err.body) from err
+    raise RequestError(405, "method not allowed")
+
+
 SETTINGS = ("demand_mode",)
 
 
@@ -361,6 +417,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
         return household(rt, "PREVIEW", body)
     if parts == ["layout"] and method == "PUT":
         return set_layout(rt, body)
+    if parts[:2] == ["settings", "config"] and len(parts) <= 3:
+        return config(rt, method, parts[2] if len(parts) == 3 else None, body)
     if method == "GET":
         if parts == ["house"]:
             return rt.house()
@@ -395,6 +453,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return boost_store(rt, body)
         if parts == ["ha", "persons"]:
             return set_ha_persons(rt, body)
+        if parts == ["outdoor"]:
+            return set_outdoor(rt, body)
         if len(parts) == 3 and parts[0] == "people":
             if parts[2] == "away":
                 return set_away(rt, parts[1], body)

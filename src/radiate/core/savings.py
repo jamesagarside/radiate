@@ -58,6 +58,17 @@ BASIS_TEXT = {
     ),
 }
 
+# Where the outdoor temperature behind the figures comes from (`house.outdoor_source`).
+OUTDOOR_TEXT = {
+    "zigbee": "Outdoor temperature from the Zigbee outdoor sensor.",
+    "home_assistant": "Outdoor temperature from Home Assistant.",
+    "both": (
+        "Outdoor temperature from the Zigbee outdoor sensor, or from Home Assistant "
+        "while the sensor is silent."
+    ),
+    "simulated": "Outdoor temperature from the simulation.",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class RoomSample:
@@ -296,7 +307,7 @@ def why_not_eligible(
         return f"no household baseline for {_hours_missing(share)} h"
     share = _num(rec.get("outdoor_share")) or 0.0
     if share < params.min_share:
-        return f"outdoor sensor missing for {_hours_missing(share)} h"
+        return f"no fresh outdoor temperature for {_hours_missing(share)} h"
     for rid, r in sorted(rec["rooms"].items()):
         if not isinstance(r, Mapping):
             return "no savings record"
@@ -345,10 +356,16 @@ def report(
     *,
     household: bool,
     outdoor_sensor: bool,
+    outdoor_source: str | None = None,
+    outdoor_missing: str = "no outdoor sensor",
     params: SavingsParams = SavingsParams(),
 ) -> dict:
     """The whole GET /api/v1/savings body (spec 8.1) from closed day summaries,
-    oldest first. Dates from each summary's `day` ordinal (date.fromordinal)."""
+    oldest first. Dates from each summary's `day` ordinal (date.fromordinal).
+
+    `outdoor_source` names where the outdoor temperature comes from (`zigbee`,
+    `home_assistant`, `both` or `simulated`), for `outdoor` in the body.
+    `outdoor_missing` is the reason given without one (`outdoor_sensor` false)."""
     by_day: dict[int, Mapping[str, Any]] = {}
     for d in days:
         if isinstance(d, Mapping) and isinstance(d.get("day"), int):
@@ -382,7 +399,7 @@ def report(
     if not household:
         status, reason = "unavailable", "no household"
     elif not outdoor_sensor:
-        status, reason = "unavailable", "no outdoor sensor"
+        status, reason = "unavailable", outdoor_missing
     elif kept and _num(kept[-1].get("litres")) is None:
         status, reason = "unavailable", "no nozzle rating"
     elif len(eligible) < params.min_days:
@@ -515,6 +532,7 @@ def report(
         "basis": basis,
         "basis_text": BASIS_TEXT.get(basis),
         "litres_upper_bound": basis != "firing",
+        "outdoor": {"source": outdoor_source, "text": OUTDOOR_TEXT.get(outdoor_source or "")},
         "fit": fit,
         "totals": totals,
         "days": listed,

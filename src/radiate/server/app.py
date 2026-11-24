@@ -215,12 +215,44 @@ async def set_ha_persons(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_ha_persons)
 
 
+async def set_outdoor(request: web.Request) -> web.Response:
+    return await _post(request, bridge.set_outdoor)
+
+
 async def settings(request: web.Request) -> web.Response:
     return web.json_response(_rt(request).settings())
 
 
 async def set_settings(request: web.Request) -> web.Response:
     return await _post(request, bridge.set_settings)
+
+
+async def _config(request: web.Request, method: str, with_body: bool) -> web.Response:
+    """Every house-file setting (`bridge.config`). Errors with field paths go as JSON."""
+    rt = _rt(request)
+    try:
+        bridge.settings_editor(rt)  # 404 before the body is read
+        body = None
+        if with_body or (method == "DELETE" and request.can_read_body):
+            body = await _json(request)
+        target = request.match_info.get("target")
+        return web.json_response(bridge.config(rt, method, target, body))
+    except bridge.RequestError as err:
+        if err.body is not None:
+            return web.json_response(err.body, status=err.status)
+        raise _http_error(err) from err
+
+
+async def config(request: web.Request) -> web.Response:
+    return await _config(request, "GET", with_body=False)
+
+
+async def config_save(request: web.Request) -> web.Response:
+    return await _config(request, "PUT", with_body=True)
+
+
+async def config_revert(request: web.Request) -> web.Response:
+    return await _config(request, "DELETE", with_body=False)
 
 
 async def get_layout(request: web.Request) -> web.Response:
@@ -320,8 +352,13 @@ def create_app(
             web.post("/api/v1/people/{person_id}/presence", set_presence),
             web.post("/api/v1/people/{person_id}/home", say_home),
             web.post("/api/v1/ha/persons", set_ha_persons),
+            web.post("/api/v1/outdoor", set_outdoor),
             web.get("/api/v1/settings", settings),
             web.post("/api/v1/settings", set_settings),
+            web.get("/api/v1/settings/config", config),
+            web.put("/api/v1/settings/config", config_save),
+            web.delete("/api/v1/settings/config", config_revert),
+            web.delete("/api/v1/settings/config/{target}", config_revert),
             web.get("/api/v1/layout", get_layout),
             web.put("/api/v1/layout", put_layout),
             web.get("/api/v1/devices", devices),

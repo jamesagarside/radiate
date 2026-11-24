@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from radiate.config import SiteConfig, WeekSchedule
 from radiate.core import Actions, Mode, Reason, RoomInput, Snapshot
-from radiate.core.types import RoomRole
+from radiate.core.types import HouseConfig, RoomRole
 
 from . import devices as health
 from .devices import DeviceHealth, HealthLimits, NetworkScan, ScanRefused
@@ -57,6 +57,7 @@ class LiveDriver:
         self._connected = connected
         self.tz = ZoneInfo(site.timezone)
         self.dry_run = site.dry_run
+        self._outdoor_age: float | None = None
         names = {n for d in site.devices.values() for n in (d.trv, d.sensor, d.window) if n}
         if site.outdoor_sensor:
             names.add(site.outdoor_sensor)
@@ -155,6 +156,18 @@ class LiveDriver:
             household_live=dict(site.household_live),
             household_fallback=dict(site.household_fallback),
             household_fallback_levels=dict(site.household_fallback_levels),
+        )
+
+    def replace_settings(self, cfg: HouseConfig, site: SiteConfig) -> None:
+        """Use settings changed in the web UI that apply without a restart
+        (`radiate.server.settings.apply_live`): the hot-water windows the Shelly fallback
+        gets, and when a device needs attention. Rooms and devices stay as they are."""
+        self.cfg = cfg
+        self.site = dataclasses.replace(self.site, house=cfg, monitoring=site.monitoring)
+        self.limits = dataclasses.replace(
+            self.limits,
+            low_battery_pct=site.monitoring.low_battery_pct,
+            weak_signal_lqi=site.monitoring.weak_signal_lqi,
         )
 
     def set_household_schedules(
@@ -306,11 +319,13 @@ class LiveDriver:
             rooms[rc.id] = inp
 
         outdoor = None
+        self._outdoor_age = None
         out_dev = self.devices.get(self.site.outdoor_sensor)
         if out_dev is not None:
             age = out_dev.age("temperature", now)
             if age is not None and age <= OUTDOOR_MAX_AGE_S:
                 outdoor = out_dev.number("temperature")
+                self._outdoor_age = age if outdoor is not None else None
 
         # Without a reading, the relay is taken to be as last commanded. When it is read
         # again, the core is told how long it went unseen: the watchdog may have
@@ -441,6 +456,10 @@ class LiveDriver:
         return self._connected() and self.devices.bridge_online is not False
 
     # --- reporting -------------------------------------------------------------------
+
+    def outdoor_age_s(self) -> float | None:
+        """Age of the Zigbee outdoor reading in the last snapshot, or None without one."""
+        return self._outdoor_age
 
     def alerts(self) -> list[Reason]:
         out: list[Reason] = []

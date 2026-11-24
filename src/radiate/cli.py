@@ -45,6 +45,7 @@ def _serve(args: argparse.Namespace) -> None:
             banner = f"Radiate demo ({args.speed:g}x)"
         else:
             runtime, queue, cleanup = await _start_live(site, session)
+            runtime.settings_editor = _settings_editor(args, site)
             interval = 60.0
             banner = f"Radiate {'DRY RUN' if site.dry_run else 'LIVE'}"
         if os.environ.get("RADIATE_ELASTIC_URL"):
@@ -82,6 +83,28 @@ def _serve(args: argparse.Namespace) -> None:
         asyncio.run(main())
 
 
+def _settings_editor(args: argparse.Namespace, site):
+    """The web UI's Settings view: the house file as read, and the settings saved over
+    it in the data directory."""
+    from radiate.config import ConfigError
+    from radiate.config.saved import read_settings
+    from radiate.config.site import read_house_file
+    from radiate.server.settings import SettingsEditor, SettingsFile
+
+    try:
+        saved = read_settings(site.data_dir)
+    except ConfigError:
+        saved = None  # site.settings_problems says why
+    locked = {"house.dry_run": "Set by --dry-run on the command line."} if args.dry_run else {}
+    return SettingsEditor.start(
+        read_house_file(args.config),
+        SettingsFile(site.data_dir),
+        saved,
+        locked=locked,
+        problems=site.settings_problems,
+    )
+
+
 async def _start_live(site, session):
     """Wire the live driver: SQLite store, MQTT, Shelly, then restore state."""
     import logging
@@ -96,6 +119,12 @@ async def _start_live(site, session):
     from radiate.server.store import SqliteQueue, Store
 
     log = logging.getLogger("radiate")
+    if site.saved_settings:
+        log.info(
+            "settings: saved from the web UI, in %s: %s",
+            Path(site.data_dir),
+            ", ".join(site.saved_settings),
+        )
     if site.household_source == "saved":
         log.info("household: saved from the web UI, in %s", Path(site.data_dir))
     for warning in _household_warnings(site):
@@ -153,6 +182,8 @@ async def _start_live(site, session):
         timezone=site.timezone,
         schedule_use=site.schedule_use,
         fire_flag_max_s=site.fire_flag_s,
+        outdoor_source=site.outdoor_source,
+        outdoor_stale_after_s=site.outdoor_stale_after_s,
     )
     runtime.setup = HouseholdSetup(site, SavedFile(site.data_dir))
     for problem in runtime.restore():
@@ -223,6 +254,11 @@ def _household_warnings(site) -> list[str]:
 def _check_config(args: argparse.Namespace) -> None:
     site = _load(args.path, args.data_dir)
     print(f"{args.path}: OK")
+    if site.saved_settings:
+        from radiate.config.saved import settings_path
+
+        print(f"  settings saved from the web UI in {settings_path(site.data_dir)}:")
+        print(f"    {', '.join(site.saved_settings)}")
     line = _household_line(site)
     if line:
         print(f"  {line}")
