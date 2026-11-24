@@ -15,17 +15,24 @@ re-learns from the data that follows, then carries on with the long memory.
 
 Confidence measures how much the data has narrowed the heating gain, not how well the
 model fits. A model fitted to bad data (heat assumed where there was none) is confident
-and wrong, and the gates that rely on its residual (`unexplained_heat`, `cooker_spike`)
-then hold back exactly the samples that would correct it. So change detection also
-watches those held-back samples, judges a confident model before the warm-up ends, and
-after a re-learn the residual gates stand down for a while (`doubt`) so the model can
-learn from the heat it could not explain.
+and wrong, and the `unexplained_heat` gate, which relies on its residual, then holds back
+exactly the samples that would correct it. So change detection also watches those
+held-back samples, judges a confident model before the warm-up ends, and after a
+re-learn the residual gates stand down for a while (`doubt`) so the model can learn from
+the heat it could not explain.
+
+A steady extra heat (sun, guests) held back while heating looks the same for an hour, and
+learning it as radiator gain would drift the model towards under-heating. So a change
+seen in held-back samples, or before the warm-up, re-learns only once it persists: seen
+in heating periods at least `PERSIST_APART_S` apart and `PERSIST_TIME_APART_MIN` apart
+in the time of day (`misfits`). Sun comes at the same time each day; a wrong model shows
+in every burn.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # (prior mean, prior standard deviation, lower bound, upper bound)
 PRIOR_A = (1.5, 1.5, 0.1, 12.0)
@@ -65,6 +72,14 @@ RELEARN_INFLATION = 0.3  # covariance added on a change, as a share of the prior
 # heating updates (drive at least DOUBT_MIN_DRIVE): about an hour of heating.
 RELEARN_DOUBT_UPDATES = 60
 DOUBT_MIN_DRIVE = 0.2
+# Persistence, for a change seen only in held-back samples or before the warm-up: a
+# heating period's first misfit after this long without one starts a new period, and two
+# periods at least PERSIST_APART_S and PERSIST_TIME_APART_MIN (time of day) apart re-learn.
+# Misfits older than PERSIST_MAX_AGE_S are forgotten.
+PERSIST_GAP_S = 30 * 60
+PERSIST_APART_S = 18 * 3600
+PERSIST_TIME_APART_MIN = 6 * 60
+PERSIST_MAX_AGE_S = 3 * 86400
 
 
 def forgetting(memory_days: float) -> float:
@@ -97,6 +112,10 @@ class RoomEstimator:
     relearns: int = 0  # changes detected so far
     # Heating updates left before the residual gates count again, after a re-learn.
     doubt: int = 0
+    # Heating periods with a change that must persist first: (monotonic s, minute of day)
+    # of each period's first misfit. Not saved: a restart only delays a re-learn.
+    misfits: list[tuple[float, int]] = field(default_factory=list)
+    misfit_at: float | None = None  # the latest misfit, to tell periods apart
 
     @classmethod
     def new(
@@ -144,11 +163,16 @@ class RoomEstimator:
     def residual(self, slope: float, drive: float, delta_out: float) -> float:
         return slope - self.predict(drive, delta_out)
 
-    def update(self, slope: float, drive: float, delta_out: float) -> bool:
-        """One RLS step. Returns False if the sample was rejected as an outlier."""
+    def update(
+        self, slope: float, drive: float, delta_out: float, at: tuple[float, int] | None = None
+    ) -> bool:
+        """One RLS step. Returns False if the sample was rejected as an outlier.
+
+        `at` is (monotonic seconds, minute of day), for persistence; without it a change
+        before the warm-up is never re-learned."""
         x = (drive, -delta_out, 1.0)
         err = slope - sum(t * xi for t, xi in zip(self.theta, x, strict=True))
-        self._watch(err, drive)
+        self._watch(err, drive, at=at)
         sd = math.sqrt(self.residual_var)
         # In doubt, the outlier limit came from a model now known to be wrong: a large
         # error is the evidence to learn from, not an outlier.
@@ -177,15 +201,18 @@ class RoomEstimator:
             self.doubt -= 1
         return True
 
-    def watch(self, slope: float, drive: float, delta_out: float) -> None:
+    def watch(
+        self, slope: float, drive: float, delta_out: float, at: tuple[float, int] | None = None
+    ) -> None:
         """Change detection only, for a sample a residual gate held back.
 
         The model is not updated: the gate may be right (sun, guests). But if the model
         itself is wrong, these are the samples that show it, so the gain statistic sees
         them. The level statistic does not: heat at no drive is what the gates are for.
+        A change they show re-learns only once it persists (`at`, see the module notes).
         """
         err = self.residual(slope, drive, delta_out)
-        self._watch(err, drive, level=False)
+        self._watch(err, drive, level=False, held=True, at=at)
 
     def change_detected(self) -> str | None:
         """Which statistic shows a change, if any: `gain` or `level`.
@@ -219,7 +246,14 @@ class RoomEstimator:
             return "level"
         return None
 
-    def _watch(self, err: float, drive: float, level: bool = True) -> None:
+    def _watch(
+        self,
+        err: float,
+        drive: float,
+        level: bool = True,
+        held: bool = False,
+        at: tuple[float, int] | None = None,
+    ) -> None:
         """Change detection: track the innovation, and re-learn when it stays biased."""
         if self.samples > 30:
             # One glitch is not a change: count each sample at most at the outlier limit.
@@ -234,8 +268,33 @@ class RoomEstimator:
             self.level_e += lv * (err - self.level_e)
             self.level_ee += lv * (err * err - self.level_ee)
         self.since_reset += 1
-        if self.change_detected() is not None:
+        if self.change_detected() is None:
+            return
+        if not held and self.samples >= CHANGE_WARMUP:
             self.relearn()
+        elif drive >= DOUBT_MIN_DRIVE and self._persists(at):
+            # Only heating samples show a heating-gain misfit, which tells periods apart.
+            self.relearn()
+
+    def _persists(self, at: tuple[float, int] | None) -> bool:
+        """Note a misfit at `at` and say whether the change has persisted: misfits in
+        heating periods far enough apart in time and in the time of day."""
+        if at is None:
+            return False
+        now, minute = at
+        seen = [m for m in self.misfits if now - m[0] <= PERSIST_MAX_AGE_S]
+        if self.misfit_at is None or now - self.misfit_at >= PERSIST_GAP_S or not seen:
+            seen.append((now, minute))
+        self.misfit_at = now
+        self.misfits = seen
+        for i, (t1, m1) in enumerate(seen):
+            for t2, m2 in seen[i + 1 :]:
+                gap = abs(m1 - m2)
+                if abs(t2 - t1) >= PERSIST_APART_S and min(gap, 1440 - gap) >= (
+                    PERSIST_TIME_APART_MIN
+                ):
+                    return True
+        return False
 
     def relearn(self) -> None:
         """Re-learn after a change.
@@ -253,6 +312,8 @@ class RoomEstimator:
         self.since_reset = 0
         self.relearns += 1
         self.doubt = RELEARN_DOUBT_UPDATES
+        self.misfits = []
+        self.misfit_at = None
 
     def to_dict(self) -> dict:
         return {

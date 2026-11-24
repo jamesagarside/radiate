@@ -138,16 +138,26 @@ def test_watching_a_gated_sample_does_not_move_the_model():
     assert est.theta == theta and est.p == p and est.samples == 800
 
 
+def _watch_burn(est, rng, start_s, minute, minutes=90):
+    """An hour and a half of heating the gate holds back, at `minute` of the day. The
+    room really warms at 6 K/h at full drive."""
+    for i in range(minutes):
+        drive = rng.uniform(0.3, 0.5)
+        at = (start_s + 60 * i, (minute + i) % 1440)
+        est.watch(6.0 * drive - 0.05 * 12 + 0.1, drive, 12.0, at=at)
+        if est.relearns:
+            return
+
+
 def test_a_confident_wrong_model_is_relearned_from_the_samples_its_gate_holds_back():
-    # The room really warms at 6 K/h at full drive. The residual is far above +1 K/h, so
-    # `unexplained_heat` holds every heating sample back: they are only watched.
+    # The residual is far above +1 K/h, so `unexplained_heat` holds every heating sample
+    # back: they are only watched. One burn is not enough: sun or guests look the same
+    # for an hour. The same misfit on the next day, at another time, is the model.
     rng = random.Random(9)
     est = _wrongly_confident(rng)
-    for _ in range(90):
-        drive = rng.uniform(0.3, 0.5)
-        est.watch(6.0 * drive - 0.05 * 12 + 0.1, drive, 12.0)
-        if est.relearns:
-            break
+    _watch_burn(est, rng, 0.0, 7 * 60)
+    assert est.relearns == 0 and est.change_detected() == "gain"
+    _watch_burn(est, rng, 86400.0 + 18 * 3600, 18 * 60)
     assert est.relearns == 1
     assert est.confidence < 0.6  # no longer trusted to call heat "unexplained"
     assert est.doubt == estimator.RELEARN_DOUBT_UPDATES
@@ -166,4 +176,44 @@ def test_a_steady_confident_model_is_not_relearned_before_the_warm_up():
     est = RoomEstimator.new()
     _feed(est, random.Random(10), 3.0, estimator.CHANGE_WARMUP - 1)
     assert est.confidence > estimator.CHANGE_CONFIDENT
+    assert est.relearns == 0
+
+
+def test_a_misfit_at_the_same_time_every_day_is_not_relearned():
+    # Sun through a window while the heating is on, at the same time each day: the
+    # held-back samples look like a gain the model lacks, but only at that time of day.
+    rng = random.Random(9)
+    est = _wrongly_confident(rng)
+    for day in range(4):
+        _watch_burn(est, rng, day * 86400.0, 12 * 60)
+    assert est.relearns == 0
+
+
+def test_a_misfit_without_a_time_is_never_relearned_early():
+    rng = random.Random(9)
+    est = _wrongly_confident(rng)
+    for _ in range(600):
+        drive = rng.uniform(0.3, 0.5)
+        est.watch(6.0 * drive - 0.05 * 12 + 0.1, drive, 12.0)
+    assert est.relearns == 0
+
+
+def _confident(rng, a=1.0):
+    est = RoomEstimator.new()
+    _feed(est, rng, a, 800)
+    assert est.confidence > 0.8 and est.samples < estimator.CHANGE_WARMUP
+    return est
+
+
+def test_daily_sun_while_heating_is_not_relearned_as_radiator_gain():
+    # A right model (a = 1 K/h) and 1.5 K/h of sun from 10:00 to 15:00 every day while the
+    # heating runs. Its gate holds those samples back and change detection watches them:
+    # sun at the same time every day must not be taken for a stronger radiator.
+    rng = random.Random(11)
+    est = _confident(rng)
+    for day in range(5):
+        for i in range(300):
+            drive = rng.uniform(0.3, 0.5)
+            slope = 1.0 * drive - 0.05 * 12 + 0.1 + 1.5 + rng.gauss(0, 0.3)
+            est.watch(slope, drive, 12.0, at=(day * 86400.0 + 600 * 60 + 60 * i, 600 + i))
     assert est.relearns == 0

@@ -1,6 +1,7 @@
 """Heat availability from the relay and the burner, and what learning and the fire
 detector may take from it (spec 4.1, 4.3, 4.6, 5.5)."""
 
+import math
 import random
 
 from radiate.core import EngineState, HeatSource, HouseConfig, RoomConfig, RoomInput, Snapshot
@@ -15,7 +16,9 @@ CFG = HouseConfig(
 MIN = 60.0
 
 
-def snap(m: int, temps: dict[str, float], *, setpoint=20.0, trv_offset=0.5, **kw) -> Snapshot:
+def snap(
+    m: int, temps: dict[str, float], *, setpoint=20.0, trv_offset=0.5, minute=None, **kw
+) -> Snapshot:
     rooms = {
         rid: RoomInput(
             temperature=t,
@@ -28,8 +31,8 @@ def snap(m: int, temps: dict[str, float], *, setpoint=20.0, trv_offset=0.5, **kw
     }
     return Snapshot(
         now=m * MIN,
-        minute_of_day=12 * 60,
-        outdoor=5.0,
+        minute_of_day=12 * 60 if minute is None else minute % 1440,
+        outdoor=kw.pop("outdoor", 5.0),
         rooms=rooms,
         heating_relay=kw.pop("relay", True),
         store_relay=kw.pop("store", False),
@@ -195,7 +198,9 @@ def test_confident_wrong_model_relearns_instead_of_pausing_forever():
     # Trained in a dry run that took heat for granted: a = 0.15 K/h, confident. The
     # bedroom really warms at 6 K/h at full drive, so its heating minutes look like
     # unexplained heat. Change detection sees those minutes, re-learns, and the gate
-    # stands down while the model learns from them. Burns of an hour, an hour apart.
+    # stands down while the model learns from them. Burns of an hour, an hour apart, for
+    # two days: one day's misfit could be sun or guests, the next day's at other times is
+    # the model.
     st = EngineState.new(CFG)
     rng = random.Random(3)
     est = st.rooms["bed"].est
@@ -205,13 +210,72 @@ def test_confident_wrong_model_relearns_instead_of_pausing_forever():
     assert est.confidence > 0.8 and est.a < 0.5 and est.relearns == 0
     t = 16.0
     codes = set()
-    for m in range(480):
+    for m in range(36 * 60):
         t += (6.0 * st.rooms["bed"].drive - 0.08 * (t - 5.0)) / 60
         on = m % 120 < 60
-        s = snap(m, {"bed": t, "lounge": 21.0}, setpoint=30.0, relay=on, heating_burner=on)
+        s = snap(
+            m, {"bed": t, "lounge": 21.0}, setpoint=30.0, minute=m, relay=on, heating_burner=on
+        )
         codes |= {r.code for r in decide(CFG, s, st).reasons}
+        if m == 8 * 60:
+            assert est.relearns == 0  # one day's misfit is not enough
     assert est.relearns >= 1 and "learning.relearn" in codes
     assert est.a > 2.0  # from 0.15, against a gain the slope window sees as about 3 to 4
+
+
+def _watched(monkeypatch, outdoor_at, start_minute, heat_source=None):
+    """Watched samples of a wrongly confident bedroom over three hours of heating from
+    `start_minute`, with the outdoor temperature `outdoor_at(minute)`."""
+    from radiate.core.estimator import RoomEstimator
+
+    calls = []
+    real = RoomEstimator.watch
+    monkeypatch.setattr(
+        RoomEstimator, "watch", lambda self, *a, **k: calls.append(1) or real(self, *a, **k)
+    )
+    cfg = CFG
+    if heat_source is not None:
+        rooms = (RoomConfig("bed", "Kitchen", heat_source=heat_source), CFG.rooms[1])
+        cfg = HouseConfig(rooms=rooms)
+    st = EngineState.new(cfg)
+    rng = random.Random(3)
+    est = st.rooms["bed"].est
+    for i in range(800):
+        u = rng.uniform(0.2, 0.5) if i % 180 < 60 else 0.0
+        est.update(0.15 * u - 0.08 * 11 + rng.gauss(0, 0.2), u, 11.0)
+    t = 16.0
+    for m in range(start_minute - 360, start_minute + 180):
+        t += (6.0 * st.rooms["bed"].drive - 0.08 * (t - 5.0)) / 60
+        on = m >= start_minute
+        s = snap(
+            m,
+            {"bed": t, "lounge": 31.0},
+            setpoint=30.0,
+            minute=m,
+            outdoor=outdoor_at(m % 1440),
+            relay=on,
+            heating_burner=on,
+        )
+        decide(cfg, s, st)
+    return len(calls)
+
+
+def test_no_watching_while_the_day_warms_outside(monkeypatch):
+    # Sun-shaped: daytime, and the outdoor temperature well above the night's low. Held
+    # back heat then may well be the sun, so change detection does not see it.
+    def warming(minute):
+        return 2.0 + 6.0 * max(0.0, math.sin(math.pi * (minute - 360) / 720))
+
+    assert _watched(monkeypatch, warming, 11 * 60) == 0
+    # The same heating in the evening, or on a day that does not warm, is watched.
+    assert _watched(monkeypatch, warming, 19 * 60) > 0
+    assert _watched(monkeypatch, lambda minute: 5.0, 11 * 60) > 0
+
+
+def test_no_watching_in_a_room_with_a_cooker(monkeypatch):
+    # The Aga's steady heat is the cooker spike gate's business, never a radiator gain.
+    flat = lambda minute: 5.0  # noqa: E731
+    assert _watched(monkeypatch, flat, 19 * 60, heat_source=HeatSource.CONTINUOUS) == 0
 
 
 def test_doubt_disarms_the_residual_gates():

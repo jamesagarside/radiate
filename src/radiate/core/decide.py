@@ -108,9 +108,15 @@ SENSOR_FROZEN_TRV_K = 2.0
 # Hard frost from a room sensor needs a second source: its TRV this close (it sits by
 # the radiator, so reads warmer), or another room below the frost threshold.
 HARD_FROST_TRV_K = 2.0
-# Gates that rely on the model's own residual. A sample they hold back still feeds change
-# detection, so a model that is wrong cannot lock itself (spec 4.3).
-RESIDUAL_GATES = frozenset({"unexplained_heat", "cooker_spike"})
+# The gate that relies on the model's own residual in an ordinary room. A sample it holds
+# back still feeds change detection, so a model that is wrong cannot lock itself (spec
+# 4.3). Not `cooker_spike`: a range cooker's steady heat is never radiator gain.
+WATCHED_GATE = "unexplained_heat"
+# Sun-shaped (spec 4.3): in daytime, on a day the outdoor temperature has risen this far
+# above its lowest since midnight, held-back heat may be the sun, so it is not watched.
+SUN_START_MIN = 8 * 60
+SUN_END_MIN = 17 * 60
+SUN_OUTDOOR_RISE_K = 1.0
 # With burner metering, a call for heat brings heat once the burner has fired in it, or
 # within this long before it began (the boiler is still hot) (spec 4.1).
 BURNER_HOT_S = 15 * 60
@@ -210,6 +216,10 @@ class EngineState:
     savings: SavingsMeter = field(default_factory=SavingsMeter)
     burner_at: float | None = None  # the heating burner was last seen firing (metered)
     relay_on_since: float | None = None  # the heating relay has been on since
+    # The lowest outdoor temperature since local midnight, and the minute of day it was
+    # last updated (a smaller minute is a new day): for the sun-shaped check.
+    outdoor_low_c: float | None = None
+    outdoor_minute: int | None = None
 
     @classmethod
     def new(cls, cfg: HouseConfig) -> EngineState:
@@ -299,6 +309,25 @@ def _target(cfg: HouseConfig, snap: Snapshot, inp: RoomInput) -> float:
     return cfg.boiler.frost_c
 
 
+def _sun_shaped(st: EngineState, snap: Snapshot) -> bool:
+    """Daytime, with the outdoor temperature well above its lowest since midnight: heat
+    the model can't explain may be the sun. Tracks that lowest temperature."""
+    minute = snap.minute_of_day
+    if snap.outdoor is not None:
+        new_day = st.outdoor_minute is None or minute < st.outdoor_minute
+        if new_day or st.outdoor_low_c is None:
+            st.outdoor_low_c = snap.outdoor
+        else:
+            st.outdoor_low_c = min(st.outdoor_low_c, snap.outdoor)
+        st.outdoor_minute = minute
+    return (
+        SUN_START_MIN <= minute < SUN_END_MIN
+        and snap.outdoor is not None
+        and st.outdoor_low_c is not None
+        and snap.outdoor - st.outdoor_low_c >= SUN_OUTDOOR_RISE_K
+    )
+
+
 def solo_threshold_c(target: float, use: RoomUse | None, bcfg: BoilerConfig) -> float:
     """Eco: below this a calling room starts a burn on its own (spec 5.8).
 
@@ -372,6 +401,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     out = snap.outdoor
     if out is None:
         out = 5.0  # conservative default when no outdoor reading
+    sunny = _sun_shaped(st, snap)
     any_trv = False
     frost = hard_frost = False
     trv_now: dict[str, float] = {}  # fresh TRV readings, for the no-heat check
@@ -608,11 +638,12 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         rs.learning_gate = gate
         relearns = rs.est.relearns
         if gate is None:
-            rs.est.update(rs.slope, rs.drive, delta_out)
-        elif held in RESIDUAL_GATES and data_gate is None:
+            rs.est.update(rs.slope, rs.drive, delta_out, at=(now, snap.minute_of_day))
+        elif held == WATCHED_GATE and data_gate is None and not sunny:
             # Held back on the model's own say-so. Change detection still sees it, so
-            # a model that is wrong is re-learned rather than paused for good.
-            rs.est.watch(rs.slope, rs.drive, delta_out)
+            # a model that is wrong is re-learned rather than paused for good, once the
+            # misfit persists across days at other times (sun is at the same time).
+            rs.est.watch(rs.slope, rs.drive, delta_out, at=(now, snap.minute_of_day))
         if rs.est.relearns != relearns:
             # Change detection (spec 4.3): the model no longer fits; re-learn it. What
             # its residual flagged was the model, not extra heat.
