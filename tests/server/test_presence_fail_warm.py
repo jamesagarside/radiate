@@ -192,6 +192,18 @@ async def test_home_evidence_counts_as_home_until_presence_changes(evidence):
     assert rt.away == {"home_worker"}
 
 
+async def test_only_a_setpoint_raised_above_the_target_is_evidence():
+    rt, _, clocks = make()
+    away_by_presence(rt, clocks)
+    rt.state.rooms["dining"].target = 20.0
+    # An automation turning a room down, or holding it where it is, says nobody is in.
+    bridge.handle(rt, "POST", "rooms/dining/setpoint", {"setpoint": 17})
+    bridge.handle(rt, "POST", "rooms/dining/setpoint", {"setpoint": 20})
+    assert rt.away == {"home_worker"}
+    bridge.handle(rt, "POST", "rooms/dining/setpoint", {"setpoint": 20.5})
+    assert rt.away == frozenset()
+
+
 async def test_clearing_an_override_or_putting_out_a_fire_is_not_evidence():
     rt, _, clocks = make()
     away_by_presence(rt, clocks)

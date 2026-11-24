@@ -206,11 +206,15 @@ def set_setpoint(rt: Runtime, room_id: str, body: Any) -> dict:
         if isinstance(minutes, bool) or not isinstance(minutes, (int, float)):
             raise RequestError(400, "duration_min must be a number")
         minutes = float(minutes)
+    target = rt.state.rooms[rc.id].target if rc.id in rt.state.rooms else None
     try:
         override = rt.set_override(rc.id, value, until=until, minutes=minutes)
     except ValueError as err:
         raise RequestError(400, str(err)) from err
-    rt.note_home_evidence("override")  # someone is in (fail warm)
+    # Someone turning a room up is in (fail warm). Holding it or turning it down is
+    # what an automation does when the house is empty, so that is no evidence.
+    if target is None or value > target:
+        rt.note_home_evidence("override")
     view = rt.override_view(rc.id, rt.driver.clock())
     return {"ok": True, "until": override.until, "expires_in_min": view["expires_in_min"]}
 
