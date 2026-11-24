@@ -29,6 +29,15 @@
         <button role="radio" data-demand="eco">Eco</button>
         <button role="radio" data-demand="comfort">Comfort</button>
       </div>
+      <div class="account" id="account" hidden>
+        <button type="button" class="btn account-btn" id="account-btn" aria-expanded="false" aria-controls="account-menu" aria-haspopup="true"><span class="sr-only">Account: </span><span id="account-name"></span><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 3l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+        <div class="card account-menu" id="account-menu" hidden>
+          <p id="account-who"></p>
+          <p class="muted" id="account-role"></p>
+          <button type="button" class="btn" id="account-out">Sign out</button>
+          <p class="account-error" id="account-error" role="alert" hidden>Not signed out. Check the connection and try again.</p>
+        </div>
+      </div>
     </div>
     <p class="demand-note" id="demand-note" hidden></p>
   </header>
