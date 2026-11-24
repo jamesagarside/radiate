@@ -20,8 +20,10 @@ A TRV may not support every governed setting: TRVZB firmware 1.3.0 rejects
 a `/set` payload separately and logs a failure on `bridge/logging` as
 `Publish 'set' '<key>' to '<device>' failed: '...'`, or `No converter available for
 '<key>' on '<device>'` for a key the converter lacks (`lib/extension/publish.ts`).
-Radiate stops sending a governed setting the device rejected as unsupported, or one its
-definition doesn't expose (`bridge/devices`).
+Radiate stops sending an optional setting (`OFF_IF_PRESENT`) for good once the device
+rejects it, and a governed setting its definition doesn't expose (`bridge/devices`). Any
+other rejected setting is skipped, reported as `driver.write_failed`, and sent again once
+the rejection is `REJECT_RETRY_S` old: the TRV needs it, and the failure may pass.
 """
 
 from __future__ import annotations
@@ -44,7 +46,10 @@ GOVERNED_STATIC = {
 # turned off where it exists.
 OFF_IF_PRESENT = frozenset({"smart_temperature_control"})
 _PUBLISH_FAILED = re.compile(r"Publish 'set' '([^']+)' to '(.+?)' failed: .*UNSUPPORTED_ATTRIBUTE")
-_NO_CONVERTER = re.compile(r"No converter available for '([^']+)' on '(.+?)'")
+# The friendly name may itself hold a quote: it runs to the last quote before the
+# optional `: (value)` that Zigbee2MQTT appends.
+_NO_CONVERTER = re.compile(r"No converter available for '([^']+)' on '(.+)'(?:: \(.*\))?$")
+REJECT_RETRY_S = 60 * 60  # a rejected essential setting is tried again after this
 SETPOINT_MIN, SETPOINT_MAX = 4.0, 35.0
 EXTERNAL_MIN, EXTERNAL_MAX = 0.0, 99.9
 RECONCILE_GRACE_S = 5 * 60
@@ -108,15 +113,29 @@ class Device:
     seen: dict[str, float] = field(default_factory=dict)  # attribute -> monotonic time
     last_message: float | None = None
     available: bool | None = None  # None: Z2M availability not reported
-    # Settings Zigbee2MQTT said the device can't take (`parse_rejection`). Kept while the
-    # process runs, across the device going offline and back.
+    # Optional settings Zigbee2MQTT said the device can't take (`parse_rejection`). Kept
+    # while the process runs, across the device going offline and back.
     unsupported: set[str] = field(default_factory=set)
+    # Other rejected settings, with the monotonic time of the latest rejection.
+    rejected: dict[str, float] = field(default_factory=dict)
 
     def update(self, data: dict[str, Any], now: float) -> None:
         for key, value in data.items():
             self.values[key] = value
             self.seen[key] = now
         self.last_message = now
+
+    def reject(self, key: str, now: float) -> None:
+        """Zigbee2MQTT said this device can't take `key`."""
+        if key in OFF_IF_PRESENT:
+            self.unsupported.add(key)
+        else:
+            self.rejected[key] = now
+
+    def blocked(self, now: float, retry_s: float = REJECT_RETRY_S) -> set[str]:
+        """Settings not to send now: the unsupported ones, and those rejected within
+        `retry_s`."""
+        return self.unsupported | {k for k, at in self.rejected.items() if now - at < retry_s}
 
     def number(self, key: str) -> float | None:
         return _num(self.values.get(key))
@@ -157,7 +176,7 @@ class DeviceStore:
         if rest == "bridge/logging":
             rejected = parse_rejection(parse_json(payload))
             if rejected is not None and rejected[0] in self.devices:
-                self.devices[rejected[0]].unsupported.add(rejected[1])
+                self.devices[rejected[0]].reject(rejected[1], now)
             return None
         if rest == "bridge/devices":
             listed = parse_bridge_devices(payload)
@@ -283,6 +302,7 @@ class TrvWriter:
     keepalive_s: float = 25 * 60
     min_external_change_k: float = 0.2
     close_bump_delay_s: float = 5.0
+    reject_retry_s: float = REJECT_RETRY_S
     sent: dict[str, _Sent] = field(default_factory=dict)
     failed: set[str] = field(default_factory=set)
     schedule_sent: dict[str, str] | None = None
@@ -311,9 +331,10 @@ class TrvWriter:
         want = self.desired(action)
         payload: dict[str, Any] = {}
         bump: int | None = None
-        # Never sent: settings the device rejected as unsupported, and governed settings
-        # its definition doesn't expose. Each is dropped on its own, so the rest still go.
-        skip = set(echo.unsupported) if echo is not None else set()
+        # Not sent: settings the device rejected (for good if optional, else for
+        # `reject_retry_s`), and governed settings its definition doesn't expose. Each is
+        # dropped on its own, so the rest still go.
+        skip = echo.blocked(now, self.reject_retry_s) if echo is not None else set()
         if exposes is not None:
             skip |= {k for k in GOVERNED_STATIC if k not in exposes}
 
@@ -348,7 +369,10 @@ class TrvWriter:
             prev.attempts += 1
 
         ext = action.external_temperature
-        if self.remote_sensor and ext is not None:
+        if self.remote_sensor and ext is not None and "external_temperature_input" in skip:
+            self.sent.pop("external_temperature_input", None)
+            self.failed.add("external_temperature_input")
+        elif self.remote_sensor and ext is not None:
             ext = round(max(EXTERNAL_MIN, min(EXTERNAL_MAX, ext)), 1)
             prev = self.sent.get("external_temperature_input")
             if (
@@ -358,6 +382,7 @@ class TrvWriter:
             ):
                 payload["external_temperature_input"] = ext
                 self.sent["external_temperature_input"] = _Sent(ext, now)
+                self.failed.discard("external_temperature_input")
 
         if self.schedule_mirror and schedule is not None and schedule != self.schedule_sent:
             payload.update(schedule)

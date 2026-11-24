@@ -264,3 +264,64 @@ def test_an_essential_setting_the_trv_rejects_is_reported():
     writes = w.plan(action(opening=30, setpoint=21.0), store.get("trv_a"), 60.0)
     assert writes[0].payload == {"occupied_heating_setpoint": 21.0}
     assert w.failed == {"valve_opening_degree"}  # shown as rejected, and alerted
+
+
+def _rejection(key: str, device: str = "trv_a") -> str:
+    message = UNSUPPORTED_LOG["message"].replace("smart_temperature_control", key)
+    return json.dumps({"level": "error", "message": message.replace("'trv_a'", f"'{device}'")})
+
+
+def test_a_friendly_name_with_an_apostrophe_is_read_whole():
+    no_converter = {
+        "level": "error",
+        "message": "No converter available for 'system_mode' on 'Jo's room TRV': (\"auto\")",
+    }
+    assert parse_rejection(no_converter) == ("Jo's room TRV", "system_mode")
+    bare = {"level": "error", "message": "No converter available for 'system_mode' on 'Jo's'"}
+    assert parse_rejection(bare) == ("Jo's", "system_mode")
+    publish = json.loads(_rejection("system_mode", "Jo's room TRV"))
+    assert parse_rejection(publish) == ("Jo's room TRV", "system_mode")
+
+
+def test_only_an_optional_setting_is_skipped_for_good():
+    store = DeviceStore("zigbee2mqtt", {"trv_a"})
+    store.handle("zigbee2mqtt/bridge/logging", _rejection("smart_temperature_control"), 1.0)
+    store.handle("zigbee2mqtt/bridge/logging", _rejection("system_mode"), 1.0)
+    dev = store.get("trv_a")
+    assert dev.unsupported == {"smart_temperature_control"}
+    assert dev.rejected == {"system_mode": 1.0}
+
+
+def test_a_rejected_essential_setting_is_retried_after_an_hour():
+    store = DeviceStore("zigbee2mqtt", {"trv_a"})
+    w = TrvWriter("trv_a", remote_sensor=True)
+    w.plan(action(), store.get("trv_a"), 0.0)
+    store.handle("zigbee2mqtt/bridge/logging", _rejection("valve_opening_degree"), 1.0)
+    store.handle("zigbee2mqtt/bridge/logging", _rejection("smart_temperature_control"), 1.0)
+    echo = store.get("trv_a")
+    assert w.plan(action(opening=30), echo, 60.0) == []
+    assert w.failed == {"valve_opening_degree"}
+    (keepalive,) = w.plan(action(opening=30), echo, 3599.0)
+    assert keepalive.payload == {"external_temperature_input": 19.8}
+    # The rejection has expired: the failure may have been passing, or the TRV's
+    # firmware updated. Sent again; the optional setting stays skipped.
+    (write,) = w.plan(action(opening=30), echo, 3602.0)
+    assert write.payload == {"valve_opening_degree": 30}
+    assert w.failed == set()
+    # Rejected again: skipped and reported for another hour.
+    store.handle("zigbee2mqtt/bridge/logging", _rejection("valve_opening_degree"), 3603.0)
+    assert w.plan(action(opening=35), echo, 3660.0) == []
+    assert w.failed == {"valve_opening_degree"}
+
+
+def test_a_rejected_external_temperature_is_reported_and_retried():
+    store = DeviceStore("zigbee2mqtt", {"trv_a"})
+    w = TrvWriter("trv_a", remote_sensor=True)
+    w.plan(action(ext=19.0), store.get("trv_a"), 0.0)
+    store.handle("zigbee2mqtt/bridge/logging", _rejection("external_temperature_input"), 1.0)
+    echo = store.get("trv_a")
+    assert w.plan(action(ext=20.0), echo, 60.0) == []
+    assert w.failed == {"external_temperature_input"}
+    (write,) = w.plan(action(ext=20.0), echo, 3700.0)
+    assert write.payload == {"external_temperature_input": 20.0}
+    assert w.failed == set()

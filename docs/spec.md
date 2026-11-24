@@ -183,7 +183,7 @@ Radiate does **not** pin the valve position (closing = 100 − opening). Pinning
 | `valve_closing_degree` | 100 | fully closed when satisfied |
 | `smart_temperature_control` | `false` | the adaptive PID mode disables opening limits. Only where the TRV has it: some firmware (TRVZB 1.3.0) rejects it |
 
-A governed setting the TRV doesn't take is not sent again: one Zigbee2MQTT rejects with `UNSUPPORTED_ATTRIBUTE` or has no converter for (read from its `bridge/logging`), and one the device's definition in `bridge/devices` doesn't expose. Each is dropped on its own, so the others still go. Without `smart_temperature_control` there is no adaptive mode to turn off, so that loses nothing; any other setting dropped this way shows in the room's `valve.rejected` and raises `driver.write_failed`.
+A setting the TRV doesn't take is held back: one Zigbee2MQTT rejects with `UNSUPPORTED_ATTRIBUTE` or has no converter for (read from its `bridge/logging`), and a governed setting the device's definition in `bridge/devices` doesn't expose. Each is dropped on its own, so the others still go. Without `smart_temperature_control` there is no adaptive mode to turn off, so that loses nothing and it is not sent again. Any other rejected setting (the external temperature, setpoint, valve degrees, system mode) shows in the room's `valve.rejected`, raises `driver.write_failed`, and is sent again 60 minutes after the latest rejection, since the failure may pass or the firmware may change.
 
 The TRV does the thermostat on/off; Radiate decides how far each valve may open, when the boiler fires and what each TRV believes the room temperature is.
 
