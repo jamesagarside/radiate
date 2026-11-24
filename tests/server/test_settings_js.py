@@ -47,7 +47,7 @@ console.log(JSON.stringify({
 }));
 """
 
-DASHES = re.compile("[–—]")
+DASHES = re.compile("[\u2013\u2014]")
 
 
 def run(view: dict, tmp_path: Path) -> dict:
@@ -90,7 +90,7 @@ def test_words_for_the_demo(tmp_path):
         "pct": "20%",
         "use": "Weekdays in use, weekend unused",
         "role": "Valve's own sensor",
-        "none": "–",
+        "none": "\u2013",  # the placeholder glyph for a missing value
     }
     assert out["parsed"] == {
         "num": 7.5,

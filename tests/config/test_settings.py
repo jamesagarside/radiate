@@ -29,7 +29,7 @@ from radiate.config.settings import (
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "reference-house.yaml"
 ENV = {"RADIATE_MQTT_PASSWORD": "m", "RADIATE_SHELLY_PASSWORD": "s"}
-DASHES = re.compile("[–—]")
+DASHES = re.compile("[\u2013\u2014]")
 
 
 def minimal(**over) -> dict:

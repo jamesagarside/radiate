@@ -329,6 +329,8 @@ done
 
 `<data_dir>/household.yaml` holds the household set up in the web UI, if any. It replaces the house file's `household` section, so pass the same data directory to `radiate check-config` and `radiate schedules` with `--data-dir` to see what the server uses. See [set up in the web UI](configuration.md#set-up-in-the-web-ui).
 
+`<data_dir>/settings.yaml` holds the settings changed in the web UI's Settings view, if any. Each value in it replaces the house file's for that key; the house file itself is never written, so it can stay read-only (a Kubernetes ConfigMap, or the file the Home Assistant App manages). The server, `radiate check-config`, `radiate schedules` and `radiate shelly` all apply it, given the same data directory, and `check-config` lists the keys it sets. If the saved settings would make the house invalid (a room was removed from the house file since, say), the server logs why, starts with the house file's values and the Settings view shows the problem. Delete the file, or choose "Use the house file for every setting", to go back to the house file. `house.data_dir` is the one key it can't set, as the file lives there. `--dry-run` still forces dry run whatever the file says. Back up both files with the database.
+
 Radiate saves engine state every 5 minutes and when it stops cleanly. The manual fire switch is not saved.
 
 If the database is lost or unreadable, Radiate starts from its priors and learns again. It also gets a new house ID, so Elastic sees a new house.

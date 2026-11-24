@@ -147,6 +147,23 @@ mqtt:
   password: ${RADIATE_MQTT_PASSWORD}
 ```
 
+## Change settings in the web UI
+
+The web UI's Settings tab shows every key on this page except the `household` and `schedules` sections, which have the household setup and the Schedules section. It doesn't add or remove rooms; list them here.
+
+A change made there is saved to `<data_dir>/settings.yaml`, never to this file, and replaces this file's value for that key from then on. Each key shows where its value comes from: the house file, set in the web UI, or the default. The file looks like this, with `rooms` keyed by room id:
+
+```yaml
+settings:
+  boiler:
+    min_burn_min: 9
+  rooms:
+    lounge:
+      actuate: true
+```
+
+Changes are checked with the same rules as this file and refused if the house wouldn't load. Boiler, hot water, balancing, suggestions, device alert limits, the outdoor source and the fire switch's length apply straight away; everything else after a restart, and the tab says which are waiting. Turning dry run off, changing the relay's host or channels, the schedule mirror, or a room's role, valve or `actuate` asks for confirmation first. Passwords set in the web UI are saved in the file in plain text, like the state database; the API never returns them. See [deployment](deployment.md#what-radiate-stores) for backups and going back to this file.
+
 ## Sections
 
 ### house
