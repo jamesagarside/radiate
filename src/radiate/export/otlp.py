@@ -1,10 +1,12 @@
 """OpenTelemetry export over OTLP/HTTP (spec 9.1).
 
-Sends every raw data series (`radiate.core.series`) once a minute as OTLP gauge
-metrics, and each decision and alert as an OTLP log record, to any OTLP/HTTP
-collector: an OpenTelemetry Collector, Elastic's managed OTLP endpoint, or anything
-else that speaks the protocol. Configured in the house file under `export.otlp`
-(`radiate.config.export`).
+Sends every raw data series (`radiate.core.series`) once a minute as OTLP gauges, the
+day's running totals as cumulative sums, each closed day's summary and savings as
+gauges, and each event (a decision, an alert, a mode change and so on) as an OTLP log
+record, to any OTLP/HTTP collector: an OpenTelemetry Collector, Elastic's managed OTLP
+endpoint, or anything else that speaks the protocol. Configured in the house file
+under `export.otlp` (`radiate.config.export`). Every name, unit and attribute comes
+from the telemetry schema, `radiate.export.telemetry` (docs/telemetry.md).
 
 Encoding is done here, with the standard library only. Requests are first built as the
 OTLP/JSON mapping (lowerCamelCase field names, 64-bit integers as strings), then sent
@@ -33,6 +35,7 @@ import contextlib
 import gzip
 import json
 import logging
+import math
 import os
 import struct
 import time
@@ -46,6 +49,7 @@ import aiohttp
 from radiate import __version__
 from radiate.config.export import OtlpConfig
 from radiate.core.series import BY_ID, LEVEL, split_key
+from radiate.export import telemetry
 from radiate.server.store import ExportQueue, MemoryQueue
 
 LOG = logging.getLogger(__name__)
@@ -56,7 +60,8 @@ LOGS_MAX = 20_000
 METRICS_BATCH = 30  # ticks a request: about 2,000 data points, well under 1 MB
 LOGS_BATCH = 500
 MAX_BACKOFF_S = 600.0
-SEVERITY_INFO = 9  # SeverityNumber.SEVERITY_NUMBER_INFO
+AGGREGATION_CUMULATIVE = 2  # AggregationTemporality.AGGREGATION_TEMPORALITY_CUMULATIVE
+DROPPED_EVERY_S = 3600.0  # at most one radiate.export.dropped record an hour per cause
 SCOPE = "radiate"
 
 
@@ -98,8 +103,14 @@ _PROTO: dict[str, dict[str, tuple[int, str]]] = {
         "description": (2, "string"),
         "unit": (3, "string"),
         "gauge": (5, "Gauge"),
+        "sum": (7, "Sum"),
     },
     "Gauge": {"dataPoints": (1, "NumberDataPoint")},
+    "Sum": {
+        "dataPoints": (1, "NumberDataPoint"),
+        "aggregationTemporality": (2, "varint"),
+        "isMonotonic": (3, "bool"),
+    },
     "NumberDataPoint": {
         "startTimeUnixNano": (2, "fixed64"),
         "timeUnixNano": (3, "fixed64"),
@@ -113,6 +124,7 @@ _PROTO: dict[str, dict[str, tuple[int, str]]] = {
         "body": (5, "AnyValue"),
         "attributes": (6, "KeyValue"),
         "observedTimeUnixNano": (11, "fixed64"),
+        "eventName": (12, "string"),
     },
     "KeyValue": {"key": (1, "string"), "value": (2, "AnyValue")},
     "AnyValue": {
@@ -120,7 +132,9 @@ _PROTO: dict[str, dict[str, tuple[int, str]]] = {
         "boolValue": (2, "bool"),
         "intValue": (3, "varint"),
         "doubleValue": (4, "double"),
+        "arrayValue": (5, "ArrayValue"),
     },
+    "ArrayValue": {"values": (1, "AnyValue")},
 }
 
 
@@ -230,11 +244,20 @@ def _attr(key: str, value: Any) -> dict:
         return {"key": key, "value": {"intValue": str(value)}}
     if isinstance(value, float):
         return {"key": key, "value": {"doubleValue": value}}
+    if isinstance(value, (list, tuple)):
+        items = [{"stringValue": str(v)} for v in value]
+        return {"key": key, "value": {"arrayValue": {"values": items}}}
     return {"key": key, "value": {"stringValue": str(value)}}
 
 
 def _nanos(t: float) -> str:
     return str(int(round(t * 1e9)))
+
+
+def _num(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
 
 
 def resource(house_id: str, dataset: str = "") -> dict:
@@ -243,6 +266,7 @@ def resource(house_id: str, dataset: str = "") -> dict:
         _attr("service.version", __version__),
         _attr("service.instance.id", house_id),
         _attr("radiate.house.id", house_id),
+        _attr("radiate.schema.version", telemetry.SCHEMA_VERSION),
     ]
     if dataset:
         attrs.append(_attr("data_stream.dataset", dataset))
@@ -253,91 +277,218 @@ def _scope() -> dict:
     return {"name": SCOPE, "version": __version__}
 
 
+class _Metrics:
+    """The metrics of one request, each named and typed by its schema definition."""
+
+    def __init__(self, rooms: Mapping[str, str]):
+        self.rooms = rooms
+        self.by_name: dict[str, dict] = {}
+
+    def _room(self, room: str | None) -> list[dict]:
+        if room is None:
+            return []
+        attrs = [_attr(telemetry.ROOM_ID.key, room)]
+        if room in self.rooms:
+            attrs.append(_attr(telemetry.ROOM_NAME.key, self.rooms[room]))
+        return attrs
+
+    def add(
+        self,
+        d: telemetry.MetricDef,
+        ts: str,
+        value: float,
+        attrs: list[dict] | None = None,
+        start: str | None = None,
+    ) -> None:
+        entry = self.by_name.get(d.name)
+        if entry is None:
+            data: dict[str, Any] = {"dataPoints": []}
+            if d.instrument == telemetry.SUM:
+                data["aggregationTemporality"] = AGGREGATION_CUMULATIVE
+                data["isMonotonic"] = d.monotonic
+            entry = self.by_name[d.name] = {
+                "name": d.name,
+                "description": d.brief,
+                "unit": d.unit,
+                d.instrument: data,
+            }
+        point: dict[str, Any] = {}
+        if start is not None:
+            point["startTimeUnixNano"] = start
+        point["timeUnixNano"] = ts
+        point["asDouble"] = float(value)
+        if attrs:
+            point["attributes"] = attrs
+        entry[d.instrument]["dataPoints"].append(point)
+
+    def tick(self, rec: dict) -> None:
+        """One tick: the raw data series as gauges, and the day's running totals."""
+        t, values = rec.get("t"), rec.get("v")
+        if not isinstance(t, (int, float)) or not isinstance(values, dict):
+            return
+        ts = _nanos(t)
+        for key, value in values.items():
+            series, room = split_key(key)
+            d = telemetry.METRIC_BY_SERIES.get(series)
+            m = BY_ID.get(series)
+            v = _num(value)
+            if d is None or m is None or v is None:
+                continue
+            attrs = self._room(room)
+            if m.kind == LEVEL:
+                # A state set (OpenTelemetry's `hw.status` pattern): one point per state.
+                for i, level in enumerate(m.levels):
+                    state = [*attrs, _attr(telemetry.BOILER_STATE.key, level)]
+                    self.add(d, ts, 1.0 if i == int(v) else 0.0, state)
+                continue
+            self.add(d, ts, v, attrs)
+        totals, start = rec.get("k"), _num(rec.get("k0"))
+        if isinstance(totals, dict) and start is not None:
+            for d in telemetry.COUNTERS:
+                v = _num(totals.get(d.source))
+                if v is not None:
+                    self.add(d, ts, v, start=_nanos(start))
+
+    def day(self, rec: dict) -> None:
+        """A closed day: its summary and savings as gauges at the day's last second."""
+        day = rec.get("d")
+        if not isinstance(day, dict) or not isinstance(day.get("summary"), dict):
+            return
+        summary = day["summary"]
+        estimate = day.get("estimate") if isinstance(day.get("estimate"), dict) else None
+        end, start = _num(day.get("end")), _num(day.get("start"))
+        if end is None:
+            return
+        ts = _nanos(end)
+        st = _nanos(start) if start is not None else None
+        partial = _attr(telemetry.DAY_PARTIAL.key, bool(summary.get("partial", False)))
+        sources = {"summary": summary, "estimate": _with_share(estimate)}
+        for d in telemetry.DAILY_METRICS:
+            base, _, path = d.source.partition(".")
+            value: Any = sources.get(base)
+            for part in path.split("."):
+                value = value.get(part) if isinstance(value, dict) else None
+            extra = _daily_attrs(d, summary, estimate)
+            if extra is None:
+                continue
+            if isinstance(value, dict):  # one point per room
+                for room, v in sorted(value.items()):
+                    if _num(v) is not None:
+                        self.add(d, ts, float(v), [*self._room(room), partial, *extra], st)
+            elif _num(value) is not None:
+                self.add(d, ts, float(value), [partial, *extra], st)
+
+    def request(self, house_id: str, dataset: str) -> dict:
+        order = {d.name: i for i, d in enumerate(telemetry.METRICS)}
+        metrics = sorted(self.by_name.values(), key=lambda m: order[m["name"]])
+        return {
+            "resourceMetrics": [
+                {
+                    "resource": resource(house_id, dataset),
+                    "scopeMetrics": [{"scope": _scope(), "metrics": metrics}],
+                }
+            ]
+        }
+
+
+def _with_share(estimate: dict | None) -> dict | None:
+    """The day's savings estimate with the share of the baseline saved, in %."""
+    if estimate is None:
+        return None
+    saved, base = _num(estimate.get("litres_saved")), _num(estimate.get("litres_baseline"))
+    share = round(100.0 * saved / base, 1) if saved is not None and base else None
+    return {**estimate, "percent_saved": share}
+
+
+def _daily_attrs(d: telemetry.MetricDef, summary: dict, estimate: dict | None) -> list | None:
+    """The attributes a daily metric needs besides the room and `radiate.day.partial`;
+    None when one is unknown, so the metric is not sent."""
+    out = []
+    keys = {a.key for a in d.attributes}
+    if telemetry.BURNER_BASIS.key in keys:
+        basis = summary.get("basis", "relay")
+        if basis not in telemetry.BURNER_BASIS.values:
+            return None
+        out.append(_attr(telemetry.BURNER_BASIS.key, basis))
+    if telemetry.SAVINGS_ELIGIBLE.key in keys:
+        if estimate is None:
+            return None
+        out.append(_attr(telemetry.SAVINGS_ELIGIBLE.key, bool(estimate.get("eligible"))))
+    return out
+
+
 def metrics_request(
     records: list[dict], house_id: str, rooms: Mapping[str, str], dataset: str = ""
 ) -> dict:
-    """ExportMetricsServiceRequest (OTLP/JSON) for queued ticks: {"t": Unix, "v": values}.
+    """ExportMetricsServiceRequest (OTLP/JSON) for queued metric records.
 
-    One gauge per metric. A room series carries `radiate.room.id` and
-    `radiate.room.name`; a level, such as the boiler state, one point per level, 1 for
-    the current one, with the level in an attribute (OpenTelemetry's state-set pattern).
+    A tick is {"t": Unix, "v": series values, "k": the day's running totals, "k0": when
+    they started, local midnight}; a closed day is {"t", "d": {"summary", "estimate",
+    "start", "end"}}. Names, units, instruments and attributes come from the telemetry
+    schema (`radiate.export.telemetry`). Room metrics carry `radiate.room.id` and
+    `radiate.room.name`.
     """
-    metrics: dict[str, dict] = {}
+    out = _Metrics(rooms)
     for rec in records:
-        t = rec.get("t")
-        values = rec.get("v")
-        if not isinstance(t, (int, float)) or not isinstance(values, dict):
+        if not isinstance(rec, dict):
             continue
-        ts = _nanos(t)
-        for key, value in values.items():
-            metric_id, room = split_key(key)
-            m = BY_ID.get(metric_id)
-            if m is None or not isinstance(value, (int, float)) or isinstance(value, bool):
-                continue
-            entry = metrics.get(m.otel_name)
-            if entry is None:
-                entry = metrics[m.otel_name] = {
-                    "name": m.otel_name,
-                    "description": m.description,
-                    "unit": m.otel_unit,
-                    "gauge": {"dataPoints": []},
-                }
-            points = entry["gauge"]["dataPoints"]
-            attrs = []
-            if room is not None:
-                attrs.append(_attr("radiate.room.id", room))
-                if room in rooms:
-                    attrs.append(_attr("radiate.room.name", rooms[room]))
-            if m.kind == LEVEL:
-                current = int(value)
-                for i, level in enumerate(m.levels):
-                    points.append(
-                        {
-                            "timeUnixNano": ts,
-                            "asDouble": 1.0 if i == current else 0.0,
-                            "attributes": [*attrs, _attr(f"radiate.{m.id}", level)],
-                        }
-                    )
-                continue
-            point: dict[str, Any] = {"timeUnixNano": ts, "asDouble": float(value)}
-            if attrs:
-                point["attributes"] = attrs
-            points.append(point)
+        if "d" in rec:
+            out.day(rec)
+        else:
+            out.tick(rec)
+    return out.request(house_id, dataset)
+
+
+def _log_record(rec: dict, rooms: Mapping[str, str]) -> dict | None:
+    t, code, message = rec.get("t"), rec.get("c"), rec.get("m")
+    if not isinstance(t, (int, float)) or not isinstance(code, str):
+        return None
+    name = rec.get("e")
+    if name in telemetry.EVENT_BY_NAME:
+        extra = rec.get("a") if isinstance(rec.get("a"), dict) else {}
+    else:
+        # Queued before the schema, or by a newer version: sent by its code.
+        built = telemetry.reason_record(code, str(message or ""), rec.get("r"))
+        name, extra = built["e"], built["a"]
+    d = telemetry.EVENT_BY_NAME[name]
+    allowed = {a.key for a in d.attributes}
+    attrs = [_attr(telemetry.EVENT_NAME.key, name), _attr(telemetry.EVENT_ACTION.key, code)]
+    room = rec.get("r")
+    if room and telemetry.ROOM_ID.key in allowed:
+        attrs.append(_attr(telemetry.ROOM_ID.key, str(room)))
+        if room in rooms:
+            attrs.append(_attr(telemetry.ROOM_NAME.key, rooms[room]))
+    for key, value in extra.items():
+        if key in allowed and value is not None:
+            attrs.append(_attr(key, value))
+    ts = _nanos(t)
     return {
-        "resourceMetrics": [
-            {
-                "resource": resource(house_id, dataset),
-                "scopeMetrics": [{"scope": _scope(), "metrics": list(metrics.values())}],
-            }
-        ]
+        "timeUnixNano": ts,
+        "observedTimeUnixNano": ts,
+        "severityNumber": telemetry.SEVERITY[d.severity],
+        "severityText": d.severity,
+        "body": {"stringValue": str(message or "")},
+        "attributes": attrs,
+        "eventName": name,
     }
 
 
-def logs_request(records: list[dict], house_id: str, dataset: str = "") -> dict:
-    """ExportLogsServiceRequest (OTLP/JSON) for decisions and alerts: {"t", "c", "m", "r"}.
+def logs_request(
+    records: list[dict],
+    house_id: str,
+    dataset: str = "",
+    rooms: Mapping[str, str] | None = None,
+) -> dict:
+    """ExportLogsServiceRequest (OTLP/JSON) for queued events: {"t", "e", "c", "m", "r",
+    "a"}, from `radiate.export.telemetry`'s builders plus the time.
 
-    The body is the message as the web UI shows it; `event.action` holds the reason
-    code, as in the Elastic export's decision stream.
+    The event name goes in the log record's event name field and, for backends that
+    don't read it, the `event.name` attribute. `event.action` holds the reason code, as
+    in the Elastic export's decision stream; the body is the message as the web UI
+    shows it.
     """
-    out = []
-    for rec in records:
-        t, code, message = rec.get("t"), rec.get("c"), rec.get("m")
-        if not isinstance(t, (int, float)) or not isinstance(code, str):
-            continue
-        attrs = [_attr("event.action", code)]
-        if rec.get("r"):
-            attrs.append(_attr("radiate.room.id", str(rec["r"])))
-        ts = _nanos(t)
-        out.append(
-            {
-                "timeUnixNano": ts,
-                "observedTimeUnixNano": ts,
-                "severityNumber": SEVERITY_INFO,
-                "severityText": "INFO",
-                "body": {"stringValue": str(message or "")},
-                "attributes": attrs,
-            }
-        )
+    built = (_log_record(rec, rooms or {}) for rec in records if isinstance(rec, dict))
+    out = [r for r in built if r is not None]
     return {
         "resourceLogs": [
             {
@@ -365,7 +516,7 @@ def count_points(request: dict) -> int:
     for rm in request.get("resourceMetrics", []):
         for sm in rm["scopeMetrics"]:
             for m in sm["metrics"]:
-                n += len(m["gauge"]["dataPoints"])
+                n += len((m.get("gauge") or m.get("sum") or {}).get("dataPoints", []))
     for rl in request.get("resourceLogs", []):
         for sl in rl["scopeLogs"]:
             n += len(sl["logRecords"])
@@ -453,25 +604,92 @@ class OtlpExporter:
         self._retry_after: float | None = None
         self._task: asyncio.Task | None = None
         self._logged_error: str | None = None
+        # Data lost and not yet reported as radiate.export.dropped, by (signal, cause).
+        self._lost: dict[tuple[str, str], int] = {}
+        self._lost_reported: dict[tuple[str, str], float] = {}
+        self._queue_dropped = {s: self._dropped(s) for s in self.queues}
 
     # --- recording, from the control loop --------------------------------------------
 
-    def record(self, wall: float, values: Mapping[str, float], logged: list[tuple] = ()) -> None:
+    def record(
+        self,
+        wall: float,
+        values: Mapping[str, float],
+        events: list = (),
+        totals: Mapping[str, float] | None = None,
+        totals_start: float | None = None,
+    ) -> None:
+        """Queue one tick: its series `values`, the day's running `totals` (ledger
+        fields, counted since `totals_start`) and `events`, each a record from
+        `radiate.export.telemetry`'s builders or a (code, message, room) tuple."""
         if not self.cfg.enabled:
             return
-        if "metrics" in self.cfg.signals and values:
-            self.queues["metrics"].extend([{"t": wall, "v": dict(values)}])
-        if "logs" in self.cfg.signals and logged:
-            self.queues["logs"].extend(
-                [{"t": wall, "c": code, "m": msg, "r": room} for code, msg, room in logged]
-            )
+        if "metrics" in self.cfg.signals and (values or totals):
+            rec: dict[str, Any] = {"t": wall, "v": dict(values)}
+            if totals and totals_start is not None:
+                rec["k"], rec["k0"] = dict(totals), totals_start
+            self.queues["metrics"].extend([rec])
+        if "logs" in self.cfg.signals and events:
+            out = []
+            for ev in events:
+                if isinstance(ev, dict):
+                    out.append({"t": wall, **ev} if "t" not in ev else dict(ev))
+                else:
+                    code, msg, room = ev
+                    out.append({"t": wall, **telemetry.reason_record(code, msg, room)})
+            self.queues["logs"].extend(out)
+        self._report_lost(wall)
+
+    def record_day(
+        self,
+        wall: float,
+        summary: Mapping[str, Any],
+        estimate: Mapping[str, Any] | None,
+        start: float | None,
+        end: float,
+    ) -> None:
+        """Queue a closed day's summary and savings `estimate`, to be sent as gauges
+        timed at `end`, the day's last second, with `start` its first."""
+        if not self.cfg.enabled or "metrics" not in self.cfg.signals:
+            return
+        day = {"summary": dict(summary), "estimate": dict(estimate) if estimate else None}
+        day.update(start=start, end=end)
+        self.queues["metrics"].extend([{"t": wall, "d": day}])
+        self._report_lost(wall)
+
+    def _dropped(self, signal: str) -> int:
+        return int(getattr(self.queues[signal], "dropped", 0))
+
+    def _lose(self, signal: str, why: str, count: int) -> None:
+        if count > 0:
+            key = (signal, why)
+            self._lost[key] = self._lost.get(key, 0) + count
+
+    def _report_lost(self, wall: float) -> None:
+        """Queue a radiate.export.dropped record for data lost since the last one, at
+        most one an hour for each signal and cause."""
+        for signal in self.queues:
+            n = self._dropped(signal)
+            self._lose(signal, "queue_full", n - self._queue_dropped[signal])
+            self._queue_dropped[signal] = n
+        if "logs" not in self.cfg.signals:
+            self._lost.clear()
+            return
+        for (signal, why), count in list(self._lost.items()):
+            last = self._lost_reported.get((signal, why))
+            if count <= 0 or (last is not None and wall - last < DROPPED_EVERY_S):
+                continue
+            record = telemetry.dropped_record(signal, count, why)
+            self.queues["logs"].extend([{"t": wall, **record}])
+            self._lost[(signal, why)] = 0
+            self._lost_reported[(signal, why)] = wall
 
     # --- sending ---------------------------------------------------------------------
 
     def _request(self, signal: str, items: list[dict]) -> dict:
         if signal == "metrics":
             return metrics_request(items, self.house_id, self.rooms, self.cfg.dataset)
-        return logs_request(items, self.house_id, self.cfg.dataset)
+        return logs_request(items, self.house_id, self.cfg.dataset, self.rooms)
 
     def _redact(self, text: str) -> str:
         return text.replace(self._secret, "[redacted]") if self._secret else text
@@ -522,6 +740,7 @@ class OtlpExporter:
             self.sent[signal] += count_points(request) - rejected
             if rejected:
                 self.rejected += rejected
+                self._lose(signal, "partial_success", rejected)
                 LOG.warning(
                     "OpenTelemetry export: the collector rejected %d %s: %s",
                     rejected,
@@ -544,6 +763,7 @@ class OtlpExporter:
             # The collector will never take this batch: drop it rather than block the rest.
             queue.drop(len(items))
             self.rejected += count_points(request)
+            self._lose(signal, str(status), len(items))
             self._fail(f"{message} (batch dropped)")
             return True
         if status in (429, 502, 503, 504) and retry_after:

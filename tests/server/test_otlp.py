@@ -10,6 +10,7 @@ from aiohttp.test_utils import TestServer
 
 from radiate.config.export import parse_export
 from radiate.core.series import BY_ID
+from radiate.export import telemetry
 from radiate.export.otlp import (
     OtlpExporter,
     encode,
@@ -17,6 +18,7 @@ from radiate.export.otlp import (
     metrics_request,
     partial_success,
 )
+from radiate.export.telemetry import SCHEMA_VERSION
 from radiate.server.store import MemoryQueue, SqliteQueue, Store
 
 pb_metrics = pytest.importorskip("opentelemetry.proto.collector.metrics.v1.metrics_service_pb2")
@@ -75,6 +77,7 @@ def test_metrics_json_is_valid_otlp_json():
         "service.version": res["service.version"],
         "service.instance.id": HOUSE,
         "radiate.house.id": HOUSE,
+        "radiate.schema.version": SCHEMA_VERSION,
         "data_stream.dataset": "radiate",
     }
     scope = rm.scope_metrics[0]
@@ -89,7 +92,7 @@ def test_metrics_json_is_valid_otlp_json():
         "radiate.room.id": "lounge",
         "radiate.room.name": "Lounge",
     }
-    assert by_name["radiate.valve.opening"].unit == "%"
+    assert by_name["radiate.valve.opening.limit"].unit == "%"
     assert by_name["radiate.room.demand.calling"].gauge.data_points[0].as_double == 1.0
     outdoor = by_name["radiate.outdoor.temperature"].gauge.data_points[0]
     assert outdoor.as_double == -2.5 and not outdoor.attributes
@@ -122,8 +125,18 @@ def test_logs_json_and_protobuf():
     assert [r.body.string_value for r in recs] == [m for _, m, _ in LOGGED]
     assert recs[0].severity_number == 9 and recs[0].severity_text == "INFO"
     assert recs[0].time_unix_nano == int(T0 * 1e9) == recs[0].observed_time_unix_nano
-    assert _attrs(recs[0].attributes) == {"event.action": "boiler.lead"}
-    assert _attrs(recs[1].attributes) == {"event.action": "room.fire", "radiate.room.id": "lounge"}
+    assert recs[0].event_name == "radiate.decision"
+    assert _attrs(recs[0].attributes) == {
+        "event.name": "radiate.decision",
+        "event.action": "boiler.lead",
+    }
+    # Queued without an event name (before the schema): sent by its code, and the room
+    # name is added only when the exporter knows the rooms.
+    assert _attrs(recs[1].attributes) == {
+        "event.name": "radiate.decision",
+        "event.action": "room.fire",
+        "radiate.room.id": "lounge",
+    }
     body, _ = encode(req, "http/protobuf")
     assert pb_logs.ExportLogsServiceRequest.FromString(body) == msg
     assert body == msg.SerializeToString()
@@ -340,7 +353,8 @@ def test_full_queue_drops_the_oldest_and_counts_them():
     for i in range(5):
         exp.record(T0 + i, {"outdoor.temperature": float(i)}, LOGGED)
     assert [r["t"] for r in exp.queues["metrics"]] == [T0 + 2, T0 + 3, T0 + 4]
-    assert exp.health()["dropped"] == 2 + 8
+    # Ten ticks' logs pushed out, plus what the radiate.export.dropped records pushed out.
+    assert exp.health()["dropped"] >= 2 + 8
 
 
 def test_on_disk_queues_survive_a_restart(tmp_path):
@@ -368,7 +382,7 @@ def test_every_metric_encodes():
     body, _ = encode(req, "http/protobuf")
     msg = pb_metrics.ExportMetricsServiceRequest.FromString(body)
     names = {m.name for m in msg.resource_metrics[0].scope_metrics[0].metrics}
-    assert names == {m.otel_name for m in BY_ID.values()}
+    assert names == {telemetry.METRIC_BY_SERIES[m.id].name for m in BY_ID.values()}
 
 
 async def test_backoff_doubles_honours_retry_after_and_drains_a_backlog(collector, monkeypatch):

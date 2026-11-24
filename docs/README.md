@@ -6,6 +6,7 @@ Start with the [project README](../README.md) for what Radiate is and how to try
 
 - [Deployment](deployment.md): every way to run Radiate, from source, Docker, Raspberry Pi, the Home Assistant App and the HACS integration, plus Elastic export, backups and the Shelly watchdog.
 - [Configuration](configuration.md): the YAML file that describes your house, and how to bring Radiate in gradually.
+- [Telemetry schema](telemetry.md): every metric and log record the OpenTelemetry export sends, with units, attributes and how the schema is versioned.
 - [Implementation status](implementation-status.md): which parts of the specification are built.
 
 ## Design and behaviour

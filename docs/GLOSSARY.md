@@ -919,6 +919,11 @@ Sending the raw data series as OTLP metrics, and the decision log as OTLP logs, 
 Code: `radiate.export.otlp.OtlpExporter`, `radiate.config.export`, config key `export.otlp`, API `GET /api/v1/export`.
 _Avoid_: "OTel export" in UI text; "Elastic export", which is the Bulk API exporter.
 
+**Telemetry schema**:
+The fixed list of metrics and log records the OpenTelemetry export sends: each one's name, instrument, unit, attributes and severity. Versioned MAJOR.MINOR and sent as `radiate.schema.version`; a minor version only adds.
+Code: `radiate.export.telemetry` (`METRICS`, `EVENTS`, `SCHEMA_VERSION`), `scripts/telemetry_docs.py`, [telemetry.md](telemetry.md).
+_Avoid_: "OTel mapping", "metrics spec".
+
 **Replay**:
 Running recorded snapshots through `decide` again, in order, and comparing the result with the recorded actions. With saved state it reproduces the recorded actions exactly; with fresh state it starts from priors. Replay is open loop: the recorded temperatures don't respond to the replayed decisions.
 Code: `Replayer`, `radiate replay`.

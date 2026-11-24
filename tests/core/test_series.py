@@ -100,13 +100,14 @@ def test_unreadable_ticks_give_nothing_or_what_they_can():
     assert v["outdoor.temperature"] == 4.5
 
 
-def test_keys_round_trip_and_every_metric_has_an_otel_name():
+def test_keys_round_trip_and_every_metric_is_well_formed():
+    # Each series' OpenTelemetry name is in radiate.export.telemetry, which checks that
+    # every series has one (tests/server/test_telemetry_schema.py).
     assert split_key(series_key("room.temperature", "lounge")) == ("room.temperature", "lounge")
     assert split_key("boiler.relay") == ("boiler.relay", None)
-    names = [m.otel_name for m in METRICS]
-    assert len(set(names)) == len(names)
+    ids = [m.id for m in METRICS]
+    assert len(set(ids)) == len(ids)
     for m in METRICS:
-        assert m.otel_name.startswith("radiate.")
         assert m.kind in ("gauge", "state", "level")
         assert m.scope in ("room", "house")
         assert "—" not in m.description and "–" not in m.description
