@@ -297,8 +297,12 @@ export function createSetup({ transport, onSaved, onOpen, onClose }) {
           `If Home Assistant stops reporting someone for this long, Radiate treats them as home, not away. 0 turns this off. ${defText(def("away", "presence_stale_after_min"), off)}`),
         field("household.away.return_warmup_min", "Warm up for a return up to", withUnit(numberInput("household.away.return_warmup_min", a.return_warmup_min, { limit: limit("away.return_warmup_min"), onChange: (v) => (a.return_warmup_min = v) }), "min"),
           `How early Radiate may start warming rooms for someone due back. ${defText(def("away", "return_warmup_min"))}`),
-        field("household.away.everyone_away", "When everyone is away", select("household.away.everyone_away", a.everyone_away, [["frost", "Hold every room at frost protection"], ["unused", "Keep rooms at their unused temperature"]], (v) => (a.everyone_away = v)),
-          "Unused suits a house with pets or one that gets damp. Default frost protection."),
+        field("household.away.presence_evidence_max_age_min", "Trust not home for", withUnit(numberInput("household.away.presence_evidence_max_age_min", a.presence_evidence_max_age_min, { limit: limit("away.presence_evidence_max_age_min"), onChange: (v) => (a.presence_evidence_max_age_min = v) }), "min"),
+          `If someone's phone or tracker hasn't reported for this long, for example because its battery died, Radiate counts them as home. ${defText(def("away", "presence_evidence_max_age_min"))}`),
+        field("household.away.presence_weak_source_delay_min", "Wifi or Bluetooth trackers count as away after", withUnit(numberInput("household.away.presence_weak_source_delay_min", a.presence_weak_source_delay_min, { limit: limit("away.presence_weak_source_delay_min"), onChange: (v) => (a.presence_weak_source_delay_min = v) }), "min"),
+          `A phone asleep at home can drop off wifi, so these trackers, and phones at 5% battery or less, wait longer. ${defText(def("away", "presence_weak_source_delay_min"))}`),
+        field("household.away.everyone_away", "When everyone has set an away until", select("household.away.everyone_away", a.everyone_away, [["frost", "Hold every room at frost protection"], ["unused", "Keep rooms at their unused temperature"]], (v) => (a.everyone_away = v)),
+          "Frost protection only applies when everyone has said when they're back. If Home Assistant alone says everyone is out, rooms stay at their unused temperature. Unused suits a house with pets or one that gets damp. Default frost protection."),
       ),
     ];
   }

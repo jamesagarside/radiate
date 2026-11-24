@@ -1043,7 +1043,13 @@ def _timing(ctx: _Ctx, raw: dict) -> Timing:
 def _away_settings(ctx: _Ctx, raw: dict) -> AwaySettings:
     p = "household.away."
     d = AwaySettings()
-    keys = ("presence_delay_min", "presence_stale_after_min", "return_warmup_min")
+    keys = (
+        "presence_delay_min",
+        "presence_stale_after_min",
+        "return_warmup_min",
+        "presence_evidence_max_age_min",
+        "presence_weak_source_delay_min",
+    )
     ctx.unknown(raw, {*keys, "everyone_away"}, p)
     values = {k: _or(_minutes(ctx, raw, k, f"away.{k}", p), getattr(d, k)) for k in keys}
     everyone = _choice(ctx, raw, "everyone_away", EveryoneAway, d.everyone_away, p)

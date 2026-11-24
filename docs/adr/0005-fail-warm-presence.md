@@ -1,6 +1,6 @@
 # ADR-0005: Fail warm: uncertain presence counts as home
 
-- **Status:** Proposed
+- **Status:** Proposed (built, pending the owner's review)
 - **Date:** 2026-11-23
 - **Deciders:** owner (pending)
 - **Evidence:** an incident on the reference install, described below; [spec 7, fail warm](../spec.md#7-failure-modes); [plan, slice 7](../plans/efficiency-mvp.md#slice-7-fail-warm-presence)
@@ -30,14 +30,14 @@ Radiate already fails safe for its own outages (governed mode, the schedule mirr
 
 ## Decision
 
-B. Radiate fails warm: when an input that could lower the heating is missing, silent or doubtful, it takes the reading that keeps the house warmer. For presence: `not_home` counts only while its source has updated recently (source silence, 120 minutes by default); evidence that someone is in (an override, a store boost, the fire switch, a shower) overrides presence-based away; and presence alone never holds the house at frost, only at the unused temperature. Frost on everyone away stays, for people who said they are away until a time.
+B. Radiate fails warm: when an input that could lower the heating is missing, silent or doubtful, it takes the reading that keeps the house warmer. For presence: `not_home` counts only while the person's trackers have reported recently (`evidence_at`, 240 minutes by default); router and Bluetooth trackers and phones at 5 % battery or less wait 240 minutes before counting; a person saying they are home, or evidence that someone is in (an override, a store boost, the fire switch, a shower), overrides presence-based away until presence changes; presence alone never holds the house at frost, only at the unused temperature and never below the 12 °C damp floor. Frost on everyone away stays, for people who said they are away until a time, and room overrides still apply during it.
 
 ## Consequences
 
-- `POST /api/v1/people/{id}/presence` accepts an optional `last_seen`; radiate-ha sends it in a later release. `GET /api/v1/people` gains `presence.last_seen`, `uncertain` and `why`. All additive.
-- `radiate.config.away` gains the source silence and home evidence rules; `household.away.presence_source_silence_min` is a new setting.
+- `POST /api/v1/people/{id}/presence` accepts optional `evidence_at`, `source_type` and `battery`; radiate-ha sends them from a companion change. `GET /api/v1/people` gains `presence.evidence_at`, `source_type`, `battery`, `uncertain` and `why`, and `home_at`. `POST /api/v1/people/{id}/home` is new. All additive.
+- `radiate.config.away` gains the evidence, weak source, I'm home and home evidence rules; `household.away.presence_evidence_max_age_min` and `presence_weak_source_delay_min` are new settings.
 - `everyone_away: frost` changes meaning: it applies only when everyone has an away until. Docs, the household setup's words and the Guide say so.
-- New reasons `away.presence_uncertain` and `away.home_evidence` in the decision log and the UI.
+- New reasons `away.presence_uncertain`, `away.home` and `away.home_evidence` in the decision log and the UI.
 - Every new input that can lower heating (room use, the outdoor cut-off, activity) must state its fail warm reading in spec 7 before it ships.
 
 ## Revisit if

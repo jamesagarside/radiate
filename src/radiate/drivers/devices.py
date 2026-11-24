@@ -12,8 +12,9 @@ Sources:
   milliseconds).
 - The retained `bridge/devices` lists every device with `friendly_name`,
   `ieee_address`, `type` (`Coordinator`, `Router`, `EndDevice`), `power_source`,
-  `software_build_id` (firmware) and `definition` (`model`, `vendor`). Routers are not
-  in the house file, so they are found here.
+  `software_build_id` (firmware) and `definition` (`model`, `vendor`, and `exposes`, the
+  properties the converter offers). Routers are not in the house file, so they are found
+  here.
 - A network scan publishes `{"type": "raw", "routes": false}` to
   `bridge/request/networkmap`; Zigbee2MQTT answers on `bridge/response/networkmap`
   with `{"status": "ok", "data": {"value": {"nodes": [...], "links": [...]}}}`. Each
@@ -122,6 +123,28 @@ class BridgeDevice:
     model: str | None = None
     vendor: str | None = None
     firmware: str | None = None
+    # The properties its Zigbee2MQTT definition exposes (`definition.exposes`, with the
+    # `features` of composite and specific types), or None when it lists none.
+    exposes: frozenset[str] | None = None
+
+
+def _exposes(items: Any) -> frozenset[str] | None:
+    if not isinstance(items, list):
+        return None
+    found: set[str] = set()
+
+    def walk(entries: list) -> None:
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            prop = _str(entry.get("property")) or _str(entry.get("name"))
+            if prop is not None:
+                found.add(prop)
+            if isinstance(entry.get("features"), list):
+                walk(entry["features"])
+
+    walk(items)
+    return frozenset(found) or None
 
 
 def parse_bridge_devices(payload: bytes | str) -> dict[str, BridgeDevice] | None:
@@ -148,6 +171,7 @@ def parse_bridge_devices(payload: bytes | str) -> dict[str, BridgeDevice] | None
             model=_str(definition.get("model")) or _str(item.get("model_id")),
             vendor=_str(definition.get("vendor")) or _str(item.get("manufacturer")),
             firmware=_str(item.get("software_build_id")),
+            exposes=_exposes(definition.get("exposes")),
         )
     return out
 

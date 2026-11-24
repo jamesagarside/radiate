@@ -50,7 +50,9 @@ household:
   #   presence_delay_min: 60  # out this long in Home Assistant before counting as away
   #   presence_stale_after_min: 60  # presence not reported this long counts as unknown
   #   return_warmup_min: 180  # how early Radiate may start warming for someone due back
-  #   everyone_away: frost    # or unused: rooms stay at the unused temperature
+  #   everyone_away: frost    # or unused; frost only when everyone set an away until
+  #   presence_evidence_max_age_min: 240  # not home counts while trackers report this recently
+  #   presence_weak_source_delay_min: 240  # router or Bluetooth trackers count as away after
   temperatures:               # house-wide, °C (these are the defaults)
     in_use: 19
     occasional: 16

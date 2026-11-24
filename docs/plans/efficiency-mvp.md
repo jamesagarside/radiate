@@ -26,6 +26,8 @@ HIGH means the slice changes when the boiler fires or how valves move on the rea
 
 ## Slice 7: fail warm presence
 
+**Built** in the `slice-7-fail-warm` branch, with changes from the fail warm audit: the source's time is `evidence_at` (with `source_type` and `battery`) rather than `last_seen`, the limit is `presence_evidence_max_age_min` (240) rather than a 120 minute source silence, weak sources wait `presence_weak_source_delay_min`, and it adds "I'm home" (`POST people/{id}/home`), overrides that win over the frost hold and a 12 °C floor on away by presence. Spec 7 has the rules as built.
+
 **Goal.** No connectivity or device problem turns the heating down through presence (spec 7, fail warm; ADR-0005). Uncertain presence counts as home; presence alone never holds frost.
 
 **Risk: HIGH**, in the warm direction: it changes when the house is set back, so it changes when the boiler fires. Each change only ever makes the house warmer than today.
