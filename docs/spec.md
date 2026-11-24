@@ -559,8 +559,17 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 | `GET /api/v1/suggestions` | | House suggestions from the learned room models, the valve checks and the devices. `summary` (`total`, `act`, `consider`, `info`, `rooms_ready`, `rooms_learning`, `rooms_compared`, `lags_compared`, `min_rooms`), `suggestions`, most pressing first, each with `id` (kind and room or router, stable while it applies), `kind` (`room.heat_loss`, `radiator.undersized`, `radiator.slow_to_warm`, `valve.passing` or `zigbee.weak_link`), `severity` (`act`, `consider` or `info`), `room_id`, `room_name`, `title`, `evidence`, `action`, `confidence` (`low`, `medium` or `high`), `basis` and `values` (the numbers behind the words), then `learning`, one per controllable room, with `room_id`, `room_name`, `status` (`ready`, `learning` or `not_judged`), `hours`, `confidence` and `note`, and `settings` (the `suggestions` section in effect). Read-only; works with every driver |
 | `GET /api/v1/savings` | | The oil saved against the baseline, and the comfort beside it (section 5.9). See the shape below. Read-only; `status` is `unavailable` without a household (or a hand-written room with a use level) |
 | `GET /api/v1/stream` | | WebSocket: the state on connect and after every tick |
+| `GET /api/v1/auth/config` | | Never needs a token. `{"login": false, "methods": [], "first_user_needed": false}` without login; with it, `login: true`, `methods` (`{"id": "local"}`, and `{"id": "oidc" or "saml", "label", "url"}` for single sign-on) and `first_user_needed` (local login is on and there are no users) |
+| `POST /api/v1/auth/login` | `{"username": "alex", "password": "..."}` | Never needs a token. `Content-Type: application/json` only (415 otherwise). 200 `{"user", "role"}` with the session cookie; 401 `{"error": "invalid"}` for a wrong username or password alike; 429 `{"error": "locked", "retry_after_s"}` with `Retry-After`; 404 when local login is off |
+| `POST /api/v1/auth/logout` | | Ends the session on the server and clears the cookie |
+| `GET /api/v1/auth/me` | | Who the request is from: `via` (`session`, `token`, `ingress` or `open`), `role` (`admin` or `viewer`), and for a session `user`, `method` (`local`, `oidc` or `saml`), `csrf` and `expires` (Unix seconds) |
+| `GET /auth/oidc/start`, `GET /auth/oidc/callback` | | Browser redirects for OIDC sign-in. Not under `/api/` |
+| `GET /auth/saml/start`, `POST /auth/saml/acs`, `GET /auth/saml/metadata` | | Browser redirects, the assertion consumer service and the service provider metadata for SAML sign-in. Not under `/api/` |
+| `GET /login` | | The login page |
 
 Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` needs `Authorization: Bearer <token>`. Browsers cannot set headers on a WebSocket, so `stream` also accepts the token as its first message, `{"token": "<token>"}`; it waits up to 10 s and closes with code 4401 if the token is missing or wrong. In the HA App, requests from the Supervisor's ingress address (`RADIATE_INGRESS_IP`) that carry an `X-Ingress-Path` header are trusted without a token. The web UI at `/` and `/static/` is not protected.
+
+User login ([ADR-0006](adr/0006-user-login.md)) is off unless the house file's `auth` section sets `enabled: true`. With it on, a request is allowed in this order: from the ingress address with `X-Ingress-Path`, as admin; with an `Authorization` header, which decides alone (a valid Bearer token is admin; anything else is 401, even with a session cookie); with a live session cookie (`radiate_session`), with the session's role. Otherwise 401, and with login on that holds even when `RADIATE_TOKEN` is empty. A cookie-authenticated request that isn't GET, HEAD or OPTIONS needs `X-CSRF-Token` equal to the session's `csrf` (403 `{"error": "csrf"}`), and a viewer gets 403 `{"error": "viewer"}` for any change except signing out. The stream accepts a session cookie at the upgrade when the `Origin`, if sent, is this server's own address (403 otherwise), and closes with 4401 within a minute of the session ending. Token and ingress clients see no difference.
 
 **Additions for room use and savings** (sections 5.8 and 5.9). All additive, so radiate-ha needs no change first (ADR-0003):
 
@@ -716,6 +725,11 @@ Efficiency by room use and savings ([ADR-0004](adr/0004-efficiency-by-room-use.m
 Hardware, raised by the efficiency work:
 
 10. Which radiators in the reference house have no valve? Section 2.2 lists the stairs radiator as the only bypass and a TRVZB in the bathroom; the owner has since described the bathroom radiator as an always-open bypass with no valve. If both are unvalved, the bathroom becomes `passive` and the bypass equivalent (`HouseConfig.bypass_equivalent`, 0.4) should rise, which also means fewer heat sinks (5.4).
+
+User login ([ADR-0006](adr/0006-user-login.md)):
+
+11. **Open question: a household role.** Login has two roles, admin and viewer. Should there be a third that can change setpoints, away and fire but not settings, the household or the layout? **Recommended:** wait until someone asks; viewer and admin cover a guest and an owner.
+12. **Open question: login in the Home Assistant App.** The App is reached only through ingress, which Home Assistant signs in, so login stays off there. Should the App offer the `auth` options for people who publish its port? **Recommended:** no, until the App publishes a port.
 
 The three behaviour questions raised in version 0.2 (learning memory, pooled demand, learning on a stale room sensor) are decided; see section 13.
 

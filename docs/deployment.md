@@ -152,7 +152,7 @@ The container makes outbound connections to the MQTT broker and the Shelly, so t
 |---|---|
 | `RADIATE_TOKEN` | If set, every `/api/` request except `/api/v1/health` needs the header `Authorization: Bearer <token>`. The WebSocket at `/api/v1/stream` also accepts it as the first message, `{"token": "<token>"}` |
 | `RADIATE_ELASTIC_URL`, `RADIATE_ELASTIC_API_KEY` | Turn on [Elastic export](#elastic-export) |
-| `RADIATE_INGRESS_IP` | Set by the Home Assistant App only. Requests from this address with an `X-Ingress-Path` header skip the token check |
+| `RADIATE_INGRESS_IP` | Set by the Home Assistant App only. Requests from this address with an `X-Ingress-Path` header skip the token check and any login |
 | `RADIATE_WEB_DIR` | Serve the web UI from another folder, for UI development |
 | Any name used as `${NAME}` in the configuration file | Substituted when the file loads |
 
@@ -161,6 +161,75 @@ We recommend setting `RADIATE_TOKEN` on a standalone install. The built-in web U
 The token stops casual access, but the server speaks plain HTTP. Keep port 8099 on a trusted network and never expose it to the internet. Through Home Assistant ingress the sidebar panel needs no token, and the UI never asks for one.
 
 To check the server is up, request `http://HOST:8099/api/v1/health`, which returns `{"ok": true}` without a token.
+
+For more than one person, or for single sign-on, turn on [user login](#user-login) instead of sharing the token.
+
+## User login
+
+Login gives each person their own account, and lets people sign in with a password, with OpenID Connect (OIDC) or with SAML. It is off until you add an `auth` section with `enabled: true` to the house file (see [configuration](configuration.md#auth)). The decision and its security reasoning are in [ADR-0006](adr/0006-user-login.md).
+
+With login on:
+
+- The web UI sends anyone without a session to `/login`. The header gets an account menu with the person's name, role and Sign out.
+- `RADIATE_TOKEN` keeps working for the Home Assistant integration and scripts, unchanged. If it is empty, only signed-in people get in.
+- Home Assistant ingress keeps working without a login, as before.
+- Admins can change anything. Viewers can see every view and change nothing.
+
+### Add the first person
+
+Radiate never creates an account from the browser, so whoever reaches the page first can't take over the heating. The login page shows the command to run instead. Run it where Radiate runs, with the same `--config` (or `--data-dir`) as the server:
+
+```bash
+radiate users add alex --role admin --config /config/radiate.yaml
+```
+
+It asks for the password twice. In Docker, run it inside the container with `docker exec -it radiate radiate users add alex --role admin --config /config/radiate.yaml`. Passwords are 10 to 1024 characters. For scripts, pipe the password in with `--password-stdin`.
+
+| Command | What it does |
+|---|---|
+| `radiate users list` | Everyone who can sign in with a password, and their role |
+| `radiate users add NAME --role admin` | Add someone. The role defaults to `viewer` |
+| `radiate users reset-password NAME` | Set a new password, for a forgotten one. Their sessions end |
+| `radiate users set-role NAME --role viewer` | Change a role. Their sessions end |
+| `radiate users remove NAME` | Remove someone. Their sessions end |
+
+The commands write to `radiate.db` directly, so they work while the server runs and take effect on the next request. If a single sign-on provider is down, add a local admin this way.
+
+### Failed logins
+
+Five wrong passwords for one username, or 20 from one address, within 15 minutes lock that username or address until 15 minutes after the oldest failure. The login page says how long to wait. The lock is in memory, so a restart clears it.
+
+### Behind a reverse proxy
+
+Login is only safe over HTTPS. Radiate doesn't terminate TLS itself, so put a reverse proxy such as Caddy, Traefik or nginx in front of it, and keep port 8099 off the internet.
+
+- Set `auth.public_url` to the address people use.
+- List the proxy's address in `auth.trusted_proxies`. Radiate then believes the proxy's `X-Forwarded-For` (for rate limiting by the real client address), `X-Forwarded-Proto` (to mark the cookie `Secure`) and `X-Forwarded-Host`. From any other address, these headers are ignored, so nobody can fake them by reaching port 8099 directly.
+- Pass WebSocket upgrades through for `/api/v1/stream`.
+
+### Single sign-on
+
+For OIDC, register Radiate with your provider (Authentik, Keycloak, Authelia, Microsoft Entra ID, Google and others) as a confidential client using the authorization code flow, with the redirect URI `<public_url>/auth/oidc/callback`. Put the client secret in an environment variable or a secret file, never in the house file itself. OIDC needs nothing beyond the standard install.
+
+For SAML, give your identity provider Radiate's metadata at `<public_url>/auth/saml/metadata`, or its entity ID (the same URL) and assertion consumer service (`<public_url>/auth/saml/acs`). The provider must sign assertions with SHA-256 or stronger.
+
+SAML needs an optional extra, because it depends on the native libxml2 and xmlsec libraries, and `lxml` and `xmlsec` must be built against the same libxml2:
+
+```bash
+pip install "radiate[server,saml]"
+```
+
+The standard Docker image and the Home Assistant App leave it out. To build an image with it, pass the extras as a build argument:
+
+```bash
+docker build --build-arg RADIATE_EXTRAS=server,saml -t radiate .
+```
+
+This build hasn't been tried on every architecture yet. If `pip` has to compile `xmlsec`, add `libxmlsec1-dev pkg-config build-essential` with `apt-get` first. If the server starts with a SAML section but without the extra, it stops with a message saying so.
+
+### In the Home Assistant App
+
+The App is reached only through ingress, which Home Assistant already signs in, and it doesn't publish a port. Leave login off there.
 
 ## Raspberry Pi
 
@@ -324,6 +393,7 @@ done
 - The house ID used by Elastic and the Home Assistant integration.
 - The heating mode, the demand mode setting, setpoint overrides, and away state: who is away until when, and the presence Home Assistant last reported.
 - The Elastic export queue.
+- With [user login](#user-login) on: the people who can sign in (`users`, with scrypt password hashes) and their sessions (`sessions`, holding only a hash of each session ID).
 - The closed day summaries savings are worked out from (`daily_history`), one per day for 730 days, a few kilobytes each.
 - The tick history: each tick's snapshot and decisions for the last `house.history_days` days (14 by default), about 1.2 MB a day for a 9-room house. See [configuration](configuration.md#tick-history-and-replay).
 
@@ -335,7 +405,7 @@ If the database is lost or unreadable, Radiate starts from its priors and learns
 
 ### Backups
 
-- Back up your configuration file and the data folder. The backup includes the tick history, so you can replay those days elsewhere, and any household set up in the web UI.
+- Back up your configuration file and the data folder. The backup includes the tick history, so you can replay those days elsewhere, and any household set up in the web UI. With login on it also holds password hashes, so keep backups somewhere only you can read.
 - For a consistent copy while the server runs, use `sqlite3 radiate.db ".backup radiate-backup.db"`. Otherwise stop the server and copy all three files.
 - Home Assistant backups include the App's `/data` and config folders.
 

@@ -215,6 +215,67 @@ When the web UI's Devices view, and the alerts, say a device needs attention.
 
 A temperature sensor that has sent nothing for `house.sensor_max_silence_min` is reported as silent (`device.stale`).
 
+### auth
+
+User login for the web UI ([ADR-0006](adr/0006-user-login.md)). Without this section, or with `enabled: false`, nothing changes: the server uses `RADIATE_TOKEN` and Home Assistant ingress alone. With login on, the token and ingress still work exactly as before, so the Home Assistant integration needs no change. To use login without a house file (the demo, say), put the section in its own file and pass it with `radiate serve --auth-config FILE`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Turn login on |
+| `local` | `true` | Allow username and password login. Add people with `radiate users add` |
+| `session_days` | 30 | A session ends this many days after sign-in, 1 to 400 |
+| `idle_days` | 7 | A session ends after this many days without use, 1 to `session_days` |
+| `secure_cookie` | `auto` | `auto` marks the session cookie `Secure` when the request came over HTTPS (directly, or from a trusted proxy that says so). `always` or `never` override it; use `never` only on a LAN for testing |
+| `public_url` | none | The address people use, such as `https://heating.example.org`. Required for single sign-on, which builds its redirect addresses from it. Must be `https` unless the host is `localhost` |
+| `trusted_proxies` | none | IP addresses or networks of your reverse proxies. Only requests from these have their `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` headers believed |
+| `oidc` | none | OpenID Connect single sign-on, below |
+| `saml` | none | SAML single sign-on, below. Needs the `radiate[saml]` extra |
+
+`auth.oidc`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `issuer` | required | The provider's issuer URL. Radiate reads `<issuer>/.well-known/openid-configuration` and checks it names the same issuer |
+| `client_id` | required | The client ID you registered. Register `<public_url>/auth/oidc/callback` as its redirect URI |
+| `client_secret` | none | The client secret, usually `${RADIATE_OIDC_SECRET}`. Leave out for a public client |
+| `client_secret_file` | none | A file holding the secret, such as a Docker or Kubernetes secret, read when the server starts. Use this or `client_secret`, not both |
+| `scopes` | `[openid, profile, email]` | Scopes to ask for. `openid` is always added. Add `groups` if your provider needs it for a groups claim |
+| `username_claim` | `preferred_username` | The claim that names the person |
+| `roles_claim` | none | A claim holding groups or roles, such as `groups`. Taken from the userinfo endpoint if the ID token lacks it |
+| `admins` | none | Usernames or `roles_claim` values that make someone an admin |
+| `viewers` | none | Usernames or `roles_claim` values that make someone a viewer. Someone in neither list is refused. At least one list is required |
+| `label` | `Sign in with single sign-on` | The button text on the login page |
+
+`auth.saml`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `idp_metadata_url` | none | Where to fetch the identity provider's metadata when the server starts |
+| `idp_metadata_file` | none | Or a file holding it. Give exactly one |
+| `sp_entity_id` | `<public_url>/auth/saml/metadata` | Radiate's entity ID. Give your provider `<public_url>/auth/saml/metadata`, which serves Radiate's metadata, and the assertion consumer service `<public_url>/auth/saml/acs` |
+| `username_attribute` | the NameID | An attribute to take the username from instead |
+| `roles_attribute` | none | An attribute holding groups or roles |
+| `admins`, `viewers`, `label` | | As for OIDC. `label` defaults to `Sign in with SAML` |
+
+Your provider must sign assertions with SHA-256 or stronger. Radiate refuses unsigned assertions, SHA-1 signatures, and responses it didn't ask for.
+
+```yaml
+auth:
+  enabled: true
+  public_url: https://heating.example.org
+  trusted_proxies: [192.0.2.1]
+  oidc:
+    issuer: https://id.example.org/application/o/radiate
+    client_id: radiate
+    client_secret_file: /run/secrets/radiate-oidc
+    roles_claim: groups
+    admins: [heating-admins]
+    viewers: [family]
+    label: Sign in with the house account
+```
+
+Roles: an **admin** can do everything. A **viewer** can see every view and is refused any change. Local users get their role from `radiate users add --role`; single sign-on users get theirs at each sign-in from `admins` and `viewers`.
+
 ### schedules
 
 Named weekly schedules in the TRVZB format: up to six transitions a day, each `HH:MM/temperature`, temperatures from 4 to 35 °C in 0.5 °C steps. If a day doesn't start at 00:00, the last setpoint of the day carries over midnight.
