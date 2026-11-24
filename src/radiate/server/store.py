@@ -1,4 +1,4 @@
-"""SQLite persistence: engine state, runtime settings and the Elastic export queue.
+"""SQLite persistence: engine state, runtime settings and the export queues.
 
 One file (`<data_dir>/radiate.db`), WAL mode, standard library only. Writes are
 small and infrequent (state every few minutes, export batches every 10 s), so they
@@ -70,8 +70,12 @@ class ExportQueue(Protocol):
 class MemoryQueue:
     def __init__(self, maxlen: int):
         self._q: deque[dict] = deque(maxlen=maxlen)
+        self.dropped = 0  # the oldest documents pushed out when full
 
     def extend(self, docs: list[dict]) -> None:
+        maxlen = self._q.maxlen
+        if maxlen is not None:
+            self.dropped += max(0, len(self._q) + len(docs) - maxlen)
         self._q.extend(docs)
 
     def peek(self, n: int) -> list[dict]:
@@ -89,13 +93,31 @@ class MemoryQueue:
 
 
 class SqliteQueue:
-    """On-disk FIFO that survives restarts and outages (spec 9: up to 7 days)."""
+    """On-disk FIFO that survives restarts and outages (spec 9: up to 7 days).
 
-    def __init__(self, store: Store, max_docs: int, max_age_s: float = 7 * 86400):
+    `table` keeps each exporter's documents apart: `export_queue` for Elastic, and one
+    table per signal for the OpenTelemetry export.
+    """
+
+    def __init__(
+        self,
+        store: Store,
+        max_docs: int,
+        max_age_s: float = 7 * 86400,
+        table: str = "export_queue",
+    ):
+        if not table.replace("_", "").isalnum():
+            raise ValueError(f"bad queue table name {table!r}")
         self.db = store.db
+        self.table = table
         self.max_docs = max_docs
         self.max_age_s = max_age_s
-        self._len = self.db.execute("SELECT COUNT(*) FROM export_queue").fetchone()[0]
+        self.dropped = 0  # documents pruned for age or to stay under max_docs
+        self.db.execute(
+            f"CREATE TABLE IF NOT EXISTS {table} "
+            "(id INTEGER PRIMARY KEY AUTOINCREMENT, created REAL NOT NULL, doc TEXT NOT NULL)"
+        )
+        self._len = self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
     def extend(self, docs: list[dict], now: float | None = None) -> None:
         if not docs:
@@ -103,30 +125,32 @@ class SqliteQueue:
         now = time.time() if now is None else now
         rows = [(now, json.dumps(d, separators=(",", ":"))) for d in docs]
         self.db.execute("BEGIN")
-        self.db.executemany("INSERT INTO export_queue (created, doc) VALUES (?, ?)", rows)
+        self.db.executemany(f"INSERT INTO {self.table} (created, doc) VALUES (?, ?)", rows)
         self.db.execute("COMMIT")
         self._len += len(rows)
         self.prune(now)
 
     def prune(self, now: float | None = None) -> None:
         now = time.time() if now is None else now
-        self.db.execute("DELETE FROM export_queue WHERE created < ?", (now - self.max_age_s,))
-        excess = self.db.execute("SELECT COUNT(*) FROM export_queue").fetchone()[0] - self.max_docs
+        before = self._len
+        self.db.execute(f"DELETE FROM {self.table} WHERE created < ?", (now - self.max_age_s,))
+        excess = self.db.execute(f"SELECT COUNT(*) FROM {self.table}").fetchone()[0] - self.max_docs
         if excess > 0:
             self.db.execute(
-                "DELETE FROM export_queue WHERE id IN "
-                "(SELECT id FROM export_queue ORDER BY id LIMIT ?)",
+                f"DELETE FROM {self.table} WHERE id IN "
+                f"(SELECT id FROM {self.table} ORDER BY id LIMIT ?)",
                 (excess,),
             )
-        self._len = self.db.execute("SELECT COUNT(*) FROM export_queue").fetchone()[0]
+        self._len = self.db.execute(f"SELECT COUNT(*) FROM {self.table}").fetchone()[0]
+        self.dropped += max(0, before - self._len)
 
     def peek(self, n: int) -> list[dict]:
-        rows = self.db.execute("SELECT doc FROM export_queue ORDER BY id LIMIT ?", (n,)).fetchall()
+        rows = self.db.execute(f"SELECT doc FROM {self.table} ORDER BY id LIMIT ?", (n,)).fetchall()
         return [json.loads(r[0]) for r in rows]
 
     def drop(self, n: int) -> None:
         self.db.execute(
-            "DELETE FROM export_queue WHERE id IN (SELECT id FROM export_queue ORDER BY id LIMIT ?)",
+            f"DELETE FROM {self.table} WHERE id IN (SELECT id FROM {self.table} ORDER BY id LIMIT ?)",
             (n,),
         )
         self._len = max(0, self._len - n)
@@ -135,5 +159,5 @@ class SqliteQueue:
         return self._len
 
     def __iter__(self):
-        for (doc,) in self.db.execute("SELECT doc FROM export_queue ORDER BY id"):
+        for (doc,) in self.db.execute(f"SELECT doc FROM {self.table} ORDER BY id"):
             yield json.loads(doc)

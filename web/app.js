@@ -13,6 +13,7 @@ import { weekView } from "./week.js";
 import { createDevices } from "./devices.js";
 import { createSuggestions } from "./suggestions.js";
 import { createSavings, houseLine } from "./savings.js";
+import { createData } from "./data.js";
 import { createHouse } from "./house.js";
 import { createGuide, guideNote } from "./guide.js";
 
@@ -110,6 +111,7 @@ function httpTransport() {
     house: async () => (await send("house")).json(),
     state: async () => (await send("state")).json(),
     get: async (path) => (await send(path)).json(),
+    text: async (path) => (await send(path)).text(),
     async post(path, body) {
       await send(path, {
         method: "POST",
@@ -1141,6 +1143,16 @@ $("savings-setup").addEventListener("click", (e) => {
   openSetup(e);
 });
 
+// Raw data view (data.js): every recorded series, to search, chart and download, with
+// the OpenTelemetry export's health, at #data. Its tab shows once the server answers
+// `GET data/series` with a history to search.
+const rawData = createData({
+  transport,
+  isAuthError: (err) => err instanceof AuthError,
+  onAuth: () => askForToken(),
+});
+let dataOffered = null;
+
 // Guide view (guide.js): how to read and work Radiate, at #guide, with each section
 // at #guide/<name>. Static text, so it is always offered.
 const guide = createGuide({ root: $("guide") });
@@ -1151,6 +1163,7 @@ const VIEWS = {
   devices: { offered: () => devicesOffered === true, module: devices },
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
   savings: { offered: () => savingsOffered === true, module: savings },
+  data: { offered: () => dataOffered === true, module: rawData },
   guide: { offered: () => true, module: guide },
 };
 
@@ -1204,14 +1217,16 @@ function renderTabs() {
 }
 
 async function offerViews() {
-  const [d, s, v] = await Promise.all([
+  const [d, s, v, r] = await Promise.all([
     devicesOffered === true ? true : devices.available(),
     suggestionsOffered === true ? true : suggestions.available(),
     savingsOffered === true ? true : savings.available(),
+    dataOffered === true ? true : rawData.available(),
   ]);
   devicesOffered = d;
   suggestionsOffered = s;
   savingsOffered = v;
+  dataOffered = r;
   renderTabs();
   renderDeviceCount(last?.alert_details);
   route(false);

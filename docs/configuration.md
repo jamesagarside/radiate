@@ -132,7 +132,9 @@ For Docker, the Home Assistant App and the other ways to run the server, see [de
 
 Each minute the live server records the tick's snapshot (every room's readings, setpoints and relay states) and what Radiate decided: valve settings, relays, the boiler state, and the reason and alert codes. Reason messages aren't stored. The server also records how its engine state was built each time it starts, and a copy of the engine state every 6 hours.
 
-The history keeps `house.history_days` days, 14 by default, and Radiate deletes older entries every hour. Each tick takes about 0.7 kB, compressed, so the reference house uses about 1.2 MB a day and 17 MB for 14 days. The demo doesn't record.
+The history keeps `house.history_days` days, 14 by default, and Radiate deletes older entries every hour. Each tick takes about 0.7 kB, compressed, so the reference house uses about 1 MB a day and 15 MB for 14 days. `radiate serve --demo` records in memory, so its Raw data view has something to show; the browser demo doesn't record.
+
+The web UI's Raw data view searches and charts the history, and downloads it as CSV or JSON. Radiate keeps an hourly index of it beside the history, about 0.4 MB a day, so a month answers quickly. Each tick also records each room's target and whether it calls for heat, the burner where the boiler reports it, the heating relay's power where the relay measures it, and how many people are home and away; never who.
 
 `radiate replay` shows what Radiate would have done during a dry run and why, and checks a code or configuration change against real days before you use it. If Radiate starts without usable saved state, it replays the history to learn its room models again. See [replay and bootstrap](deployment.md#replay-and-bootstrap).
 
@@ -510,6 +512,31 @@ When the web UI's Suggestions view (`GET /api/v1/suggestions`) gives advice abou
 | `min_lag_samples` | 5 | Measured arrivals a radiator needs before its lag is judged, 3 to 15 |
 
 Rooms measured only by their TRV (`internal_sensor_only`) and rooms with a `continuous` heat source are never judged from their model. Weak Zigbee links use `monitoring.weak_signal_lqi`.
+
+### export
+
+Where to send data besides the web UI. One subsection today, `otlp`: the [OpenTelemetry export](deployment.md#opentelemetry-export) over OTLP/HTTP. Leave it out to send nothing.
+
+```yaml
+export:
+  otlp:
+    endpoint: https://my-project.ingest.eu-west-1.aws.elastic.cloud:443
+    api_key: ${RADIATE_OTLP_API_KEY}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `endpoint` | required | The collector's OTLP/HTTP base URL. Radiate adds `/v1/metrics` and `/v1/logs`. No credentials, query or signal path in it |
+| `enabled` | `true` | Set `false` to keep the section and send nothing |
+| `api_key` | none | Sent as `Authorization: ApiKey <key>`. A value starting `ApiKey ` has the prefix dropped |
+| `api_key_file` | none | A file holding the key, instead of `api_key`. Without either, `RADIATE_OTLP_API_KEY` is used if set |
+| `headers` | none | Extra request headers. An `Authorization` header here replaces the API key |
+| `protocol` | `http/protobuf` | Or `http/json`. gRPC is not supported |
+| `interval_s` | 60 | Seconds between sends, 10 to 3600 |
+| `timeout_s` | 30 | Seconds to wait for an answer, 1 to 120 |
+| `compression` | `none` | Or `gzip` |
+| `signals` | `[metrics, logs]` | Readings as metrics, decisions and alerts as logs |
+| `dataset` | `radiate` | Sent as `data_stream.dataset`, which Elastic routes by. Empty to leave it out |
 
 ### balancing
 

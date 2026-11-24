@@ -26,9 +26,13 @@ options:
   token: ""
   elastic_url: ""
   elastic_api_key: ""
+  otlp_endpoint: ""
+  otlp_api_key: ""
 schema:
   demo: bool
   config_file: str?
   token: password?
   elastic_url: url?
   elastic_api_key: password?
+  otlp_endpoint: url?
+  otlp_api_key: password?
