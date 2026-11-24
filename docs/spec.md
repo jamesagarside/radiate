@@ -558,6 +558,9 @@ Request and response bodies are JSON. A body that is not a JSON object returns 4
 | `POST /api/v1/devices/scan` | | Ask Zigbee2MQTT for a raw network map (`bridge/request/networkmap`), to show which router each device talks through. Only on a person's request, never on a timer: the scan slows the mesh for 10 s to 2 min. Allowed in dry run, as it changes no device. Returns `{"ok": true, "scan": {...}}` and the answer appears in `GET devices`; a scan with no answer in 3 min fails. `409` while one runs, `429` within 10 min of the last start, `503` while Zigbee2MQTT is not reachable, each with `message` and `retry_in_s`; `404` without Zigbee2MQTT |
 | `GET /api/v1/suggestions` | | House suggestions from the learned room models, the valve checks and the devices. `summary` (`total`, `act`, `consider`, `info`, `rooms_ready`, `rooms_learning`, `rooms_compared`, `lags_compared`, `min_rooms`), `suggestions`, most pressing first, each with `id` (kind and room or router, stable while it applies), `kind` (`room.heat_loss`, `radiator.undersized`, `radiator.slow_to_warm`, `valve.passing` or `zigbee.weak_link`), `severity` (`act`, `consider` or `info`), `room_id`, `room_name`, `title`, `evidence`, `action`, `confidence` (`low`, `medium` or `high`), `basis` and `values` (the numbers behind the words), then `learning`, one per controllable room, with `room_id`, `room_name`, `status` (`ready`, `learning` or `not_judged`), `hours`, `confidence` and `note`, and `settings` (the `suggestions` section in effect). Read-only; works with every driver |
 | `GET /api/v1/savings` | | The oil saved against the baseline, and the comfort beside it (section 5.9). See the shape below. Read-only; `status` is `unavailable` without a household (or a hand-written room with a use level) |
+| `GET /api/v1/data/series` | | Raw data (section 9.2): whether there is a history (`available`, and `why` when not), `now`, `timezone`, `retention_days`, `first` and `last`, the `metrics` catalogue (`metric`, `label`, `unit`, `kind` of `gauge`, `state` or `level`, `scope` of `room` or `house`, `description`, and `levels` for a level), `rooms`, every `series` with data (`key`, `metric`, `room`, `room_name`, `label`, `unit`, `kind`, `first`, `last`), the allowed `steps`, `indexing` (`done`, `behind_ticks`) and `export` (the OpenTelemetry export's health, or null) |
+| `GET /api/v1/data` | | Points for the series a query names: `metric` and `room` (comma-separated or repeated; `room` narrows room series only), `from` and `to` (Unix seconds or ISO 8601, house time without an offset; default the last 24 hours), `step` (`auto` or seconds, raised to the next allowed step and to at most 5,000 points a series and 250,000 in all), `format` (`json` or `csv`). JSON: `from`, `to`, `step`, `step_raised`, `timezone`, `partial` (the index is still catching up), `took_ms` and `series`, each with `points` as `[t, mean, min, max]`. CSV: `time,metric,room,unit,value,min,max`, times in house time with their offset. 400 for an unknown metric or room, a bad time or step, or no history |
+| `GET /api/v1/export` | | The health of each export: `otlp` (`enabled`, `status` of `ok`, `waiting`, `failing` or `off`, `endpoint` without credentials, `protocol`, `signals`, `interval_s`, `last_success`, `last_attempt`, `last_error`, `last_error_at`, `next_attempt`, `failures`, `queued`, `dropped`, `rejected`, `sent`; times are Unix seconds) and `elastic` (`queued`, `sent`, `failures`), each null when not running. Never includes a key or a header |
 | `GET /api/v1/stream` | | WebSocket: the state on connect and after every tick |
 
 Authentication: when `RADIATE_TOKEN` is set, every `/api/` path except `health` needs `Authorization: Bearer <token>`. Browsers cannot set headers on a WebSocket, so `stream` also accepts the token as its first message, `{"token": "<token>"}`; it waits up to 10 s and closes with code 4401 if the token is missing or wrong. In the HA App, requests from the Supervisor's ingress address (`RADIATE_INGRESS_IP`) that carry an `X-Ingress-Path` header are trusted without a token. The web UI at `/` and `/static/` is not protected.
@@ -645,7 +648,42 @@ Common fields: `@timestamp`, `data_stream.*`, `service.{name,version}`, `radiate
 
 Built (section 5.9): in the daily stream `savings.{outdoor_share,baseline_share}` and `comfort.{deficit_kh,warm_share}` from the day's record, the room-weighted `savings.{dh_actual_kh,dh_baseline_kh,eligible}` as `GET /api/v1/savings` gives them when the day closes, and `savings.{litres,fit_cv_rmse}` once the gate is open (the fit moves later, so the API's figure for an old day can differ). **Not yet implemented** (section 5.8): `demand.use` and `demand.solo` in the room stream.
 
-**Not yet implemented** ([status](implementation-status.md#9-elastic-export)): `temperature.trv`, `model.eta`, `disturbance.{shower,window,cooker_spike}`, `boiler.firing`, `store.recovering`, `host.name` (edge id, not the house name), a Kibana dashboard (balance, burns, rooms), an install command for the templates, and an OTLP path to an EDOT collector.
+**Not yet implemented** ([status](implementation-status.md#9-elastic-export)): `temperature.trv`, `model.eta`, `disturbance.{shower,window,cooker_spike}`, `boiler.firing`, `store.recovering`, `host.name` (edge id, not the house name), a Kibana dashboard (balance, burns, rooms) and an install command for the templates. The OTLP path is section 9.1.
+
+### 9.1 OpenTelemetry export
+
+Optional, off by default. Sends the raw data series (section 9.2) as OTLP metrics and the decision log as OTLP logs to any OTLP/HTTP receiver, including Elastic's managed OTLP endpoint. The cloud never sits in the control loop (ADR-0002): the export only reads what each tick recorded.
+
+- **Transport**: OTLP/HTTP, `POST <endpoint>/v1/metrics` and `<endpoint>/v1/logs`, protobuf (`application/x-protobuf`, the default) or JSON (`application/json`), optionally gzip. Encoded by Radiate with the standard library; the tests check both encodings against the official `opentelemetry-proto` classes. Auth: `Authorization: ApiKey <key>`, or any headers.
+- **Resource**: `service.name` `radiate`, `service.version`, `service.instance.id` and `radiate.house.id` (the random house ID), and `data_stream.dataset` (default `radiate`) for Elastic's routing. No names of people, no location.
+- **Metrics**: one OTLP gauge per series, one data point a minute at the tick's time, in the `radiate.*` namespace (OpenTelemetry has no semantic conventions for room heating). Room metrics carry `radiate.room.id` and `radiate.room.name`.
+
+| Metric | Unit | Raw data metric |
+|---|---|---|
+| `radiate.room.temperature`, `radiate.room.setpoint`, `radiate.room.target` | `Cel` | `room.temperature`, `room.setpoint`, `room.target` |
+| `radiate.room.humidity` | `%` | `room.humidity` |
+| `radiate.room.demand.calling`, `radiate.room.window.open` | `1` (0 or 1) | `room.calling`, `room.window` |
+| `radiate.valve.temperature` | `Cel` | `valve.temperature` |
+| `radiate.valve.opening`, `radiate.valve.opening.reported` | `%` | `valve.opening`, `valve.reported` |
+| `radiate.outdoor.temperature` | `Cel` | `outdoor.temperature` |
+| `radiate.boiler.relay`, `radiate.boiler.demand`, `radiate.boiler.burner`, `radiate.store.relay` | `1` (0 or 1) | `boiler.relay`, `boiler.demand`, `boiler.burner`, `store.relay` |
+| `radiate.boiler.status` | `1` | `boiler.state`, as a state set: one point per state (`idle`, `lead`, `firing`, `rest`) in `radiate.boiler.state`, 1 for the current one |
+| `radiate.boiler.power` | `W` | `boiler.power` |
+| `radiate.people.home`, `radiate.people.away` | `{person}` | `people.home`, `people.away` |
+
+- **Logs**: one record per decision and alert the runtime logs (the same as the Elastic decision stream): body the message, `severity_number` 9 (INFO), `event.action` the reason code, `radiate.room.id` where there is one.
+- **Buffering**: on-disk queues (7 days of ticks, 20,000 log records), batches of 30 ticks or 500 records, backoff from the interval to 10 minutes, `Retry-After` honoured. Retryable: network errors, 429, 502, 503, 504; kept and retried: 401, 403, 404 and other errors; dropped: 400; halved batch: 413. A full queue drops the oldest and counts them. Health in `GET /api/v1/export`.
+
+**Not yet implemented**: gRPC, traces, the daily summary (section 5.6) and savings as metrics, and sums for counters such as burner starts.
+
+### 9.2 Raw data
+
+Every tick records its snapshot and actions (section 6). Raw data reads them as series: one metric for one room or for the house (`radiate.core.series`), which `GET /api/v1/data` serves and the OpenTelemetry export sends.
+
+- Room metrics: `room.temperature` (the room sensor), `room.humidity`, `room.setpoint` (schedule or hold), `room.target` (what Radiate heats to now), `room.calling`, `room.window`, `valve.temperature` (the TRV's sensor), `valve.opening` (the opening limit set), `valve.reported` (as the TRV reports it). House metrics: `outdoor.temperature`, `boiler.relay` (as read), `boiler.demand` (as asked), `boiler.state` (a level: idle, lead, firing, rest), `boiler.burner` (where the boiler reports it), `boiler.power` (where the relay measures it), `store.relay`, `people.home`, `people.away`.
+- States are 1 or 0, so their mean over a step is the share of the step they were on. Target, calling, burner, power and the people counts are recorded with each tick under `observed`; ticks recorded before this have the rest.
+- People are counts only: the history never records who is home.
+- Queries read a derived index, `data_hour` in the state database: one row per series and hour with its count, mean, minimum, maximum and the 60 minute values. It is built from the tick history in the background, a few hundred ticks at a time, kept up to date as ticks arrive, and pruned with the history. A step of an hour or more is answered from the hourly figures in SQL; days, 3 hours and 6 hours start at local midnight.
 
 **Balance score (daily):** for each heating start with two or more calling rooms, the spread between the first and last room reaching its target. Score = 100 × (1 − median spread / 120 min), clamped 0 to 100. The rooms are the `normal` rooms calling when the burn starts; a room still calling when the burn ends counts as arriving then; a burn where no room arrives is not scored; a partial day (section 5.6) has no score. **Not yet implemented** ([status](implementation-status.md#9-elastic-export)): weather normalisation following Håkansson et al. 2025.
 
