@@ -32,7 +32,10 @@ Every control and balancing feature belongs in every edition. The cloud edition 
 - Time comes in through the snapshot: `Snapshot.now` (monotonic seconds) and `Snapshot.minute_of_day` (local time).
 - Configuration types are frozen dataclasses with `slots=True`. State types are mutable dataclasses with `slots=True`, owned by the caller.
 - Every decision that a person might ask about carries a `Reason`. Codes are dotted, area first: `boiler.lead`, `disturbance.fire`, `learning.paused`. Messages start with the room name and read as UI text. Reason codes reach the decision log and Elastic's `event.action`, so treat a rename as an API change.
-- Persistence is pure as well. `dump_state` and `load_state` turn engine state into plain data. Bump `persist.VERSION` when the saved shape changes. Invalid saved data resets that room to its priors and reports a problem; it never stops the server.
+- Persistence is pure as well. `dump_state` and `load_state` turn engine state into plain data. Learned state must survive upgrades ([ADR-0007](../adr/0007-learned-state-across-upgrades.md)):
+  - When the saved shape changes, bump `persist.VERSION`, add a migration from the version before to `persist.MIGRATIONS` with a sentence saying what it means for the house, and add a fixture written by the old code to `tests/core/fixtures` (`engine_v<N>*.json`). Never reset every model to get past a format change.
+  - When what a learning update means changes, bump `provenance.LEARNER_VERSION`. If models learned before are wrong, add an `Invalidation` to `provenance.RULES` that names only them, with its own test.
+  - A parameter that is not plausible goes back to its prior on its own; only an unreadable model resets its room. Every drop, migration and reset reports a problem or a reason, which becomes a learning note; it never stops the server.
 
 ## Drivers
 

@@ -54,6 +54,16 @@
     </details>
   </section>
 
+  <section class="notice" id="learning-notes" aria-labelledby="learning-notes-h" hidden>
+    <div class="notice-copy">
+      <p><strong class="notice-tag" id="learning-notes-h">Learning</strong> <span id="learning-notes-lead"></span></p>
+    </div>
+    <details class="notice-more">
+      <summary>What changed</summary>
+      <ul></ul>
+    </details>
+  </section>
+
   <section class="card signin" id="signin" aria-labelledby="signin-h" hidden>
     <h2 id="signin-h">Sign in to Radiate</h2>
     <p class="muted">This server needs its access token, the value of <code>RADIATE_TOKEN</code> where Radiate runs. This browser keeps it, so you sign in once.</p>
@@ -472,6 +482,7 @@
             <div><dt>TRV offline</dt><dd>The room's valve can't be reached.</dd></div>
           </dl>
           <p>Learning counts only the minutes that pass every check. Suggestions about a room start once it has 48 hours of learning and Radiate is sure enough of it. Radiate keeps learning after that, remembers up to two years, and relearns a room that changes, for example after a new radiator.</p>
+          <p>What Radiate has learned carries over when you update it. If an update finds that some rooms learned from data it now knows was wrong, for example a dry run before it could see the burner, it starts just those rooms again and says so in a Learning notice under the header for 14 days.</p>
         </section>
 
         <section class="g-sec" id="g-not-heating" aria-labelledby="g-not-heating-h">

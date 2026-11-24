@@ -315,6 +315,14 @@ class RoomEstimator:
         self.misfits = []
         self.misfit_at = None
 
+    def discount(self, share: float) -> None:
+        """Trust what was learned less, without changing it: add `share` of the prior
+        variance back to each parameter, up to the prior's. For values carried over from
+        an older save (ADR-0007), so the data that follows can move them sooner. Unlike
+        `relearn`, the change statistics and outlier limit are left alone."""
+        for i, p0 in enumerate(self.p0_diag):
+            self.p[i][i] = min(max(p0, self.p[i][i]), self.p[i][i] + share * p0)
+
     def to_dict(self) -> dict:
         return {
             "theta": self.theta,
