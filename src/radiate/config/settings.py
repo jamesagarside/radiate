@@ -152,8 +152,8 @@ SECTIONS: list[Section] = [
             _choice(
                 "house.outdoor_source",
                 "Outdoor temperature from",
-                "zigbee uses the sensor above, home_assistant the reading the Radiate "
-                "integration sends, both the sensor first.",
+                "Zigbee sensor uses the sensor above, Home Assistant the reading the "
+                "Radiate integration sends, and Both prefers the sensor.",
                 ("zigbee", "home_assistant", "both"),
                 "zigbee",
                 restart=False,
@@ -257,8 +257,9 @@ SECTIONS: list[Section] = [
             _choice(
                 "boiler.demand_mode",
                 "Demand mode",
-                "eco pools rooms into fewer, longer burns; comfort holds every room at "
-                "its target. The Eco and Comfort control can change it for now.",
+                "The mode Radiate starts in. Eco pools rooms into fewer, longer burns; "
+                "Comfort holds every room at its target. The Eco and Comfort control "
+                "in the header changes it for now.",
                 ("eco", "comfort"),
                 _B.demand_mode.value,
                 restart=False,
@@ -680,9 +681,9 @@ SECTIONS: list[Section] = [
             _choice(
                 "role",
                 "Role",
-                "normal has a valve and a room sensor; internal_sensor_only a valve "
-                "using its own sensor; passive an unvalved radiator Radiate only "
-                "watches; unheated no radiator at all.",
+                "Normal has a valve and a room sensor. Valve's own sensor has a valve "
+                "but no room sensor. Bypass is an unvalved radiator Radiate only "
+                "watches. No radiator is recorded only.",
                 ("normal", "internal_sensor_only", "passive", "unheated"),
                 "normal",
                 hardware=True,
@@ -690,8 +691,7 @@ SECTIONS: list[Section] = [
             _choice(
                 "heat_source",
                 "Other heat",
-                "episodic for an open fire, continuous for a range cooker. Learning "
-                "pauses while they heat the room.",
+                "An open fire or a range cooker in the room. Learning pauses while they heat it.",
                 ("episodic", "continuous"),
                 None,
                 optional=True,
@@ -719,9 +719,9 @@ SECTIONS: list[Section] = [
                 "schedule",
                 "Schedule",
                 "choice",
-                "The house file's schedule the room follows when the household doesn't cover it.",
+                "The house file's schedule the room follows when the household doesn't "
+                "cover it. Not set, it follows the schedule named default.",
                 choices_from="schedules",
-                default="default",
                 optional=True,
             ),
             _bool(

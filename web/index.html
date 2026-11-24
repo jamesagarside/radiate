@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="static/house.css">
   <link rel="stylesheet" href="static/guide.css">
   <link rel="stylesheet" href="static/savings.css">
+<link rel="stylesheet" href="static/settings.css">
 </head>
 <body>
   <header class="top">
@@ -38,6 +39,7 @@
     <a href="#devices" class="view-tab" data-view="devices" hidden>Devices<span class="view-count" id="devices-count" hidden></span></a>
     <a href="#suggestions" class="view-tab" data-view="suggestions" hidden>Suggestions<span class="view-count" id="suggestions-count" hidden></span></a>
     <a href="#savings" class="view-tab" data-view="savings" hidden>Savings</a>
+    <a href="#settings" class="view-tab" data-view="settings" hidden>Settings</a>
     <a href="#guide" class="view-tab" data-view="guide" hidden>Guide</a>
   </nav>
 
@@ -280,6 +282,27 @@
     </div>
   </section>
 
+  <section class="settings-view" id="settings" aria-labelledby="settings-h" hidden>
+    <div class="devices-head">
+      <h2 id="settings-h" tabindex="-1">Settings</h2>
+      <p class="devices-summary" id="settings-summary" aria-live="polite">Loading settings…</p>
+      <p class="muted devices-network"><span id="settings-where"></span> <a class="help-link" href="#guide/settings">How settings work</a></p>
+    </div>
+    <section class="notice" id="settings-restart" aria-label="Restart needed" hidden>
+      <p><strong class="notice-tag">Restart needed</strong><span id="settings-restart-text"></span></p>
+    </section>
+    <section class="notice" id="settings-problems" aria-label="Saved settings not used" role="alert" hidden>
+      <p><strong class="notice-tag">Not used</strong><span id="settings-problems-text"></span></p>
+    </section>
+    <div class="settings-body">
+      <nav class="card guide-toc settings-toc" aria-label="Settings sections"><ul id="settings-toc"></ul></nav>
+      <div class="settings-sections">
+        <div class="st-all" id="settings-all" hidden></div>
+        <div class="settings-list" id="settings-sections"></div>
+      </div>
+    </div>
+  </section>
+
   <section class="guide-view" id="guide" aria-labelledby="guide-h" hidden>
     <div class="devices-head">
       <h2 id="guide-h" tabindex="-1">Guide</h2>
@@ -303,6 +326,7 @@
           <li><a href="#guide/devices">Devices</a></li>
           <li><a href="#guide/suggestions">Suggestions</a></li>
           <li><a href="#guide/savings">Savings</a></li>
+          <li><a href="#guide/settings">Settings</a></li>
           <li><a href="#guide/alerts">Alerts</a></li>
           <li><a href="#guide/problems">When something goes wrong</a></li>
           <li><a href="#guide/home-assistant">Home Assistant</a></li>
@@ -527,6 +551,20 @@
           </dl>
           <p>Litres come from the time the boiler was called for heat, times the burner's nozzle rating. The boiler's own thermostat switches the burner off for spells within that time, so the litres read high: they are an upper bound until the burner itself is measured. The percentage saved still holds, as both sides read high by the same factor.</p>
           <p>Every figure says "about" because it is an estimate. Radiate doesn't project a year from a few weeks, and it needs an outdoor sensor and the boiler's nozzle rating to estimate at all.</p>
+        </section>
+
+        <section class="g-sec" id="g-settings" aria-labelledby="g-settings-h">
+          <h3 class="section-h" id="g-settings-h" tabindex="-1">Settings</h3>
+          <p>The Settings tab shows every setting in the house file, what each one does and its value now. You can change them there instead of editing the file.</p>
+          <p>Radiate never changes the house file itself, as it may be read-only. A change is saved in Radiate's data directory and replaces the house file's value from then on. Each section saves on its own, and a value that wouldn't load is refused with the reason under it.</p>
+          <dl class="g-terms g-words">
+            <div><dt>House file</dt><dd>The value comes from the house file.</dd></div>
+            <div><dt>Set here</dt><dd>You changed it in Settings. "Use the house file's" goes back to the file's value, or to the default if the file doesn't set it. Each section and each room can go back as a whole.</dd></div>
+            <div><dt>Default</dt><dd>Neither the house file nor Settings sets it, so Radiate uses its own default.</dd></div>
+            <div><dt>Restart to use</dt><dd>Saved, but Radiate uses it only after it restarts. Boiler, hot water, learning, alerts and suggestions settings apply straight away; rooms, devices, the boiler relay and MQTT wait for a restart.</dd></div>
+          </dl>
+          <p>A change that lets Radiate write to the boiler or the valves, such as turning dry run off, giving the relay's address or actuating a room's valve, asks you to confirm first.</p>
+          <p>Passwords are never shown, only whether one is set. Type a new one to replace it. The household and the weekly times have their own places: the household setup and the Schedules section of the House view.</p>
         </section>
 
         <section class="g-sec" id="g-alerts" aria-labelledby="g-alerts-h">
