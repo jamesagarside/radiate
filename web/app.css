@@ -795,3 +795,22 @@ body[data-link="stale"] .status { color: var(--warn); }
   .views { gap: 0; flex-wrap: wrap; }
   .view-tab { padding-inline: 8px; }
 }
+
+/* Roles (ADR-0006): a control the signed-in person's role can't use stays in place,
+   disabled, with a neutral tag saying why ("Read only", "Ask an admin"). */
+.lock-tag {
+  font-family: var(--body); font-size: 0.72rem; font-weight: 600; padding: 2px 7px; border-radius: 0;
+  white-space: nowrap; background: var(--surface-2); color: var(--muted);
+}
+.lock-row { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.sp-copy .lock-tag { margin-top: 3px; }
+.btn[data-locked], .seg[data-locked] button, .step[data-locked], .link:disabled { cursor: not-allowed; }
+.btn[data-locked]:active, .seg[data-locked] button:active, .link:disabled:active { transform: none; }
+/* The selected segment still reads as the mode in effect; the others dim. */
+.seg[data-locked] button:not([aria-checked="true"]) { opacity: 0.6; }
+.link:disabled { opacity: 0.6; text-decoration: none; }
+@media (hover: hover) and (pointer: fine) {
+  .btn[data-locked]:not(.btn-primary):hover { background: transparent; }
+  .btn-primary[data-locked]:hover { border-color: var(--cool); }
+  .seg[data-locked] button:not([aria-checked="true"]):hover { color: var(--muted); }
+}

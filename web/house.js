@@ -137,7 +137,9 @@ function fitView(svg) {
 }
 
 // ---------- the view ----------
-export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWeek }) {
+// `arrangeLock()` says why the signed-in person can't arrange rooms ("Ask an admin",
+// "Read only"), or "" when they can: the layout is an admin's (ADR-0006).
+export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWeek, arrangeLock = () => "" }) {
   let state = null;
   let houseInfo = null;
   let rooms = new Map();
@@ -198,7 +200,8 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
           <h2 id="hm-model-h">Your house</h2>
           <div class="hm-head-right">
             <span class="hm-scale" aria-hidden="true"><span class="hm-lab">12°</span><span class="hm-ramp"></span><span class="hm-lab">22°</span></span>
-            <button type="button" class="btn" data-act="arrange">Arrange rooms</button>
+            <button type="button" class="btn" data-act="arrange" aria-describedby="hm-arrange-lock">Arrange rooms</button>
+            <span class="lock-tag" id="hm-arrange-lock" hidden></span>
           </div>
         </div>
         <p class="hm-hint">Each block is a room in its temperature colour. A blinking bar is a radiator taking heat. <span class="hm-guess" hidden>Rooms are placed by a guess from their names. Arrange them to match your house.</span> <a class="help-link" href="#guide/model">How to read the model</a></p>
@@ -214,6 +217,14 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     }
     modelEl.querySelector(".hm-ramp").style.background = `linear-gradient(90deg, ${[12, 15, 17, 19, 22].map((t) => rgb(tempRgb(t))).join(", ")})`;
     modelEl.querySelector(".hm-guess").hidden = saved;
+    const why = arrangeLock();
+    const arrange = modelEl.querySelector("[data-act=arrange]");
+    arrange.disabled = Boolean(why);
+    if (why) arrange.dataset.locked = "";
+    else delete arrange.dataset.locked;
+    const arrangeTag = modelEl.querySelector(".lock-tag");
+    arrangeTag.hidden = !why;
+    arrangeTag.textContent = why;
     const svg = modelEl.querySelector(".hm-iso");
     const focused = svg.contains(document.activeElement) ? document.activeElement.closest(".hm-room")?.dataset.id : null;
     svg.innerHTML = isoMarkup(layout, rooms, { selected, interactive: true });

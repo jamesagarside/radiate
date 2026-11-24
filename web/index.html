@@ -22,15 +22,16 @@
     <p class="status" id="status" aria-live="polite">Connecting…</p>
     <div class="right">
       <span class="outdoor" id="outdoor" title="Outdoor temperature"></span>
-      <div class="seg" role="radiogroup" aria-label="Heating mode" id="mode">
+      <div class="seg" role="radiogroup" aria-label="Heating mode" aria-describedby="controls-lock" id="mode">
         <button role="radio" data-mode="auto">Auto</button>
         <button role="radio" data-mode="frost">Frost</button>
         <button role="radio" data-mode="off">Off</button>
       </div>
-      <div class="seg" role="radiogroup" aria-label="Demand mode" aria-describedby="demand-note" id="demand" hidden>
+      <div class="seg" role="radiogroup" aria-label="Demand mode" aria-describedby="demand-note controls-lock" id="demand" hidden>
         <button role="radio" data-demand="eco">Eco</button>
         <button role="radio" data-demand="comfort">Comfort</button>
       </div>
+      <span class="lock-tag" id="controls-lock" hidden></span>
       <div class="account" id="account" hidden>
         <button type="button" class="btn account-btn" id="account-btn" aria-expanded="false" aria-controls="account-menu" aria-haspopup="true"><span class="sr-only">Account: </span><span id="account-name"></span><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 3l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
         <div class="card account-menu" id="account-menu" hidden>
@@ -111,7 +112,8 @@
         <h2 id="boiler-h">Boiler</h2>
         <span class="chip" id="boiler-chip">–</span>
         <span class="muted" id="boiler-detail"></span>
-        <button class="btn" id="boost">Boost hot water</button>
+        <span class="lock-tag" id="boost-lock" hidden></span>
+        <button class="btn" id="boost" aria-describedby="boost-lock">Boost hot water</button>
       </div>
       <div class="guard" id="guard" aria-hidden="true"><div class="guard-fill"></div></div>
       <p class="boiler-note" id="short-cycle" hidden><strong class="tag">Short-cycling</strong> <span id="short-cycle-text"></span></p>
@@ -136,13 +138,19 @@
         <h2 id="setup-cta-h">Set up your household</h2>
         <p class="muted">Tell Radiate who lives here, when you're usually up, out and in bed, and how you use each room. It builds every room's heating schedule from your answers. It takes a few minutes, and you can change anything later.</p>
       </div>
-      <button type="button" class="btn btn-primary" id="setup-start">Set up your household</button>
+      <div class="lock-row">
+        <button type="button" class="btn btn-primary" id="setup-start" aria-describedby="setup-start-lock">Set up your household</button>
+        <span class="lock-tag" id="setup-start-lock" hidden></span>
+      </div>
     </section>
 
     <section id="people" aria-labelledby="people-h" hidden>
       <div class="section-row">
         <h2 id="people-h" class="section-h">People</h2>
-        <button type="button" class="link" id="setup-change" hidden>Change household setup</button>
+        <span class="lock-row" id="setup-change-row" hidden>
+          <button type="button" class="link" id="setup-change" aria-describedby="setup-change-lock">Change household setup</button>
+          <span class="lock-tag" id="setup-change-lock" hidden></span>
+        </span>
       </div>
       <p class="away-note" id="away-note" hidden>Everyone is away until a set time. Rooms are held at frost protection, apart from any held temperature, until someone is home or due back.</p>
       <p class="away-note" id="return-note" hidden></p>
@@ -168,7 +176,7 @@
     <section id="week" aria-labelledby="week-h" hidden>
       <h2 id="week-h" class="section-h">Schedules</h2>
       <div class="week-head">
-        <p class="muted">The week each room follows. Blocks are warm periods, darker when warmer. <span id="week-hint" hidden>Drag the edge of a block, or use Adjust, to keep a room warm or cold for longer.</span> <a class="help-link" href="#guide/schedules">Where schedules come from</a></p>
+        <p class="muted">The week each room follows. Blocks are warm periods, darker when warmer. <span id="week-hint" hidden>Drag the edge of a block, or use Adjust, to keep a room warm or cold for longer.</span> <span class="lock-tag" id="week-lock" hidden></span> <a class="help-link" href="#guide/schedules">Where schedules come from</a></p>
         <p class="week-legend" id="week-legend" hidden></p>
       </div>
       <p class="away-note week-saved" id="week-saved" role="status"></p>
@@ -200,7 +208,10 @@
             <p>See which router each device talks through.</p>
             <p class="muted mesh-note">A scan slows the Zigbee network for up to 2 minutes, so it runs only when you ask, and at most every 10 minutes.</p>
           </div>
-          <button type="button" class="btn" id="mesh-scan" aria-describedby="mesh-status">Scan network</button>
+          <div class="lock-row">
+            <button type="button" class="btn" id="mesh-scan" aria-describedby="mesh-status mesh-lock">Scan network</button>
+            <span class="lock-tag" id="mesh-lock" hidden></span>
+          </div>
         </div>
         <p class="mesh-status" id="mesh-status" role="status"></p>
         <ul class="tree" id="mesh-tree" aria-label="Routes" hidden></ul>
@@ -242,7 +253,10 @@
 
     <section class="card sv-missing" id="savings-missing" aria-label="What savings need" hidden>
       <p id="savings-missing-text"></p>
-      <button type="button" class="btn btn-primary" id="savings-setup" hidden>Set up your household</button>
+      <div class="lock-row" id="savings-setup-row" hidden>
+        <button type="button" class="btn btn-primary" id="savings-setup" aria-describedby="savings-setup-lock">Set up your household</button>
+        <span class="lock-tag" id="savings-setup-lock" hidden></span>
+      </div>
     </section>
 
     <div class="sv-body" id="savings-body" hidden>
@@ -796,6 +810,7 @@
         <div class="sp-copy">
           <span class="sp-label">Setpoint</span>
           <button type="button" class="link hold-clear" hidden>Resume schedule</button>
+          <span class="lock-tag" hidden></span>
         </div>
         <div class="stepper" role="group">
           <button type="button" class="step" data-step="-0.5"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" /></svg></button>
@@ -824,6 +839,7 @@
       <div class="person-actions">
         <button type="button" class="btn away-open">Set away</button>
         <button type="button" class="link away-clear" hidden>Back now</button>
+        <span class="lock-tag" hidden></span>
       </div>
       <form class="away-form" hidden>
         <div class="away-fields">

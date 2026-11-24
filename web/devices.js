@@ -77,7 +77,9 @@ function routeText(d, scanned) {
   return scanned ? "Not in the last scan" : null;
 }
 
-export function createDevices({ transport, isAuthError, onAuth }) {
+// `scanLock()` says why the signed-in person can't start a scan ("Ask an admin",
+// "Read only"), or "" when they can: a scan disturbs the network, so it is an admin's.
+export function createDevices({ transport, isAuthError, onAuth, scanLock = () => "" }) {
   const cards = new Map();
   let view = null;
   let timer = null;
@@ -295,7 +297,12 @@ export function createDevices({ transport, isAuthError, onAuth }) {
     $("devices-mesh-section").hidden = !s.available && !v.devices.some((d) => d.kind === "router");
     btn.hidden = !s.available;
     const scanning = s.state === "scanning";
-    btn.disabled = scanning || s.retry_in_s > 0;
+    const why = scanLock();
+    btn.disabled = Boolean(why) || scanning || s.retry_in_s > 0;
+    if (why) btn.dataset.locked = "";
+    else delete btn.dataset.locked;
+    $("mesh-lock").hidden = !why || !s.available;
+    $("mesh-lock").textContent = why;
     btn.setAttribute("aria-busy", String(scanning));
     btn.textContent = scanning ? "Scanning…" : "Scan network";
     status.dataset.error = String(s.state === "failed" || Boolean(scanError));

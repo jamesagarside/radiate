@@ -873,8 +873,8 @@ A sign-in that lasts until it expires, goes idle or is signed out. Kept on the s
 Code: `Session`, `Accounts.create_session`.
 
 **Role**:
-What a signed-in person may do: admin (everything) or viewer (read only). The API token and ingress count as admin.
-Code: `ROLES`, `Identity.role`, `RoleMap`.
+What a signed-in person may do, highest first: admin (everything), household (day-to-day control: setpoints, modes, boosts, fire, away, room adjustments; no settings or setup) or viewer (read only, labelled "Read only" in the web UI; `readonly` is accepted as another name). The API token and ingress count as admin. Each API route's lowest role is in one table.
+Code: `ROLES`, `role_at_least`, `Identity.role`, `RoleMap`, `radiate.server.permissions.PERMISSIONS`.
 
 **Snapshot**:
 All inputs to one tick, timestamped and checked for staleness.

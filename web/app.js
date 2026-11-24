@@ -161,6 +161,40 @@ async function post(path, body) {
   }
 }
 
+// Roles (ADR-0006): what the signed-in person may change. Token, ingress, a server
+// without login and the demo count as admin. A control the role can't use stays in
+// its place, disabled, with a short tag saying why, so nothing fails with "Not saved".
+// The server checks every change too (radiate.server.permissions); this only shows it.
+const RANK = { viewer: 0, household: 1, admin: 2 };
+let role = "admin";
+const may = (needed) => (RANK[role] ?? -1) >= RANK[needed];
+// Why a control is off for this role, or "" when it may be used.
+const lockText = (needed) => (may(needed) ? "" : role === "household" ? "Ask an admin" : "Read only");
+
+// Disable `controls` (buttons, or groups of them) and show `tag` when the role is
+// below `needed`. Returns whether they are locked.
+function lock(controls, tag, needed) {
+  const why = lockText(needed);
+  for (const c of controls) {
+    if (!c) continue;
+    const buttons = c.matches("button") ? [c] : [...c.querySelectorAll("button")];
+    for (const b of buttons) b.disabled = Boolean(why);
+    if (why) c.dataset.locked = "";
+    else delete c.dataset.locked;
+  }
+  if (tag) {
+    tag.hidden = !why;
+    tag.textContent = why;
+  }
+  return Boolean(why);
+}
+
+// The controls that are always on the page: the header's modes and hot-water boost.
+function applyRole() {
+  lock([$("mode"), $("demand")], $("controls-lock"), "household");
+  lock([$("boost")], $("boost-lock"), "household");
+}
+
 // Eco demand mode (spec 5.3): a calling room on its own waits until other rooms join
 // it, so the boiler fires once for all of them.
 const pooled = (r) => r.reason_code === "demand.pooled";
@@ -343,6 +377,8 @@ function renderRoom(r) {
   if (c.clearing && !r.override) c.clearing = false;
   const canSet = controllable(r);
   const sp = n.querySelector(".sp");
+  const fireBtn = n.querySelector(".fire");
+  const locked = lock([...sp.querySelectorAll(".step"), fireBtn.hidden ? null : fireBtn], sp.querySelector(".lock-tag"), "household");
   sp.hidden = !canSet;
   const target = n.querySelector(".target");
   target.textContent = r.target != null ? `→ ${r.target.toFixed(1)}°` : !canSet && r.setpoint != null ? `set ${r.setpoint.toFixed(1)}°` : "";
@@ -353,10 +389,10 @@ function renderRoom(r) {
     sp.dataset.error = String(Boolean(c.error));
     sp.querySelector(".sp-val").textContent = fmtT(shown);
     const [down, up] = sp.querySelectorAll(".step");
-    down.disabled = shown != null && shown <= SETPOINT_MIN;
-    up.disabled = shown != null && shown >= SETPOINT_MAX;
+    down.disabled = locked || (shown != null && shown <= SETPOINT_MIN);
+    up.disabled = locked || (shown != null && shown >= SETPOINT_MAX);
     sp.querySelector(".sp-label").textContent = c.error || (held ? holdText(r.override) : "Setpoint");
-    sp.querySelector(".hold-clear").hidden = !held;
+    sp.querySelector(".hold-clear").hidden = !held || locked;
   }
 
   // Stuck-valve check (spec 7): the radiator stayed cold for burns in a row.
@@ -556,13 +592,18 @@ function renderPeople(away) {
   }
   for (const p of list) {
     const n = ensurePerson(p);
+    const awayLocked = lock([n.querySelector(".away-open")], n.querySelector(".person-actions .lock-tag"), "household");
+    if (awayLocked) {
+      n.querySelector(".away-form").hidden = true;
+      n.querySelector(".away-open").hidden = false;
+    }
     const [text, label, kind] = personText(p, away);
     n.querySelector(".person-state").textContent = text;
     const badge = n.querySelector(".badge");
     badge.textContent = label;
     badge.dataset.kind = kind;
     // Back now: for an away until, or away from Home Assistant presence.
-    n.querySelector(".away-clear").hidden = !p.until && !p.away;
+    n.querySelector(".away-clear").hidden = awayLocked || (!p.until && !p.away);
     const open = n.querySelector(".away-open");
     open.textContent = p.until ? "Change" : "Set away";
     open.setAttribute("aria-label", p.until ? `Change when ${p.name} is back` : `Set ${p.name} away`);
@@ -580,6 +621,7 @@ const houseView = createHouse({
   statusEl: $("hm-status"),
   planEl: $("hm-plan"),
   transport,
+  arrangeLock: () => lockText("admin"),
   onRoom: (id) => {
     const card = $(`room-${id}`);
     if (!card) return;
@@ -1086,8 +1128,15 @@ async function renderSetupEntry() {
   if (offered === null) setupOffered = null; // ask again next time, after signing in say
   const has = Boolean(house?.household);
   $("setup-cta").hidden = !offered || has;
-  $("setup-change").hidden = !offered || !has;
-  if (offered && !weekEditing) {
+  $("setup-change-row").hidden = !offered || !has;
+  // The setup (people, routines, temperatures) is an admin's; room adjustments in the
+  // week view are the household role's too.
+  lock([$("setup-start")], $("setup-start-lock"), "admin");
+  lock([$("setup-change")], $("setup-change-lock"), "admin");
+  const weekLock = $("week-lock");
+  weekLock.hidden = !offered || may("household");
+  weekLock.textContent = lockText("household");
+  if (offered && !weekEditing && may("household")) {
     weekEditing = true;
     week.setEditor(weekEditor);
     weekSync.key = null; // draw the weeks again, now with edges to drag
@@ -1114,6 +1163,7 @@ $("setup-change").addEventListener("click", openSetup);
 // route answers 404 and the page stays as it was.
 const devices = createDevices({
   transport,
+  scanLock: () => lockText("admin"),
   isAuthError: (err) => err instanceof AuthError,
   onAuth: () => askForToken(),
 });
@@ -1173,7 +1223,8 @@ let savingsOffered = null;
 // Without a household, the Savings view offers the setup, where the server has one.
 async function renderSavingsSetup() {
   const offered = savingsWhy === "no household" && setupOffered ? await setupOffered : false;
-  $("savings-setup").hidden = !offered;
+  $("savings-setup-row").hidden = !offered;
+  lock([$("savings-setup")], $("savings-setup-lock"), "admin");
 }
 // The setup replaces the House view, so go there first; Back then returns to it.
 $("savings-setup").addEventListener("click", (e) => {
@@ -1323,15 +1374,22 @@ async function checkLogin() {
   return true;
 }
 
+const ROLE_TEXT = {
+  admin: "Admin: you can change anything here.",
+  household: "Household: you can change temperatures, away, fires, boosts and room adjustments. Settings and the household setup need an admin.",
+  viewer: "Read only: you can see the house but not change it.",
+};
+
 function showAccount(me) {
   transport.setCsrf(me.csrf);
   const how = me.method === "local" ? "a password" : "single sign-on";
   $("account-name").textContent = me.user;
   $("account-who").textContent = `Signed in as ${me.user} with ${how}.`;
-  $("account-role").textContent = me.role === "admin"
-    ? "Admin: you can change anything here."
-    : "View only: you can see the house but not change it.";
-  document.body.dataset.role = me.role;
+  $("account-role").textContent = ROLE_TEXT[me.role] ?? ROLE_TEXT.viewer;
+  role = me.role in RANK ? me.role : "viewer";
+  document.body.dataset.role = role;
+  applyRole();
+  houseView.redraw();
   $("account").hidden = false;
 }
 
