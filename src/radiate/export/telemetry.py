@@ -230,8 +230,8 @@ SETTINGS_RESTART = Attribute(
 AUTH_FAILURES = Attribute(
     "radiate.auth.failures",
     INT,
-    "Requests refused for a missing or wrong token since the last record. Never the "
-    "client's address.",
+    "Requests refused since the last record: a missing or wrong token or session, or a "
+    "wrong username or password. Never the client's address or the username.",
     "{request}",
     required=True,
 )
@@ -624,9 +624,9 @@ EVENTS: tuple[EventDef, ...] = (
     EventDef(
         AUTH_DENIED,
         "WARN",
-        "API requests or stream connections were refused for a missing or wrong token. "
-        "At most one record a tick, with the count.",
-        "`<n> requests refused: missing or wrong token`.",
+        "API requests, stream connections or sign-ins were refused. At most one record "
+        "a tick, with the count.",
+        "`<n> requests refused: not signed in or wrong credentials`.",
         (*_COMMON_EVENT, AUTH_FAILURES),
         "`auth.denied`.",
     ),
@@ -753,7 +753,7 @@ def auth_record(failures: int) -> dict:
     return {
         "e": AUTH_DENIED,
         "c": "auth.denied",
-        "m": f"{failures} {noun} refused: missing or wrong token",
+        "m": f"{failures} {noun} refused: not signed in or wrong credentials",
         "r": None,
         "a": {AUTH_FAILURES.key: int(failures)},
     }

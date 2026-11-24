@@ -14,7 +14,7 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -81,6 +81,7 @@ from radiate.core.persist import dump_state, first_start_state, load_state, save
 from radiate.core.provenance import Provenance
 from radiate.core.series import observed_values, tick_values
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
+from radiate.export import telemetry
 from radiate.server import layout
 from radiate.server.savings import DailyHistory, day_estimate, savings_view
 
@@ -233,6 +234,12 @@ class Runtime:
     learning_notes: list[dict] = field(default_factory=list)
     _index_task: asyncio.Task | None = None
     _otlp_error_at: float | None = None
+    # OpenTelemetry log records from outside the tick (a mode or settings change), each
+    # with its time, sent with the next tick (radiate.export.telemetry).
+    _otlp_events: list[dict] = field(default_factory=list)
+    # API requests refused for a missing or wrong token since the last tick: a count,
+    # never the client's address.
+    auth_denied: int = 0
 
     def __post_init__(self) -> None:
         self.state = EngineState.new(self.cfg)
@@ -487,8 +494,24 @@ class Runtime:
     def set_demand_mode(self, mode: DemandMode | None) -> None:
         """Choose the demand mode (spec 5.3), or None to follow the configuration file.
         Saved straight away and used from the next tick."""
+        before = self.effective_demand_mode
         self.demand_mode = mode
         self._save_runtime(self.driver.clock())
+        after = self.effective_demand_mode
+        if after is not before:
+            self.telemetry_event(telemetry.mode_record("demand", before.value, after.value))
+
+    def set_mode(self, mode: Mode) -> None:
+        """Set the heating mode (`auto`, `off` or `frost`), as the API asks."""
+        before, self.mode = self.mode, mode
+        if mode is not before:
+            self.telemetry_event(telemetry.mode_record("heating", before.value, mode.value))
+
+    def telemetry_event(self, record: dict) -> None:
+        """Queue an OpenTelemetry log record (`radiate.export.telemetry`'s builders) made
+        outside the tick; it goes with the next tick, at the time it happened."""
+        if self.otlp is not None:
+            self._otlp_events.append({"t": self.wall(), **record})
 
     def settings(self) -> dict:
         """Settings a person can see, and `demand_mode` they can change at runtime."""
@@ -1273,6 +1296,7 @@ class Runtime:
         self._apply_use(snap)
         # Always explicit, so the tick history records the mode each tick was decided in.
         snap.demand_mode = self.effective_demand_mode
+        burn_start = self.state.ledger.burn_start
         actions = decide(self.cfg, snap, self.state)
         if any(r.code == "disturbance.shower" for r in actions.reasons):
             self.note_home_evidence("shower")
@@ -1299,9 +1323,10 @@ class Runtime:
         estimate = None
         if actions.day_summary is not None:
             self.daily.add(actions.day_summary)
-            if self.exporter is not None:
+            if self.exporter is not None or self.otlp is not None:
                 estimate = self._day_estimate(actions.day_summary)
-        logged = [(r.code, r.message, r.room_id) for r in self._away_log]
+        # Reasons for the exporters, each with whether it is an alert.
+        exported: list[tuple[Reason, bool]] = [(r, False) for r in self._away_log]
         self._away_log.clear()
         noted = False
         for r in actions.reasons:
@@ -1309,7 +1334,7 @@ class Runtime:
                 ("boiler.", "disturbance.", "safe_mode.", "learning.relearn", *LEARNING_NOTE_CODES)
             ):
                 self._log(now, r)
-                logged.append((r.code, r.message, r.room_id))
+                exported.append((r, False))
             if r.code in LEARNING_NOTE_CODES:
                 LOG.warning("learning: %s", r.message)
                 self._note(self.wall(), r.code, r.message, r.room_id)
@@ -1324,10 +1349,16 @@ class Runtime:
             keys.add(key)
             if key not in self._alert_keys:
                 self._log(now, r)
-                logged.append((r.code, r.message, r.room_id))
+                exported.append((r, True))
+        holding = {(code, room) for code, room, _ in keys}
+        cleared = [k for k in self._alert_keys if (k[0], k[1]) not in holding]
         self._alert_keys = keys
+        logged = [(r.code, r.message, r.room_id) for r, _ in exported]
         if self.otlp is not None:
-            self._export_otlp(wall, snap, compact, observed, logged)
+            events = self._otlp_records(exported, cleared, burn_start, snap.now)
+            self._export_otlp(wall, snap, compact, observed, events)
+            if actions.day_summary is not None:
+                self._export_otlp_day(wall, actions.day_summary, estimate)
         if self.exporter is None and not self.listeners:
             return actions  # nobody to tell; the browser demo warms up much faster
         payload = self.describe()
@@ -1365,13 +1396,76 @@ class Runtime:
             LOG.debug("observed values skipped: %s", err)
             return None
 
+    def _otlp_records(
+        self,
+        exported: list[tuple[Reason, bool]],
+        cleared: list[tuple[str, str | None, str]],
+        burn_start: float | None,
+        now: float,
+    ) -> list[dict]:
+        """This tick's OpenTelemetry log records (radiate.export.telemetry): reasons and
+        alerts, cleared alerts, a burn that ended, refused requests, and what happened
+        between ticks. Never stops the tick."""
+        events, self._otlp_events = self._otlp_events, []
+        try:
+            people = (len(self.people) - len(self.away), len(self.away))
+            for r, alert in exported:
+                events.append(
+                    telemetry.reason_record(
+                        r.code, r.message, r.room_id, r.values, alert=alert, people=people
+                    )
+                )
+            for code, room, message in sorted(cleared, key=lambda k: (k[0], k[1] or "")):
+                events.append(telemetry.alert_cleared_record(code, message, room))
+            ledger = self.state.ledger
+            if burn_start is not None and ledger.burn_start is None and ledger.relay is False:
+                events.append(telemetry.burn_record(now - burn_start, not ledger.live))
+            if self.auth_denied:
+                events.append(telemetry.auth_record(self.auth_denied))
+                self.auth_denied = 0
+        except Exception as err:
+            self._otlp_error(err)
+        return events
+
+    def _day_bounds(self, label: object) -> tuple[float, float] | None:
+        """The first and last second of the local day `label` (a `date.toordinal()`),
+        as Unix times; None for a label that is not a date (the simulator)."""
+        if not isinstance(label, int) or label < 1:
+            return None
+        day = date.fromordinal(label)
+        if day.year < 2000:
+            return None
+        tz = ZoneInfo(self.timezone)
+        start = datetime(day.year, day.month, day.day, tzinfo=tz)
+        nxt = day + timedelta(days=1)
+        end = datetime(nxt.year, nxt.month, nxt.day, tzinfo=tz)
+        return start.timestamp(), end.timestamp() - 1.0
+
+    def _day_totals(self, wall: float) -> tuple[dict[str, float], float]:
+        """The day's running totals for the OpenTelemetry counters, from the ledger, and
+        when they started: local midnight."""
+        t = self.state.ledger.today
+        totals: dict[str, float] = {
+            "relay_s": round(t.relay_s, 1),
+            "burner_s": round(t.burner_s, 1),
+            "starts": float(len(t.starts)),
+        }
+        nozzle = self.cfg.boiler.nozzle_lph
+        if nozzle:
+            totals["litres"] = round(t.burner_s / 3600 * nozzle, 3)
+        if t.metered_s > 0 or t.store_firing_s > 0:
+            totals["store_burner_s"] = round(t.store_firing_s, 1)
+        local = datetime.fromtimestamp(wall, ZoneInfo(self.timezone))
+        midnight = datetime(local.year, local.month, local.day, tzinfo=local.tzinfo)
+        return totals, midnight.timestamp()
+
     def _export_otlp(
         self,
         wall: float,
         snap: Snapshot,
         compact: dict | None,
         observed: dict | None,
-        logged: list[tuple[str, str, str | None]],
+        events: list[dict],
     ) -> None:
         """Queue this tick for the OpenTelemetry export. Never stops the tick."""
         try:
@@ -1379,7 +1473,17 @@ class Runtime:
             if compact is not None:
                 acts = {**compact, "observed": observed} if observed else compact
                 values = tick_values(tick_data(snap, acts))
-            self.otlp.record(wall, values, logged)
+            totals, start = self._day_totals(wall)
+            self.otlp.record(wall, values, events, totals, start)
+        except Exception as err:
+            self._otlp_error(err)
+
+    def _export_otlp_day(self, wall: float, summary: dict, estimate: dict | None) -> None:
+        """Queue a closed day's summary and savings. Never stops the tick."""
+        try:
+            bounds = self._day_bounds(summary.get("day"))
+            start, end = bounds if bounds is not None else (None, wall)
+            self.otlp.record_day(wall, summary, estimate, start, end)
         except Exception as err:
             self._otlp_error(err)
 
@@ -1412,6 +1516,7 @@ class Runtime:
             message = f"{name}: learning reset to priors"
             self._log(now, Reason("learning.reset", message, rid))
             self._note(self.wall(), "learning.reset", message, rid)
+            self.telemetry_event(telemetry.reason_record("learning.reset", message, rid))
         self.save()
         self._save_notes()
         return ids
