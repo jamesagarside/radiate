@@ -286,7 +286,8 @@ class Runtime:
         if self.store is None:
             return
         now = self.driver.clock()
-        self.store.put("engine", dump_state(self.state, now))
+        # Stamped with the runtime's wall clock, which `restore` measures downtime by.
+        self.store.put("engine", dump_state(self.state, now), wall=self.wall())
         self._save_runtime(now)
         memory = getattr(self.driver, "sensor_memory", None)
         if callable(memory):
@@ -313,6 +314,7 @@ class Runtime:
                 "overrides": overrides,
                 "demand_mode": self.demand_mode.value if self.demand_mode else None,
             },
+            wall=self.wall(),
         )
 
     # --- layout --------------------------------------------------------------------------
