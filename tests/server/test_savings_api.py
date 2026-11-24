@@ -104,7 +104,7 @@ def test_a_day_that_does_not_count_says_why():
     gap["savings"]["outdoor_share"] = 0.8
     rt.daily.add(gap)
     days = savings_view(rt)["days"]
-    assert [d["why"] for d in days] == ["partial day", "outdoor sensor missing for 5 h"]
+    assert [d["why"] for d in days] == ["partial day", "no fresh outdoor temperature for 5 h"]
 
 
 def test_history_replaces_a_repeated_day_and_keeps_two_years():

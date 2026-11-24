@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from radiate.config.site import SiteConfig
 from radiate.core.outdoor import OutdoorSource
-from radiate.core.savings import report, room_weights
+from radiate.core.savings import SavingsParams, report, room_weights
 
 if TYPE_CHECKING:
     from .runtime import Runtime
@@ -95,6 +95,7 @@ def savings_view(rt: Runtime) -> dict:
         household=has_baseline_source(rt),
         outdoor_sensor=has_outdoor_sensor(rt),
         outdoor_source=outdoor_source(rt),
+        outdoor_missing=NO_SENSOR if needs_sensor(rt) else NO_READINGS,
     )
 
 
@@ -104,16 +105,43 @@ def has_baseline_source(rt: Runtime) -> bool:
     return rt.household is not None or bool(rt.schedule_use)
 
 
-def has_outdoor_sensor(rt: Runtime) -> bool:
-    """Whether the house has an outdoor temperature source. The simulator and the demo
-    always have one; a live house has one when the house file names a Zigbee sensor or
-    takes the outdoor temperature from Home Assistant (`house.outdoor_source`)."""
-    if rt.outdoor_source is not OutdoorSource.ZIGBEE:
-        return True
+NO_SENSOR = "no outdoor sensor"
+NO_READINGS = "no outdoor readings yet"
+
+
+def _zigbee_sensor(rt: Runtime) -> bool:
+    """The house file names a Zigbee outdoor sensor (always true off the live driver:
+    the simulator and the demo have an outdoor temperature)."""
     site = getattr(rt.driver, "site", None)
-    if isinstance(site, SiteConfig):
-        return bool(site.outdoor_sensor)
-    return True
+    return bool(site.outdoor_sensor) if isinstance(site, SiteConfig) else True
+
+
+def needs_sensor(rt: Runtime) -> bool:
+    """Whether the outdoor temperature can only come from a Zigbee sensor."""
+    return rt.outdoor_source is OutdoorSource.ZIGBEE
+
+
+def has_outdoor_sensor(rt: Runtime) -> bool:
+    """Whether the house has an outdoor temperature to judge days by. A Zigbee sensor
+    counts once the house file names one. Home Assistant counts only once it has given
+    fresh readings: today, or on a kept day for most of it (the savings meter's outdoor
+    share), so a source set up but silent or stale is not taken for one. Each day is
+    still judged on its own share."""
+    if rt.driver.name != "live" or (
+        rt.outdoor_source is not OutdoorSource.HOME_ASSISTANT and _zigbee_sensor(rt)
+    ):
+        return True
+    if needs_sensor(rt):
+        return False
+    if rt.state.savings.outdoor_s > 0:
+        return True
+    least = SavingsParams().min_share
+    for day in rt.daily.days():
+        rec = day.get("savings")
+        share = rec.get("outdoor_share") if isinstance(rec, Mapping) else None
+        if isinstance(share, (int, float)) and share >= least:
+            return True
+    return False
 
 
 def outdoor_source(rt: Runtime) -> str | None:

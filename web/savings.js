@@ -89,6 +89,10 @@ const UNAVAILABLE = {
     "Savings need an outdoor sensor",
     "Cold days use more oil than mild ones, so Radiate compares like with like using the outdoor temperature. Add a Zigbee outdoor sensor as house.outdoor_sensor in the house file, or set house.outdoor_source to home_assistant and pick an outdoor entity in the Radiate integration's options.",
   ],
+  "no outdoor readings yet": [
+    "Savings need outdoor readings",
+    "Radiate takes the outdoor temperature from Home Assistant, and no fresh reading has arrived yet. Check the outdoor entity in the Radiate integration's options, and that it reports at least every few hours.",
+  ],
   "no nozzle rating": [
     "Savings need the nozzle rating",
     "Radiate turns burner time into litres with the boiler's nozzle rating. Add it as boiler.nozzle_lph in the house file; it's on the burner's nozzle or in the service record.",

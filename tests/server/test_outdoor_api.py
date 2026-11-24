@@ -234,6 +234,7 @@ def test_savings_count_home_assistant_as_an_outdoor_source():
     assert body["outdoor"] == {"source": None, "text": None}
     rt = make(OutdoorSource.HOME_ASSISTANT)
     rt.schedule_use = {"lounge": ("in_use", "in_use")}
+    rt.state.savings.outdoor_s = 600.0  # some fresh outdoor time today
     body = savings_view(rt)
     assert body["why"] != "no outdoor sensor"
     assert body["outdoor"] == {
@@ -281,3 +282,36 @@ def test_the_browser_demo_accepts_a_reading():
     # The demo's source is its simulation; the reading is kept but not used.
     assert reply["body"]["outdoor"]["setting"] == "zigbee"
     assert reply["body"]["outdoor"]["source"] == "simulated"
+
+
+async def test_home_assistant_outdoor_counts_only_once_fresh_readings_arrive():
+    wall = Wall()
+    rt = make(OutdoorSource.HOME_ASSISTANT, wall=wall)
+    rt.schedule_use = {"lounge": ("in_use", "in_use")}
+    # Configured, but nothing has arrived: no outdoor temperature behind any figure.
+    await rt.step()
+    body = savings_view(rt)
+    assert body["status"] == "unavailable"
+    assert body["why"] == "no outdoor readings yet"
+    assert body["outdoor"]["source"] is None
+    # A reading too old to use is no better.
+    old = datetime.fromtimestamp(wall.t - 6 * 3600, TZ).isoformat()
+    handle(rt, "POST", "outdoor", {"temperature_c": 6.5, "measured_at": old})
+    wall.t += 60
+    await rt.step()
+    assert savings_view(rt)["why"] == "no outdoor readings yet"
+    # A fresh one: the house has an outdoor source; each day is judged on its share.
+    handle(rt, "POST", "outdoor", {"temperature_c": 6.5})
+    wall.t += 60
+    await rt.step()
+    body = savings_view(rt)
+    assert body["status"] == "learning" and body["outdoor"]["source"] == "home_assistant"
+
+
+def test_a_kept_day_with_outdoor_readings_keeps_the_source_counted():
+    rt = make(OutdoorSource.HOME_ASSISTANT)
+    rt.schedule_use = {"lounge": ("in_use", "in_use")}
+    rt.daily._days = [{"day": 739000, "partial": False, "savings": {"outdoor_share": 0.95}}]
+    assert savings_view(rt)["why"] != "no outdoor readings yet"
+    rt.daily._days = [{"day": 739000, "partial": False, "savings": {"outdoor_share": 0.2}}]
+    assert savings_view(rt)["why"] == "no outdoor readings yet"

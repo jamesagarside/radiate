@@ -362,7 +362,7 @@ def test_why_not_eligible():
     assert "basis" in why_not_eligible(summary(0, 100, 120, litres=2.0), "firing")
     assert why_not_eligible(
         summary(0, 100, 120, litres=2.0, outdoor_share=1 - 4 / 24), "relay"
-    ) == ("outdoor sensor missing for 4 h")
+    ) == ("no fresh outdoor temperature for 4 h")
     assert "baseline" in why_not_eligible(
         summary(0, 100, 120, litres=2.0, baseline_share=0.5), "relay"
     )
