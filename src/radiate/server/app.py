@@ -12,6 +12,7 @@ from pathlib import Path
 from aiohttp import WSMsgType, web
 
 from . import bridge
+from .data import QueryError, data_view, export_view, series_view, to_csv
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
@@ -160,6 +161,34 @@ async def savings(request: web.Request) -> web.Response:
     return web.json_response(savings_view(_rt(request)))
 
 
+async def data(request: web.Request) -> web.Response:
+    """Raw data points (`radiate.server.data`); `format=csv` for a CSV file."""
+    rt = _rt(request)
+    query = {k: ",".join(request.query.getall(k)) for k in request.query}
+    try:
+        view = data_view(rt, query)
+    except QueryError as err:
+        raise web.HTTPBadRequest(text=str(err)) from err
+    if query.get("format") == "csv":
+        return web.Response(
+            text=to_csv(view),
+            content_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="radiate-data.csv"'},
+        )
+    if query.get("format") not in (None, "", "json"):
+        raise web.HTTPBadRequest(text="format must be json or csv")
+    return web.json_response(view)
+
+
+async def data_series(request: web.Request) -> web.Response:
+    rt = _rt(request)
+    return web.json_response(series_view(rt, export_view(rt)["otlp"]))
+
+
+async def export(request: web.Request) -> web.Response:
+    return web.json_response(export_view(_rt(request)))
+
+
 async def _household(request: web.Request, method: str, with_body: bool) -> web.Response:
     """The household setup (`bridge.household`). Errors with field paths go as JSON."""
     rt = _rt(request)
@@ -301,6 +330,9 @@ def create_app(
             web.get("/api/v1/schedules", schedules),
             web.get("/api/v1/suggestions", suggestions),
             web.get("/api/v1/savings", savings),
+            web.get("/api/v1/data", data),
+            web.get("/api/v1/data/series", data_series),
+            web.get("/api/v1/export", export),
             web.get("/api/v1/household", household),
             web.post("/api/v1/household/preview", household_preview),
             web.put("/api/v1/household", household_save),
