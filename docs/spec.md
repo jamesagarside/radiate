@@ -710,26 +710,13 @@ Built (section 5.9): in the daily stream `savings.{outdoor_share,baseline_share}
 Optional, off by default. Sends the raw data series (section 9.2) as OTLP metrics and the decision log as OTLP logs to any OTLP/HTTP receiver, including Elastic's managed OTLP endpoint. The cloud never sits in the control loop (ADR-0002): the export only reads what each tick recorded.
 
 - **Transport**: OTLP/HTTP, `POST <endpoint>/v1/metrics` and `<endpoint>/v1/logs`, protobuf (`application/x-protobuf`, the default) or JSON (`application/json`), optionally gzip. Encoded by Radiate with the standard library; the tests check both encodings against the official `opentelemetry-proto` classes. Auth: `Authorization: ApiKey <key>`, or any headers.
-- **Resource**: `service.name` `radiate`, `service.version`, `service.instance.id` and `radiate.house.id` (the random house ID), and `data_stream.dataset` (default `radiate`) for Elastic's routing. No names of people, no location.
-- **Metrics**: one OTLP gauge per series, one data point a minute at the tick's time, in the `radiate.*` namespace (OpenTelemetry has no semantic conventions for room heating). Room metrics carry `radiate.room.id` and `radiate.room.name`.
-
-| Metric | Unit | Raw data metric |
-|---|---|---|
-| `radiate.room.temperature`, `radiate.room.setpoint`, `radiate.room.target` | `Cel` | `room.temperature`, `room.setpoint`, `room.target` |
-| `radiate.room.humidity` | `%` | `room.humidity` |
-| `radiate.room.demand.calling`, `radiate.room.window.open` | `1` (0 or 1) | `room.calling`, `room.window` |
-| `radiate.valve.temperature` | `Cel` | `valve.temperature` |
-| `radiate.valve.opening`, `radiate.valve.opening.reported` | `%` | `valve.opening`, `valve.reported` |
-| `radiate.outdoor.temperature` | `Cel` | `outdoor.temperature` |
-| `radiate.boiler.relay`, `radiate.boiler.demand`, `radiate.boiler.burner`, `radiate.store.relay` | `1` (0 or 1) | `boiler.relay`, `boiler.demand`, `boiler.burner`, `store.relay` |
-| `radiate.boiler.status` | `1` | `boiler.state`, as a state set: one point per state (`idle`, `lead`, `firing`, `rest`) in `radiate.boiler.state`, 1 for the current one |
-| `radiate.boiler.power` | `W` | `boiler.power` |
-| `radiate.people.home`, `radiate.people.away` | `{person}` | `people.home`, `people.away` |
-
-- **Logs**: one record per decision and alert the runtime logs (the same as the Elastic decision stream): body the message, `severity_number` 9 (INFO), `event.action` the reason code, `radiate.room.id` where there is one.
+- **Schema**: every metric and log record is defined in `radiate.export.telemetry` and listed in the [telemetry schema](telemetry.md), which is generated from it. Requests carry its version in `radiate.schema.version` (MAJOR.MINOR; additive only within a major, enforced by tests).
+- **Resource**: `service.name` `radiate`, `service.version`, `service.instance.id` and `radiate.house.id` (the random house ID), `radiate.schema.version`, and `data_stream.dataset` (default `radiate`) for Elastic's routing. No names of people, no location.
+- **Metrics**: every raw data series as a gauge, one data point a minute at the tick's time, in the `radiate.*` namespace (OpenTelemetry has no semantic conventions for room heating); room metrics carry `radiate.room.id` and `radiate.room.name`. The day's running totals (relay and burner time, starts, oil, store burner time) as cumulative monotonic sums starting at local midnight. When a local day closes, its summary (section 5.6) and savings (section 5.9) as gauges timed at the day's last second, with `radiate.day.partial`.
+- **Logs**: one record per event, with the event name in the log record's event name field and the `event.name` attribute: `radiate.decision`, `radiate.alert` and `radiate.alert.cleared`, `radiate.boiler.burn`, `radiate.mode.changed`, `radiate.presence.changed` (people as counts), `radiate.learning.invalidated`, `radiate.settings.changed` (paths, never values), `radiate.auth.denied` (a count, never an address) and `radiate.export.dropped`. `event.action` is the reason code; severity is INFO (9) or WARN (13) by event; the body is the message.
 - **Buffering**: on-disk queues (7 days of ticks, 20,000 log records), batches of 30 ticks or 500 records, backoff from the interval to 10 minutes, `Retry-After` honoured. Retryable: network errors, 429, 502, 503, 504; kept and retried: 401, 403, 404 and other errors; dropped: 400; halved batch: 413. A full queue drops the oldest and counts them. Health in `GET /api/v1/export`.
 
-**Not yet implemented**: gRPC, traces, the daily summary (section 5.6) and savings as metrics, and sums for counters such as burner starts.
+**Not yet implemented**: gRPC, traces, and histograms (burn lengths are sent only as the daily mean).
 
 ### 9.2 Raw data
 
