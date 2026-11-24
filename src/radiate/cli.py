@@ -691,6 +691,7 @@ def _users(args: argparse.Namespace) -> None:
     import getpass
     from pathlib import Path
 
+    from radiate.config.auth import normalise_role
     from radiate.server.auth import AccountError, Accounts
     from radiate.server.auth.passwords import password_problem
     from radiate.server.store import Store
@@ -733,9 +734,10 @@ def _users(args: argparse.Namespace) -> None:
             print(f"Password changed for {args.name.lower()}. Their sessions have ended.")
         elif args.action == "set-role":
             if not args.role:
-                sys.exit("set-role needs --role admin or --role viewer")
+                sys.exit("set-role needs --role admin, household or viewer")
             accounts.set_role(args.name, args.role)
-            print(f"{args.name.lower()} is now {args.role}. Their sessions have ended.")
+            role = normalise_role(args.role)
+            print(f"{args.name.lower()} is now {role}. Their sessions have ended.")
         elif args.action == "remove":
             accounts.remove_user(args.name)
             print(f"Removed {args.name.lower()}. Their sessions have ended.")
@@ -864,7 +866,11 @@ def build_parser() -> argparse.ArgumentParser:
     u = sub.add_parser("users", help="manage the people who can sign in to the web UI")
     u.add_argument("action", choices=["list", "add", "reset-password", "set-role", "remove"])
     u.add_argument("name", nargs="?", help="username")
-    u.add_argument("--role", choices=["admin", "viewer"], help="default viewer for add")
+    u.add_argument(
+        "--role",
+        choices=["admin", "household", "viewer", "readonly"],
+        help="admin, household or viewer (readonly is the same as viewer); default viewer for add",
+    )
     u.add_argument("--config", help="house configuration file (for house.data_dir)")
     u.add_argument("--data-dir", help="folder holding radiate.db, in place of --config")
     u.add_argument(

@@ -28,6 +28,7 @@ from radiate.config.household import (
     household_section,
     limits_view,
     options_view,
+    without_adjustments,
 )
 from radiate.config.schedule import WeekSchedule
 from radiate.config.site import (
@@ -177,6 +178,25 @@ class HouseholdSetup:
             ) from None
         self._use(rt, apply_household(self.site, household, "saved"))
         return self.view(rt)
+
+    def only_adjustments(self, body: Any) -> bool:
+        """Whether a draft changes nothing but room adjustments (`rooms.<id>.adjust`).
+
+        The household role may save such a draft, which is what the week view sends; the
+        people, routines, away settings and temperatures stay with an admin. Both sides
+        go through the parser first, so formatting can't hide a change. A draft that
+        doesn't parse counts as only adjustments: saving it fails with its errors anyway.
+        """
+        current = self.site.household
+        if current is None:
+            return False
+        try:
+            draft = parse_household(_section(body), self.site)
+        except (ConfigError, SetupError):
+            return True
+        return household_section(without_adjustments(draft)) == household_section(
+            without_adjustments(current)
+        )
 
     def revert(self, rt: Runtime) -> dict:
         """`DELETE household`: forget the saved setup and use the house file's again."""

@@ -1004,8 +1004,17 @@ SECTIONS: list[Section] = [
                 optional=True,
             ),
             Setting(
+                "auth.oidc.households",
+                "OIDC households",
+                "list",
+                "Users or groups who can change setpoints, away, fire, boosts and room "
+                "adjustments but not settings. Set in the house file.",
+                editable=False,
+                optional=True,
+            ),
+            Setting(
                 "auth.oidc.viewers",
-                "OIDC viewers",
+                "OIDC viewers (read only)",
                 "list",
                 "Users or groups who can only look. Set in the house file.",
                 editable=False,
@@ -1060,8 +1069,17 @@ SECTIONS: list[Section] = [
                 optional=True,
             ),
             Setting(
+                "auth.saml.households",
+                "SAML households",
+                "list",
+                "Users or groups who can change setpoints, away, fire, boosts and room "
+                "adjustments but not settings. Set in the house file.",
+                editable=False,
+                optional=True,
+            ),
+            Setting(
                 "auth.saml.viewers",
-                "SAML viewers",
+                "SAML viewers (read only)",
                 "list",
                 "Users or groups who can only look. Set in the house file.",
                 editable=False,

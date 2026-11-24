@@ -13,7 +13,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 
-from radiate.config.auth import ROLES
+from radiate.config.auth import ROLES, normalise_role
 
 from .passwords import hash_password
 
@@ -58,9 +58,11 @@ def normalise_username(name: str) -> str:
 
 
 def check_role(role: str) -> str:
-    if role not in ROLES:
-        raise AccountError(f"role must be {' or '.join(ROLES)}")
-    return role
+    """The stored name of a role, taking `readonly` for `viewer`."""
+    stored = normalise_role(role) if isinstance(role, str) else None
+    if stored is None:
+        raise AccountError(f"role must be {', '.join(ROLES[:-1])} or {ROLES[-1]} (or readonly)")
+    return stored
 
 
 class Accounts:
@@ -89,7 +91,7 @@ class Accounts:
 
     def add_user(self, username: str, password: str, role: str, now: float | None = None) -> User:
         name = normalise_username(username)
-        check_role(role)
+        role = check_role(role)
         if self.user(name):
             raise AccountError(f"user {name} already exists")
         now = time.time() if now is None else now
@@ -111,7 +113,7 @@ class Accounts:
 
     def set_role(self, username: str, role: str) -> None:
         name = self._existing(username)
-        check_role(role)
+        role = check_role(role)
         self.db.execute(
             "UPDATE users SET role = ?, updated = ? WHERE username = ?", (role, time.time(), name)
         )

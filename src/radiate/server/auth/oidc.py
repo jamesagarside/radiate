@@ -282,5 +282,5 @@ class OidcClient:
         values = _claim_values(claims.get(self.cfg.roles.claim)) if self.cfg.roles.claim else ()
         role = self.cfg.roles.role_for(username, values)
         if role is None:
-            raise OidcError(f"{username} is in neither admins nor viewers")
+            raise OidcError(f"{username} is in none of admins, households or viewers")
         return OidcIdentity(username=username, role=role, subject=str(claims["sub"]))

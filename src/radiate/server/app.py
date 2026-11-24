@@ -14,6 +14,7 @@ from aiohttp import WSMsgType, web
 from . import bridge
 from .auth import AUTH, IDENTITY, AuthService, Identity, add_routes
 from .data import QueryError, data_view, export_view, series_view, to_csv
+from .permissions import ADMIN, HOUSEHOLD_SETTINGS, PUBLIC, allowed, needed_role
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
@@ -29,9 +30,6 @@ WEB_DIR = Path(os.environ.get("RADIATE_WEB_DIR") or (_PKG_WEB if _PKG_WEB.exists
 
 
 STREAM_PATH = "/api/v1/stream"
-LOGOUT_PATH = "/api/v1/auth/logout"
-# Paths under /api/ that answer without signing in. The stream checks its own.
-PUBLIC_API = frozenset({"/api/v1/health", "/api/v1/auth/config", "/api/v1/auth/login", STREAM_PATH})
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SESSION_RECHECK_S = 60.0
 # A browser cannot set headers on a WebSocket, so the stream also accepts the token
@@ -72,22 +70,35 @@ def identify(request: web.Request) -> Identity | None:
     return None
 
 
+def _refused(role: str, needed: str) -> web.Response:
+    """403 for a role below what the route needs. `error` names the caller's role, as
+    `viewer` always has; `needs` is the role that may."""
+    return web.json_response({"error": role, "needs": needed}, status=403)
+
+
 @web.middleware
 async def auth(request: web.Request, handler):
-    path = request.path
-    if path.startswith("/api/") and path not in PUBLIC_API:
-        ident = identify(request)
-        if ident is None:
-            raise web.HTTPUnauthorized()
-        if ident.session is not None and request.method not in SAFE_METHODS:
-            # A cookie is sent automatically, so a change must also prove it came from
-            # Radiate's own page, which alone can read the session's CSRF token.
-            if not AuthService.csrf_ok(request, ident.session):
-                return web.json_response({"error": "csrf"}, status=403)
-            if ident.role != "admin" and path != LOGOUT_PATH:
-                return web.json_response({"error": "viewer"}, status=403)
-        request[IDENTITY] = ident
+    """Who may call what: `radiate.server.permissions` holds one entry per route."""
+    if request.path.startswith("/api/"):
+        needed = needed_role(request)
+        if needed != PUBLIC:
+            ident = identify(request)
+            if ident is None:
+                raise web.HTTPUnauthorized()
+            if ident.session is not None and request.method not in SAFE_METHODS:
+                # A cookie is sent automatically, so a change must also prove it came
+                # from Radiate's own page, which alone can read the session's CSRF token.
+                if not AuthService.csrf_ok(request, ident.session):
+                    return web.json_response({"error": "csrf"}, status=403)
+            if not allowed(ident.role, needed):
+                return _refused(ident.role, needed)
+            request[IDENTITY] = ident
     return await handler(request)
+
+
+def _role(request: web.Request) -> str:
+    ident = request.get(IDENTITY)
+    return ident.role if ident is not None else ADMIN
 
 
 async def _stream_handshake(ws: web.WebSocketResponse, token: str) -> bool:
@@ -243,6 +254,16 @@ async def household_preview(request: web.Request) -> web.Response:
 
 
 async def household_save(request: web.Request) -> web.Response:
+    role = _role(request)
+    if role != ADMIN:
+        # The household role saves room adjustments from the week view; the people,
+        # routines and the rest of the setup stay with an admin.
+        try:
+            setup = bridge.setup(_rt(request))
+        except bridge.RequestError as err:
+            raise _http_error(err) from err
+        if not setup.only_adjustments(await _json(request)):
+            return _refused(role, ADMIN)
     return await _household(request, "PUT", with_body=True)
 
 
@@ -281,6 +302,9 @@ async def settings(request: web.Request) -> web.Response:
 
 
 async def set_settings(request: web.Request) -> web.Response:
+    role = _role(request)
+    if role != ADMIN and not set(await _json(request)) <= HOUSEHOLD_SETTINGS:
+        return _refused(role, ADMIN)
     return await _post(request, bridge.set_settings)
 
 
