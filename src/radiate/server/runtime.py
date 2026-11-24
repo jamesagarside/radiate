@@ -187,6 +187,8 @@ class Runtime:
     ha_persons: list[dict] | None = None
     ha_persons_at: float | None = None
     setup: object | None = None  # radiate.server.setup.HouseholdSetup; None: not offered
+    # radiate.server.settings.SettingsEditor, the web UI's Settings view; None: not offered
+    settings_editor: object | None = None
     # Outdoor temperature source (radiate.core.outdoor, `house.outdoor_source`). The
     # Home Assistant reading is the last `POST /api/v1/outdoor`, kept in the state
     # database so a restart does not lose it; its age still counts.

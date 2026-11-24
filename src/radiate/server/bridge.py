@@ -26,6 +26,7 @@ from .layout import LayoutError
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
+from .settings import SettingsEditor, SettingsError
 from .setup import HouseholdSetup, SetupError
 from .suggestions import suggestions_view
 
@@ -324,6 +325,29 @@ def household(rt: Runtime, method: str, body: Any = None) -> dict:
     raise RequestError(405, "method not allowed")
 
 
+def settings_editor(rt: Runtime) -> SettingsEditor:
+    if not isinstance(rt.settings_editor, SettingsEditor):
+        raise RequestError(404, "settings are not available")
+    return rt.settings_editor
+
+
+def config(rt: Runtime, method: str, target: str | None = None, body: Any = None) -> dict:
+    """Every house-file setting (`radiate.server.settings`): GET reads them, PUT saves
+    changes over the house file, DELETE goes back to the house file's value for one
+    setting, a section, a room (`rooms.<id>`) or, without a target, all of them."""
+    editor = settings_editor(rt)
+    try:
+        if method == "GET" and target is None:
+            return editor.view()
+        if method == "PUT" and target is None:
+            return editor.save(rt, body)
+        if method == "DELETE":
+            return editor.revert(rt, target, body)
+    except SettingsError as err:
+        raise RequestError(err.status, str(err) or "invalid settings", err.body) from err
+    raise RequestError(405, "method not allowed")
+
+
 SETTINGS = ("demand_mode",)
 
 
@@ -393,6 +417,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
         return household(rt, "PREVIEW", body)
     if parts == ["layout"] and method == "PUT":
         return set_layout(rt, body)
+    if parts[:2] == ["settings", "config"] and len(parts) <= 3:
+        return config(rt, method, parts[2] if len(parts) == 3 else None, body)
     if method == "GET":
         if parts == ["house"]:
             return rt.house()

@@ -189,6 +189,10 @@ class SiteConfig:
     household_notes: tuple[str, ...] = ()  # the part of `notes` about the household
     # Why a household saved from the web UI was not used, if it was not.
     saved_problems: tuple[str, ...] = ()
+    # Settings saved from the web UI's Settings view (radiate.config.settings) that are
+    # in effect, as dotted paths, and why saved settings were not used, if they were not.
+    saved_settings: tuple[str, ...] = ()
+    settings_problems: tuple[str, ...] = ()
 
     def schedule_for(self, room_id: str) -> WeekSchedule:
         """The room's week as the valve holds it: the schedule mirror and the fallback."""
@@ -1407,19 +1411,69 @@ def apply_saved(site: SiteConfig) -> SiteConfig:
     return apply_household(site, household, "saved")
 
 
-def load_site(
-    path: str | Path, env: dict[str, str] | None = None, data_dir: str | Path | None = None
-) -> SiteConfig:
-    """Read and validate a YAML config file, then apply the household saved in the data
-    directory, if any. `data_dir` replaces `house.data_dir`, as `--data-dir` does."""
+def read_house_file(path: str | Path) -> Any:
+    """The house file as parsed YAML, before any checks. Raises OSError or ConfigError."""
     import yaml
 
     text = Path(path).read_text(encoding="utf-8")
     try:
-        data = yaml.safe_load(text)
+        return yaml.safe_load(text)
     except yaml.YAMLError as err:
         raise ConfigError([f"{path}: not valid YAML: {err}"]) from None
+
+
+def parse_with_settings(
+    data: Any, flat: dict[str, Any], env: dict[str, str] | None = None
+) -> tuple[SiteConfig, dict]:
+    """The site from the house file `data` with saved settings `flat` laid over it
+    (`radiate.config.settings`), and the merged house file. Raises ConfigError listing
+    every problem, settings with nowhere to go included."""
+    from .settings import merge_settings
+
+    merged, problems = merge_settings(data, flat)
+    if problems:
+        raise ConfigError(problems)
+    site = parse_site(merged, env)
+    return replace(site, saved_settings=tuple(flat)), merged
+
+
+def apply_saved_settings(
+    data: Any, site: SiteConfig, env: dict[str, str] | None = None
+) -> SiteConfig:
+    """The site with the settings saved from the web UI, if `site.data_dir` holds any.
+
+    Saved settings that would make the configuration invalid are not used: the house
+    file's settings apply, and `settings_problems` and a note say why, so Radiate still
+    starts and the web UI can offer to fix them. `site` is the house file's own.
+    """
+    from .saved import read_settings, settings_path
+    from .settings import flatten
+
+    try:
+        nested = read_settings(site.data_dir)
+        if nested is None:
+            return site
+        flat, problems = flatten(nested)
+        if problems:
+            raise ConfigError(problems)
+        saved, _ = parse_with_settings(data, flat, env)
+    except ConfigError as err:
+        note = (
+            f"{settings_path(site.data_dir)}: the settings saved from the web UI were not "
+            f"used, so the house file's apply: {'; '.join(err.problems)}"
+        )
+        return replace(site, settings_problems=tuple(err.problems), notes=(*site.notes, note))
+    return replace(saved, data_dir=site.data_dir)
+
+
+def load_site(
+    path: str | Path, env: dict[str, str] | None = None, data_dir: str | Path | None = None
+) -> SiteConfig:
+    """Read and validate a YAML config file, then apply the settings and the household
+    saved in the data directory, if any. `data_dir` replaces `house.data_dir`, as
+    `--data-dir` does."""
+    data = read_house_file(path)
     site = parse_site(data, env)
     if data_dir is not None:
         site = replace(site, data_dir=str(data_dir))
-    return apply_saved(site)
+    return apply_saved(apply_saved_settings(data, site, env))
