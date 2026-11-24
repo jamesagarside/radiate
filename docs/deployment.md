@@ -63,7 +63,7 @@ Run your own house. Draft the file from Zigbee2MQTT's device list, then check it
 
 Radiate keeps its state in `radiate.db` inside `house.data_dir`, which defaults to `./data` relative to the directory you start it from. See [Data, backups and upgrades](#data-backups-and-upgrades).
 
-To compare Radiate with plain smart TRVs in the simulator, run `.venv/bin/radiate sim --days 5`.
+To compare Radiate with plain smart TRVs in the simulator, run `.venv/bin/radiate sim --days 5`. To compare `eco` with and without room use, `comfort` and a plain heating timer, run `.venv/bin/radiate sim-efficiency` (see [simulation](simulation.md#room-use-in-eco)).
 
 ## Standalone Docker
 

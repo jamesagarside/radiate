@@ -401,8 +401,8 @@ Code: `HouseConfig.comfort_horizon_s`.
 _Avoid_: comfort limit (that is the boiler's pooling threshold in K).
 
 **Optimum start**:
-Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag. It looks up to three hours ahead, or as far as the return warm-up for a return.
-Code: `_preheat_due`, `PREHEAT_MAX_S`, `RoomInput.preheat_max_s`, `RoomState.preheating`, UI badge "Preheating".
+Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag. It looks up to three hours ahead (3.25 hours in `eco` for a room with room use, which may have waited down at its damp floor), or as far as the return warm-up for a return.
+Code: `_preheat_due`, `PREHEAT_MAX_S`, `PREHEAT_USE_MAX_S`, `RoomInput.preheat_max_s`, `RoomState.preheating`, UI badge "Preheating".
 _Avoid_: preheat as a noun for the feature; use "preheating" for the room state.
 
 **Deadline**:
