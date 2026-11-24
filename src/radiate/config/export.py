@@ -129,7 +129,7 @@ OTLP_SETTINGS: tuple[dict[str, Any], ...] = (
         "type": "multi",
         "default": list(SIGNALS),
         "choices": list(SIGNALS),
-        "help": "Metrics every minute; logs for each decision and alert.",
+        "help": "Metrics every minute and daily; logs for each decision, alert and change.",
     },
     {
         "key": "dataset",

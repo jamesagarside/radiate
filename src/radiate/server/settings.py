@@ -39,6 +39,7 @@ from radiate.config.settings import (
     setting_for,
 )
 from radiate.config.site import ConfigError, SiteConfig, parse_household, parse_with_settings
+from radiate.export import telemetry
 
 from .runtime import Runtime
 
@@ -243,7 +244,7 @@ class SettingsEditor:
                 clean[str(path)] = _normalise(str(path), value)
         if errors:
             raise SettingsError(400, {"message": "Some settings were not saved.", "errors": errors})
-        return self._commit(rt, {**self.saved, **clean}, body)
+        return self._commit(rt, {**self.saved, **clean}, body, "settings.saved")
 
     def revert(self, rt: Runtime, target: str | None, body: Any = None) -> dict:
         """`DELETE settings/config[/<target>]`: go back to the house file's value.
@@ -266,11 +267,11 @@ class SettingsEditor:
         if target is not None and target in self.locked:
             raise SettingsError(400, {"message": self.locked[target]})
         flat = {p: v for p, v in self.saved.items() if p not in drop}
-        return self._commit(rt, flat, body if isinstance(body, dict) else {})
+        return self._commit(rt, flat, body if isinstance(body, dict) else {}, "settings.reverted")
 
     # --- helpers -------------------------------------------------------------------------
 
-    def _commit(self, rt: Runtime, flat: dict[str, Any], body: dict) -> dict:
+    def _commit(self, rt: Runtime, flat: dict[str, Any], body: dict, action: str) -> dict:
         before = self._values(self._merged(self.saved))
         after = self._values(self._merged(flat))
         changed = [p for p in after if before.get(p) != after.get(p)]
@@ -314,6 +315,9 @@ class SettingsEditor:
         view = self.view()
         view["applied"] = live
         view["restart"] = [p for p in changed if _restart(p)]
+        emit = getattr(rt, "telemetry_event", None)
+        if changed and callable(emit):  # the paths only: a value can be a secret
+            emit(telemetry.settings_record(action, changed, bool(view["restart"])))
         return view
 
     def _check_household(self, rt: Runtime, site: SiteConfig) -> None:

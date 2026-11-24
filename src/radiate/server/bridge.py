@@ -280,7 +280,7 @@ def boost_store(rt: Runtime, body: Any) -> dict:
 
 def set_mode(rt: Runtime, body: Any) -> dict:
     try:
-        rt.mode = Mode(require_object(body).get("mode"))
+        rt.set_mode(Mode(require_object(body).get("mode")))
     except ValueError as err:
         raise RequestError(400, "mode must be auto, off or frost") from err
     return {"ok": True}

@@ -1,0 +1,855 @@
+{
+  "events": {
+    "radiate.alert": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.id": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "severity": "WARN"
+    },
+    "radiate.alert.cleared": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.id": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.auth.denied": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.auth.failures": {
+          "required": true,
+          "type": "int",
+          "unit": "{request}"
+        }
+      },
+      "severity": "WARN"
+    },
+    "radiate.boiler.burn": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.burn.duration": {
+          "required": true,
+          "type": "double",
+          "unit": "s"
+        },
+        "radiate.dry_run": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.decision": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.boiler.pooled_demand": {
+          "required": false,
+          "type": "double",
+          "unit": "min"
+        },
+        "radiate.boiler.predicted_burn": {
+          "required": false,
+          "type": "double",
+          "unit": "min"
+        },
+        "radiate.room.id": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.room.target": {
+          "required": false,
+          "type": "double",
+          "unit": "Cel"
+        },
+        "radiate.room.temperature": {
+          "required": false,
+          "type": "double",
+          "unit": "Cel"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.export.dropped": {
+      "attributes": {
+        "error.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "queue_full",
+            "400",
+            "413",
+            "partial_success"
+          ]
+        },
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.export.dropped": {
+          "required": true,
+          "type": "int",
+          "unit": "{record}"
+        },
+        "radiate.export.signal": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "metrics",
+            "logs"
+          ]
+        }
+      },
+      "severity": "WARN"
+    },
+    "radiate.learning.invalidated": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.id": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "severity": "WARN"
+    },
+    "radiate.mode.changed": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.mode.after": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "auto",
+            "off",
+            "frost",
+            "eco",
+            "comfort"
+          ]
+        },
+        "radiate.mode.before": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "auto",
+            "off",
+            "frost",
+            "eco",
+            "comfort"
+          ]
+        },
+        "radiate.mode.kind": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "heating",
+            "demand"
+          ]
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.presence.changed": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.people.away": {
+          "required": false,
+          "type": "int",
+          "unit": "{person}"
+        },
+        "radiate.people.home": {
+          "required": false,
+          "type": "int",
+          "unit": "{person}"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.settings.changed": {
+      "attributes": {
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.name": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.settings.paths": {
+          "required": true,
+          "type": "string[]"
+        },
+        "radiate.settings.restart_required": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "severity": "INFO"
+    }
+  },
+  "metrics": {
+    "radiate.boiler.burner.on": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "1"
+    },
+    "radiate.boiler.burner.time": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "sum",
+      "monotonic": true,
+      "temporality": "cumulative",
+      "unit": "s"
+    },
+    "radiate.boiler.demand": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "1"
+    },
+    "radiate.boiler.oil.consumed": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "sum",
+      "monotonic": true,
+      "temporality": "cumulative",
+      "unit": "L"
+    },
+    "radiate.boiler.power": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "W"
+    },
+    "radiate.boiler.relay.on": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "1"
+    },
+    "radiate.boiler.relay.time": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "sum",
+      "monotonic": true,
+      "temporality": "cumulative",
+      "unit": "s"
+    },
+    "radiate.boiler.starts": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "sum",
+      "monotonic": true,
+      "temporality": "cumulative",
+      "unit": "{start}"
+    },
+    "radiate.boiler.status": {
+      "attributes": {
+        "radiate.boiler.state": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "idle",
+            "lead",
+            "firing",
+            "rest"
+          ]
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "1"
+    },
+    "radiate.daily.balance.arrival_spread": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "min"
+    },
+    "radiate.daily.balance.score": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "{score}"
+    },
+    "radiate.daily.burn.mean_duration": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "min"
+    },
+    "radiate.daily.burner.time": {
+      "attributes": {
+        "radiate.burner.basis": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "relay",
+            "firing",
+            "mixed"
+          ]
+        },
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "h"
+    },
+    "radiate.daily.burns": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "{burn}"
+    },
+    "radiate.daily.comfort.deficit": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.savings.eligible": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "K.h"
+    },
+    "radiate.daily.comfort.warm_share": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.savings.eligible": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "1"
+    },
+    "radiate.daily.energy": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "kW.h"
+    },
+    "radiate.daily.oil.baseline": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.savings.eligible": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "L"
+    },
+    "radiate.daily.oil.consumed": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "L"
+    },
+    "radiate.daily.relay.time": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "h"
+    },
+    "radiate.daily.room.below_comfort": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "min"
+    },
+    "radiate.daily.savings.degree_hours.actual": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.savings.eligible": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "K.h"
+    },
+    "radiate.daily.savings.degree_hours.baseline": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.savings.eligible": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "K.h"
+    },
+    "radiate.daily.savings.oil": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.savings.eligible": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "L"
+    },
+    "radiate.daily.savings.share": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        },
+        "radiate.savings.eligible": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "%"
+    },
+    "radiate.daily.starts": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "{start}"
+    },
+    "radiate.daily.starts_peak_hour": {
+      "attributes": {
+        "radiate.day.partial": {
+          "required": true,
+          "type": "bool"
+        }
+      },
+      "cadence": "daily",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "{start}"
+    },
+    "radiate.outdoor.temperature": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "Cel"
+    },
+    "radiate.people.away": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "{person}"
+    },
+    "radiate.people.home": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "{person}"
+    },
+    "radiate.room.demand.calling": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "1"
+    },
+    "radiate.room.humidity": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "%"
+    },
+    "radiate.room.setpoint": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "Cel"
+    },
+    "radiate.room.target": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "Cel"
+    },
+    "radiate.room.temperature": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "Cel"
+    },
+    "radiate.room.window.open": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "1"
+    },
+    "radiate.store.burner.time": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "sum",
+      "monotonic": true,
+      "temporality": "cumulative",
+      "unit": "s"
+    },
+    "radiate.store.relay.on": {
+      "attributes": {},
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "1"
+    },
+    "radiate.valve.opening.limit": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "%"
+    },
+    "radiate.valve.opening.reported": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "%"
+    },
+    "radiate.valve.temperature": {
+      "attributes": {
+        "radiate.room.id": {
+          "required": true,
+          "type": "string"
+        },
+        "radiate.room.name": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "cadence": "minute",
+      "instrument": "gauge",
+      "monotonic": false,
+      "temporality": "",
+      "unit": "Cel"
+    }
+  },
+  "resource": {
+    "data_stream.dataset": {
+      "required": false,
+      "type": "string"
+    },
+    "radiate.house.id": {
+      "required": true,
+      "type": "string"
+    },
+    "radiate.schema.version": {
+      "required": true,
+      "type": "string"
+    },
+    "service.instance.id": {
+      "required": true,
+      "type": "string"
+    },
+    "service.name": {
+      "required": true,
+      "type": "string"
+    },
+    "service.version": {
+      "required": true,
+      "type": "string"
+    }
+  },
+  "version": "1.0"
+}

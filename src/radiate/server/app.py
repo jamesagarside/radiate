@@ -31,7 +31,8 @@ WEB_DIR = Path(os.environ.get("RADIATE_WEB_DIR") or (_PKG_WEB if _PKG_WEB.exists
 STREAM_PATH = "/api/v1/stream"
 LOGOUT_PATH = "/api/v1/auth/logout"
 # Paths under /api/ that answer without signing in. The stream checks its own.
-PUBLIC_API = frozenset({"/api/v1/health", "/api/v1/auth/config", "/api/v1/auth/login", STREAM_PATH})
+LOGIN_PATH = "/api/v1/auth/login"
+PUBLIC_API = frozenset({"/api/v1/health", "/api/v1/auth/config", LOGIN_PATH, STREAM_PATH})
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 SESSION_RECHECK_S = 60.0
 # A browser cannot set headers on a WebSocket, so the stream also accepts the token
@@ -78,6 +79,7 @@ async def auth(request: web.Request, handler):
     if path.startswith("/api/") and path not in PUBLIC_API:
         ident = identify(request)
         if ident is None:
+            _refused(request)
             raise web.HTTPUnauthorized()
         if ident.session is not None and request.method not in SAFE_METHODS:
             # A cookie is sent automatically, so a change must also prove it came from
@@ -87,7 +89,18 @@ async def auth(request: web.Request, handler):
             if ident.role != "admin" and path != LOGOUT_PATH:
                 return web.json_response({"error": "viewer"}, status=403)
         request[IDENTITY] = ident
-    return await handler(request)
+    response = await handler(request)
+    if path == LOGIN_PATH and response.status == 401:
+        _refused(request)  # a wrong username or password
+    return response
+
+
+def _refused(request: web.Request) -> None:
+    """Count a refused request for the OpenTelemetry export's radiate.auth.denied: a
+    count only, never who sent it."""
+    rt = request.app.get(RUNTIME)
+    if isinstance(getattr(rt, "auth_denied", None), int):
+        rt.auth_denied += 1
 
 
 async def _stream_handshake(ws: web.WebSocketResponse, token: str) -> bool:
@@ -349,10 +362,12 @@ async def stream(request: web.Request) -> web.WebSocketResponse:
         raise web.HTTPForbidden()
     pending_auth = ident is None
     if pending_auth and not ws.can_prepare(request).ok:
+        _refused(request)
         raise web.HTTPUnauthorized()
     await ws.prepare(request)
     token = request.app[TOKEN]
     if pending_auth and (not token or not await _stream_handshake(ws, token)):
+        _refused(request)
         await ws.close(code=WS_UNAUTHORISED, message=b"unauthorised")
         return ws
     session = ident.session if ident is not None else None
