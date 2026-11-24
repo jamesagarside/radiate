@@ -39,7 +39,7 @@ def _serve(args: argparse.Namespace) -> None:
 
             if args.demo_days:
                 print(f"Running the demo house for {args.demo_days} simulated days…")
-            runtime = demo_runtime(days=max(0, args.demo_days))
+            runtime = demo_runtime(days=max(0, args.demo_days), record=True)
             queue = None
             interval = 60.0 / args.speed  # one simulated minute per 1/speed real minutes
             banner = f"Radiate demo ({args.speed:g}x)"
@@ -58,6 +58,7 @@ def _serve(args: argparse.Namespace) -> None:
                 queue=queue,
             )
             runtime.exporter.start(session)
+        _start_otlp(runtime, site, session)
         runtime.start(interval_s=interval)
         app = create_app(
             runtime,
@@ -74,6 +75,8 @@ def _serve(args: argparse.Namespace) -> None:
             await runtime.stop()
             if runtime.exporter is not None:
                 await runtime.exporter.stop()
+            if runtime.otlp is not None:
+                await runtime.otlp.stop()
             for fn in reversed(cleanup):
                 await fn()
             await runner.cleanup()
@@ -102,6 +105,72 @@ def _settings_editor(args: argparse.Namespace, site):
         saved,
         locked=locked,
         problems=site.settings_problems,
+    )
+
+
+def _otlp_config(site):
+    """The OpenTelemetry export's settings: the house file's `export.otlp`, else
+    RADIATE_OTLP_ENDPOINT (and RADIATE_OTLP_PROTOCOL), as the App and the demo set them."""
+    from radiate.config.export import parse_export
+
+    if site is not None and site.export.otlp is not None:
+        return site.export.otlp
+    endpoint = os.environ.get("RADIATE_OTLP_ENDPOINT", "").strip()
+    if not endpoint:
+        return None
+    raw = {"endpoint": endpoint}
+    if os.environ.get("RADIATE_OTLP_PROTOCOL"):
+        raw["protocol"] = os.environ["RADIATE_OTLP_PROTOCOL"].strip()
+    export, problems = parse_export({"otlp": raw})
+    if problems:
+        sys.exit("RADIATE_OTLP_*: " + "; ".join(p.removeprefix("export.otlp.") for p in problems))
+    return export.otlp
+
+
+def _start_otlp(runtime, site, session) -> None:
+    """Start the OpenTelemetry export (spec 9.1) when it is configured and enabled."""
+    import logging
+
+    from radiate.export.otlp import (
+        LOGS_MAX,
+        METRICS_MAX,
+        OtlpExporter,
+        resolve_api_key,
+        safe_endpoint,
+    )
+    from radiate.server.store import SqliteQueue
+
+    cfg = _otlp_config(site)
+    if cfg is None:
+        return
+    log = logging.getLogger("radiate")
+    if not cfg.enabled:
+        log.info("OpenTelemetry export: configured but turned off (export.otlp.enabled)")
+        return
+    try:
+        api_key = resolve_api_key(cfg)
+    except ValueError as err:
+        sys.exit(f"OpenTelemetry export: {err}")
+    queues = (None, None)
+    if runtime.store is not None:  # survive restarts and outages, like the Elastic queue
+        queues = (
+            SqliteQueue(runtime.store, METRICS_MAX, table="otlp_metrics_queue"),
+            SqliteQueue(runtime.store, LOGS_MAX, table="otlp_logs_queue"),
+        )
+    runtime.otlp = OtlpExporter(
+        cfg,
+        runtime.house_id,
+        {r.id: r.name for r in runtime.cfg.rooms},
+        api_key,
+        *queues,
+    )
+    runtime.otlp.start(session)
+    log.info(
+        "OpenTelemetry export: %s to %s every %g s%s",
+        cfg.protocol,
+        safe_endpoint(cfg.endpoint),
+        cfg.interval_s,
+        "" if api_key or cfg.headers else ", without an API key",
     )
 
 

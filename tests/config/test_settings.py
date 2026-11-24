@@ -13,6 +13,7 @@ import yaml
 
 from radiate.config import ConfigError, load_site, parse_site
 from radiate.config import site as site_module
+from radiate.config.export import OTLP_SETTINGS
 from radiate.config.saved import read_settings, settings_path, write_settings
 from radiate.config.settings import (
     SECTIONS,
@@ -71,6 +72,8 @@ def house_file_keys() -> set[str]:
         parse_site(every_section(), ENV)
     finally:
         site_module._Ctx.unknown = real
+    # export.otlp is checked by radiate.config.export, not the house file's parser.
+    seen.update(f"export.otlp.{s['key']}" for s in OTLP_SETTINGS)
     return seen
 
 

@@ -36,6 +36,7 @@ from radiate.core.types import (
     SuggestionConfig,
 )
 
+from .export import ExportConfig, parse_export
 from .household import (
     ADJUST_GROUPS,
     LIMITS,
@@ -161,6 +162,8 @@ class SiteConfig:
     history_days: float = 14.0
     # How long the manual fire flag lasts; it also ends at local midnight (spec 7).
     fire_flag_s: float = 6 * 3600.0
+    # Where to send data besides the web UI: the OpenTelemetry export (spec 9.1).
+    export: ExportConfig = field(default_factory=ExportConfig)
     notes: tuple[str, ...] = ()  # non-fatal remarks for the operator
     household: Household | None = None
     # The household's rooms: the valve's week (fixed preheat, fitted to the TRVZB) and
@@ -1155,6 +1158,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "learning",
             "monitoring",
             "suggestions",
+            "export",
         },
         "",
     )
@@ -1231,6 +1235,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     silence_min = ctx.number(house, "sensor_max_silence_min", 60, 10, 180, "house.")
     history_days = ctx.number(house, "history_days", 14, 0, 90, "house.")
     fire_flag_hours = ctx.number(house, "fire_flag_hours", 6, 0.5, 24, "house.")
+    export, export_problems = parse_export(data.get("export"))
+    ctx.problems.extend(export_problems)
 
     if ctx.problems:
         raise ConfigError(ctx.problems)
@@ -1251,6 +1257,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         sensor_max_silence_s=silence_min * 60,
         fire_flag_s=fire_flag_hours * 3600,
         history_days=history_days,
+        export=export,
         notes=tuple(notes),
         room_schedules=own,
         schedule_use=schedule_use,

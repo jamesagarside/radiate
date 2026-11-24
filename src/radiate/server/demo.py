@@ -362,11 +362,14 @@ def demo_outdoor_mean(day: float) -> float:
     return 4.0 + 3.5 * math.sin(2 * math.pi * day / 11.0)
 
 
-def demo_runtime(start_hour: float = 5.5, seed: int = 7, days: int = 0):
+def demo_runtime(start_hour: float = 5.5, seed: int = 7, days: int = 0, record: bool = False):
     """The demo's runtime: the simulated house, with a household setup kept in memory.
 
     With `days`, the demo starts that many simulated days in, with the example
     household set up, so closed days, savings and learning already have a history.
+    With `record`, it also records a tick history in memory, as a live house does, so
+    the Raw data view has something to search (`radiate serve --demo`; the browser
+    demo has no SQLite).
     """
     from .bridge import run_sync
     from .runtime import Runtime
@@ -377,11 +380,40 @@ def demo_runtime(start_hour: float = 5.5, seed: int = 7, days: int = 0):
     rt = Runtime(site.house, DemoDriver(start_hour=start_hour, seed=seed))
     rt.setup = HouseholdSetup(site, SavedMemory())
     rt.settings_editor = SettingsEditor.start(demo_house_file(), SettingsMemory())
+    if record:
+        _record(rt, days)
     if days > 0:
         rt.setup.save(rt, {"household": DEMO_HOUSEHOLD})
         for _ in range(int(days * 1440)):
             run_sync(rt.step())
     return rt
+
+
+def _record(rt, days: int) -> None:
+    """Record the demo's ticks in an in-memory state database, on simulated wall time.
+
+    Simulated midnight on day 0 is local midnight `days` days ago, so after the warm-up
+    the history ends about now, and the clock shown in the UI matches the times in it.
+    """
+    import time
+    from datetime import datetime, timedelta
+
+    from .data import SeriesIndex
+    from .history import History, Recorder
+    from .store import Store
+
+    midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    base = (midnight - timedelta(days=days)).timestamp()
+    driver = rt.driver
+    rt.wall = lambda: base + driver.clock()
+    store = Store(":memory:")
+    history = History(store, DEMO_HISTORY_DAYS)
+    now = driver.clock()
+    rt.recorder = Recorder(history, int(time.time() * 1000), now, rt.wall(), None, 0.0)
+    rt.recorder.index = SeriesIndex(store, history)
+
+
+DEMO_HISTORY_DAYS = 14.0
 
 
 def demo_site() -> SiteConfig:

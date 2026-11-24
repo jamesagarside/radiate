@@ -14,6 +14,7 @@ import json
 import re
 from collections.abc import Coroutine
 from typing import Any
+from urllib.parse import parse_qs
 
 from radiate.config.away import parse_local
 from radiate.config.site import HA_PERSON
@@ -22,6 +23,7 @@ from radiate.core.outdoor import OUTDOOR_MAX_C, OUTDOOR_MIN_C, plausible
 from radiate.core.types import RoomConfig, RoomRole
 from radiate.drivers.devices import ScanRefused
 
+from .data import QueryError, data_view, export_view, series_view
 from .layout import LayoutError
 from .runtime import Runtime
 from .savings import savings_view
@@ -408,8 +410,11 @@ def set_layout(rt: Runtime, body: Any) -> dict:
 
 
 def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
-    """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`."""
+    """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`,
+    and may end in a query string (`data?metric=room.temperature`)."""
     method = method.upper()
+    path, _, qs = path.partition("?")
+    query = {k: ",".join(v) for k, v in parse_qs(qs).items()}
     parts = [p for p in path.strip("/").split("/") if p]
     if parts == ["household"] and method in ("GET", "PUT", "DELETE"):
         return household(rt, method, body)
@@ -440,6 +445,15 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return suggestions_view(rt)
         if parts == ["savings"]:
             return savings_view(rt)
+        if parts == ["data"]:
+            try:
+                return data_view(rt, query)
+            except QueryError as err:
+                raise RequestError(400, str(err)) from err
+        if parts == ["data", "series"]:
+            return series_view(rt, export_view(rt)["otlp"])
+        if parts == ["export"]:
+            return export_view(rt)
     elif method == "POST":
         if parts == ["devices", "scan"]:
             return scan_network(rt, body)

@@ -34,6 +34,8 @@ def test_expected_files(site):
         "static/suggestions.js",
         "static/savings.js",
         "static/savings.css",
+        "static/data.js",
+        "static/data.css",
         "static/house.js",
         "static/house.css",
         "static/guide.js",
@@ -65,6 +67,7 @@ def test_static_assets_have_no_root_relative_urls(site):
         "devices.js",
         "suggestions.js",
         "savings.js",
+        "data.js",
         "demo.js",
         "demo-worker.js",
     ):

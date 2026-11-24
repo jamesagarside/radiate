@@ -65,6 +65,10 @@ def main() -> None:
     if opts.get("elastic_url"):
         env["RADIATE_ELASTIC_URL"] = opts["elastic_url"]
         env["RADIATE_ELASTIC_API_KEY"] = opts.get("elastic_api_key") or ""
+    if opts.get("otlp_endpoint"):
+        # The house file's export.otlp section, if it has one, wins over these.
+        env["RADIATE_OTLP_ENDPOINT"] = opts["otlp_endpoint"]
+        env["RADIATE_OTLP_API_KEY"] = opts.get("otlp_api_key") or ""
     announce(token)
     args = ["radiate", "serve", "--port", str(PORT)]
     if opts.get("demo", True):

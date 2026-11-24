@@ -66,6 +66,7 @@ from radiate.core import (
 )
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
 from radiate.core.decide import reset_learned
+from radiate.core.history import compact_actions, tick_data
 from radiate.core.outdoor import (
     DEFAULT_STALE_AFTER_S,
     OutdoorChoice,
@@ -78,11 +79,14 @@ from radiate.core.outdoor import (
 from radiate.core.persist import VERSION as ENGINE_VERSION
 from radiate.core.persist import dump_state, first_start_state, load_state, saved_version
 from radiate.core.provenance import Provenance
+from radiate.core.series import observed_values, tick_values
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.server import layout
 from radiate.server.savings import DailyHistory, day_estimate, savings_view
 
 LOG = logging.getLogger(__name__)
+INDEX_CHUNK = 200  # ticks the raw data index reads at a time while it catches up
+EXPORT_ERROR_LOG_S = 3600.0
 
 
 class Driver(Protocol):
@@ -181,6 +185,7 @@ class Runtime:
     )
     listeners: list[asyncio.Queue] = field(default_factory=list)
     exporter: object | None = None  # radiate.export.elastic.ElasticExporter
+    otlp: object | None = None  # radiate.export.otlp.OtlpExporter
     store: object | None = None  # radiate.server.store.Store; None keeps state in memory
     save_every_s: float = 300.0
     wall: Callable[[], float] = field(default=lambda: time.time())  # Unix time
@@ -226,6 +231,8 @@ class Runtime:
     _task: asyncio.Task | None = None
     # Learning notes, oldest first: {"at" (Unix s), "code", "message", "room_id"}.
     learning_notes: list[dict] = field(default_factory=list)
+    _index_task: asyncio.Task | None = None
+    _otlp_error_at: float | None = None
 
     def __post_init__(self) -> None:
         self.state = EngineState.new(self.cfg)
@@ -302,6 +309,7 @@ class Runtime:
 
             # The start entry records exactly how this state was built, for replay.
             self.recorder = Recorder(history, int(wall * 1000), now, wall, data, elapsed)
+            self.recorder.index = self._open_index(history)
         return problems
 
     def _keep_newer(self, data: object, saved_wall: float) -> None:
@@ -336,6 +344,16 @@ class Runtime:
             return History(self.store, float(days))
         except Exception as err:  # history is a convenience: never stop the server
             LOG.warning("history: cannot open: %s", err)
+            return None
+
+    def _open_index(self, history):
+        """The raw data index of the history (radiate.server.data), or None."""
+        from radiate.server.data import SeriesIndex
+
+        try:
+            return SeriesIndex(self.store, history)
+        except Exception as err:  # raw data is a convenience: never stop the server
+            LOG.warning("raw data: cannot open the index: %s", err)
             return None
 
     def _bootstrap(self, history, data: object, wall: float) -> object:
@@ -1260,14 +1278,18 @@ class Runtime:
             self.note_home_evidence("shower")
         recorder = self.recorder
         compact = recorder.compact(actions) if recorder is not None else None
+        if compact is None and self.otlp is not None:
+            compact = self._compact(actions)
         await self.driver.apply(actions)
         driver_alerts = getattr(self.driver, "alerts", None)
         extra = driver_alerts() if callable(driver_alerts) else []
         if self.outdoor is not None and self.outdoor.alert is not None:
             extra.append(self.outdoor.alert)
         actions.alerts.extend(extra)
+        wall = self.wall()
+        observed = self._observed() if compact is not None else None
         if recorder is not None:
-            recorder.record(self.wall(), snap, compact, extra, self.state, snap.now)
+            recorder.record(wall, snap, compact, extra, self.state, snap.now, observed)
         if self.store is not None and (
             self._saved_at is None or now - self._saved_at >= self.save_every_s
         ):
@@ -1304,6 +1326,8 @@ class Runtime:
                 self._log(now, r)
                 logged.append((r.code, r.message, r.room_id))
         self._alert_keys = keys
+        if self.otlp is not None:
+            self._export_otlp(wall, snap, compact, observed, logged)
         if self.exporter is None and not self.listeners:
             return actions  # nobody to tell; the browser demo warms up much faster
         payload = self.describe()
@@ -1317,6 +1341,53 @@ class Runtime:
                     q.get_nowait()
             q.put_nowait(payload)
         return actions
+
+    def _compact(self, actions: Actions) -> dict | None:
+        try:
+            return compact_actions(actions)
+        except Exception as err:  # the export is a convenience: never stop the tick
+            self._otlp_error(err)
+            return None
+
+    def _observed(self) -> dict | None:
+        """Values recorded for raw data and the OpenTelemetry export beside the snapshot
+        and actions: targets, calling, the burner and the people counts."""
+        try:
+            targets = {
+                rc.id: (rs.target, rs.calling)
+                for rc in self.cfg.rooms
+                if (rs := self.state.rooms.get(rc.id)) is not None
+            }
+            return observed_values(
+                targets, self.driver.telemetry(), len(self.people), len(self.away)
+            )
+        except Exception as err:
+            LOG.debug("observed values skipped: %s", err)
+            return None
+
+    def _export_otlp(
+        self,
+        wall: float,
+        snap: Snapshot,
+        compact: dict | None,
+        observed: dict | None,
+        logged: list[tuple[str, str, str | None]],
+    ) -> None:
+        """Queue this tick for the OpenTelemetry export. Never stops the tick."""
+        try:
+            values: dict[str, float] = {}
+            if compact is not None:
+                acts = {**compact, "observed": observed} if observed else compact
+                values = tick_values(tick_data(snap, acts))
+            self.otlp.record(wall, values, logged)
+        except Exception as err:
+            self._otlp_error(err)
+
+    def _otlp_error(self, err: Exception) -> None:
+        t = time.monotonic()
+        if self._otlp_error_at is None or t - self._otlp_error_at >= EXPORT_ERROR_LOG_S:
+            self._otlp_error_at = t
+            LOG.warning("OpenTelemetry export: tick not queued: %s", err)
 
     def _day_estimate(self, summary: dict) -> dict | None:
         """The savings figures for the day that just closed, for the exporter. Never
@@ -1354,14 +1425,32 @@ class Runtime:
             await self.step()
             await asyncio.sleep(max(0.0, interval_s - (time.monotonic() - started)))
 
+    async def index_raw_data(self) -> None:
+        """Keep the raw data index up to date, in small chunks so the loop never waits."""
+        while True:
+            index = getattr(self.recorder, "index", None)
+            if index is None:
+                return
+            try:
+                n = index.catch_up(INDEX_CHUNK)
+            except Exception as err:  # raw data is a convenience: never stop the server
+                LOG.warning("raw data: indexing failed: %s", err)
+                await asyncio.sleep(600)
+                continue
+            await asyncio.sleep(0.05 if n >= INDEX_CHUNK else 30.0)
+
     def start(self, interval_s: float) -> None:
-        self._task = asyncio.get_running_loop().create_task(self.run(interval_s))
+        loop = asyncio.get_running_loop()
+        self._task = loop.create_task(self.run(interval_s))
+        if getattr(self.recorder, "index", None) is not None:
+            self._index_task = loop.create_task(self.index_raw_data())
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+        for task in (self._task, self._index_task):
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         self.save()
 
     # --- views ---------------------------------------------------------------------------

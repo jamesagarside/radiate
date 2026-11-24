@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="static/guide.css">
   <link rel="stylesheet" href="static/savings.css">
 <link rel="stylesheet" href="static/settings.css">
+  <link rel="stylesheet" href="static/data.css">
 </head>
 <body>
   <header class="top">
@@ -40,6 +41,7 @@
     <a href="#suggestions" class="view-tab" data-view="suggestions" hidden>Suggestions<span class="view-count" id="suggestions-count" hidden></span></a>
     <a href="#savings" class="view-tab" data-view="savings" hidden>Savings</a>
     <a href="#settings" class="view-tab" data-view="settings" hidden>Settings</a>
+    <a href="#data" class="view-tab" data-view="data" hidden>Raw data</a>
     <a href="#guide" class="view-tab" data-view="guide" hidden>Guide</a>
   </nav>
 
@@ -313,6 +315,91 @@
     </div>
   </section>
 
+  <section class="data-view" id="data" aria-labelledby="data-h" hidden>
+    <div class="devices-head">
+      <h2 id="data-h" tabindex="-1">Raw data</h2>
+      <p class="devices-summary" id="data-summary" aria-live="polite">Loading raw data…</p>
+      <p class="help-line">Every reading Radiate records, a minute apart, to search, chart and download. <a class="help-link" href="#guide/raw-data">What each reading means</a></p>
+    </div>
+    <p class="rd-note" id="data-note" role="status" hidden></p>
+
+    <div class="rd-body" id="data-body" hidden>
+      <section class="card rd-plate rd-query" aria-labelledby="data-query-h">
+        <h3 class="rd-h" id="data-query-h">Find a reading</h3>
+        <div class="rd-search">
+          <label for="data-search">Search</label>
+          <input id="data-search" type="search" autocomplete="off" spellcheck="false" placeholder="Lounge humidity, burner, outdoor" aria-describedby="data-search-help" aria-controls="data-results">
+          <p class="rd-help" id="data-search-help">A room or a reading. Pick a match to show it.</p>
+          <ul class="rd-results" id="data-results" aria-label="Matching readings" hidden></ul>
+        </div>
+        <form class="rd-form" id="data-form" onsubmit="return false">
+          <div class="rd-field"><label for="data-metric">Reading</label><select id="data-metric"></select></div>
+          <div class="rd-field"><label for="data-room">Room</label><select id="data-room"></select></div>
+          <div class="rd-field rd-range rd-wide">
+            <span class="rd-label" id="data-range-l">Time</span>
+            <div class="seg" role="radiogroup" aria-labelledby="data-range-l" id="data-range">
+              <button type="button" role="radio" data-range="6h" aria-checked="false">6 h</button>
+              <button type="button" role="radio" data-range="24h" aria-checked="true">24 h</button>
+              <button type="button" role="radio" data-range="7d" aria-checked="false">7 days</button>
+              <button type="button" role="radio" data-range="30d" aria-checked="false">30 days</button>
+            </div>
+          </div>
+          <div class="rd-field rd-wide"><label for="data-from">From</label><input id="data-from" type="datetime-local"></div>
+          <div class="rd-field rd-wide"><label for="data-to">To</label><input id="data-to" type="datetime-local"></div>
+          <div class="rd-field rd-wide">
+            <label for="data-step">One point every</label>
+            <select id="data-step">
+              <option value="auto">Automatic</option>
+              <option value="60">1 min</option>
+              <option value="300">5 min</option>
+              <option value="900">15 min</option>
+              <option value="3600">1 h</option>
+              <option value="21600">6 h</option>
+              <option value="86400">1 day</option>
+            </select>
+          </div>
+        </form>
+        <p class="rd-meta" id="data-meta" aria-live="polite"></p>
+        <div class="rd-downloads" id="data-downloads" hidden>
+          <button type="button" class="btn" id="data-csv">Download CSV</button>
+          <button type="button" class="btn" id="data-json">Download JSON</button>
+          <p id="data-dl-status" role="status"></p>
+        </div>
+      </section>
+
+      <section class="card rd-plate rd-chart-plate" aria-labelledby="data-chart-h">
+        <div class="rd-toolbar">
+          <h3 class="rd-h" id="data-chart-h">Raw data</h3>
+          <button type="button" class="btn" id="data-table-toggle" aria-pressed="false" aria-controls="data-table-wrap">Show as table</button>
+        </div>
+        <p class="rd-stats-for" id="data-stats-for" hidden></p>
+        <dl class="stats rd-stats" id="data-stats"></dl>
+        <div class="rd-chart-wrap" id="data-chart-wrap">
+          <div class="rd-chart" id="data-chart" role="img" tabindex="0"></div>
+          <p class="rd-readout" id="data-readout" aria-live="polite"></p>
+        </div>
+        <ul class="rd-legend" id="data-legend" aria-label="Show in ink" hidden></ul>
+        <p class="muted" id="data-empty" hidden>Nothing recorded for this in the time chosen. Try a longer time or another reading.</p>
+        <div class="rd-table-wrap" id="data-table-wrap" hidden>
+          <table class="rd-table">
+            <caption class="rd-table-note" id="data-table-note"></caption>
+            <thead><tr><th scope="col">Time</th><th scope="col">Reading</th><th scope="col">Value</th><th scope="col" class="rd-range-col">Lowest</th><th scope="col" class="rd-range-col">Highest</th></tr></thead>
+            <tbody id="data-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card rd-plate rd-export" id="data-export" aria-labelledby="data-export-h">
+        <div class="rd-toolbar">
+          <h3 class="rd-h" id="data-export-h">OpenTelemetry export</h3>
+          <span class="badge" id="data-export-badge"></span>
+        </div>
+        <p id="data-export-line" aria-live="polite"></p>
+        <dl class="rd-export-list" id="data-export-list" hidden></dl>
+      </section>
+    </div>
+  </section>
+
   <section class="guide-view" id="guide" aria-labelledby="guide-h" hidden>
     <div class="devices-head">
       <h2 id="guide-h" tabindex="-1">Guide</h2>
@@ -337,6 +424,7 @@
           <li><a href="#guide/suggestions">Suggestions</a></li>
           <li><a href="#guide/savings">Savings</a></li>
           <li><a href="#guide/settings">Settings</a></li>
+          <li><a href="#guide/raw-data">Raw data and exporting it</a></li>
           <li><a href="#guide/alerts">Alerts</a></li>
           <li><a href="#guide/problems">When something goes wrong</a></li>
           <li><a href="#guide/home-assistant">Home Assistant</a></li>
@@ -562,6 +650,20 @@
           </dl>
           <p>Litres come from the time the boiler was called for heat, times the burner's nozzle rating. The boiler's own thermostat switches the burner off for spells within that time, so the litres read high: they are an upper bound until the burner itself is measured. The percentage saved still holds, as both sides read high by the same factor.</p>
           <p>Every figure says "about" because it is an estimate. Radiate doesn't project a year from a few weeks, and it needs an outdoor sensor and the boiler's nozzle rating to estimate at all.</p>
+        </section>
+        <section class="g-sec" id="g-raw-data" aria-labelledby="g-raw-data-h">
+          <h3 class="section-h" id="g-raw-data-h" tabindex="-1">Raw data and exporting it</h3>
+          <p>The Raw data tab shows every reading Radiate records, once a minute, for as long as the house file keeps its history (14 days unless <code>house.history_days</code> says otherwise). Search for a room or a reading, pick a time, and the chart and table show it. Download CSV or JSON to open it in a spreadsheet or another tool.</p>
+          <p>Over a long time each point is an average: every 5 minutes for a day, every hour for a month. The band around the line runs from the lowest to the highest reading within each point. You can choose the step under "One point every"; a very fine step over a long time is made coarser, so the page stays quick.</p>
+          <dl class="g-terms g-words">
+            <div><dt>Temperature</dt><dd>The room sensor's reading. Valve temperature is the TRV's own sensor, at the radiator, which reads warmer while it heats.</dd></div>
+            <div><dt>Setpoint and target</dt><dd>The setpoint is what the schedule, or a hold, asks for. The target is what Radiate is heating to now, which can be lower while a room isn't in use, or higher while it warms up early.</dd></div>
+            <div><dt>Opening limit</dt><dd>How far Radiate lets the valve open. "Reported" is what the valve says it holds, which lags a change by a minute or two.</dd></div>
+            <div><dt>On or off readings</dt><dd>Relays, the burner, calling for heat and open windows. Over a step wider than a minute they read as the share of the time they were on.</dd></div>
+            <div><dt>Boiler state</dt><dd>Idle, lead (opening valves before the burner), firing or rest, as the boiler guard has it.</dd></div>
+            <div><dt>People home and away</dt><dd>How many people count as home or away. Only the counts are kept, never who.</dd></div>
+          </dl>
+          <p>Radiate can also send these readings, and every decision and alert, to an OpenTelemetry collector over OTLP/HTTP, such as Elastic's managed OTLP endpoint. Add an <code>export.otlp</code> section to the house file with the endpoint and an API key. The OpenTelemetry export plate on the Raw data tab says when it last sent, what is waiting, and any error. While the collector can't be reached, Radiate keeps up to 7 days of readings and sends them once it can; if the queue fills, the oldest go first and the plate counts them.</p>
         </section>
 
         <section class="g-sec" id="g-settings" aria-labelledby="g-settings-h">
