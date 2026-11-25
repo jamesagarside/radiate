@@ -287,7 +287,7 @@ main { max-width: 1340px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .stats .sub:empty { display: none; }
 
 /* Rooms */
-.rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.rooms { display: grid; align-items: start; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .room { padding: 14px 16px; display: grid; gap: 10px; align-content: start; }
 /* Rooms are focused from the house view; the ring sits inside so the clip keeps it. */
 .room:focus { outline: 2px solid var(--cool); outline-offset: -2px; }
@@ -375,7 +375,7 @@ main { max-width: 1340px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .learned > summary:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
 .learned-tag { font-family: var(--body); font-size: 0.72rem; font-weight: 600; padding: 2px 7px; background: var(--cool-soft); color: var(--cool); }
 .learned-body { display: grid; gap: 8px; padding-top: 8px; font-size: 0.84rem; }
-.learned-status { color: var(--cool); font-weight: 600; }
+.learned-status { color: var(--muted); font-weight: 600; }
 .learned-rows { margin: 0; display: grid; font-variant-numeric: tabular-nums; }
 .learned-rows > div { padding: 6px 0; border-top: 1px solid var(--line); }
 .learned-rows > div:first-child { border-top: 0; padding-top: 0; }
