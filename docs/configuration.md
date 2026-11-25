@@ -642,6 +642,7 @@ export:
 | `dataset` | `radiate` | Sent as `data_stream.dataset`, which Elastic routes by. Empty to leave it out |
 | `daily_metrics` | `true` | Send each closed day's summary and savings (`radiate.daily.*`) once a day. Needs `metrics` in `signals`. The running totals go every minute either way |
 | `daily_timestamp` | `end_of_day` | When daily figures are timed. `end_of_day`: the day's last second in the house's time zone, so a one-day date histogram puts each figure on the day it covers. `day_close`: when Radiate closed the day, a minute or so after midnight, for a backend that drops points older than when they arrive. See the [telemetry schema](telemetry.md#once-a-day) |
+| `security` | `true` | Send the [security log](deployment.md#security-log)'s events (`radiate.security.*`), with usernames and client addresses. `false` keeps them out of the export; Radiate still records them in its own security log. Needs `logs` in `signals` |
 
 ### balancing
 
