@@ -130,6 +130,9 @@ def apply_live(rt: Runtime, site: SiteConfig) -> None:
     rt.fire_flag_max_s = site.fire_flag_s
     rt.outdoor_source = site.outdoor_source
     rt.outdoor_stale_after_s = site.outdoor_stale_after_s
+    security = getattr(rt, "security", None)
+    if security is not None:  # the security log (ADR-0008)
+        security.audit_controls = site.auth.audit_controls
     hook = getattr(rt.driver, "replace_settings", None)
     if callable(hook):
         hook(rt.cfg, site)

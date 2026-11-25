@@ -20,6 +20,7 @@ const WHAT = {
   "radiate.security.lockout.ended": "Sign-in unlocked",
   "radiate.security.user.changed": "User changed",
   "radiate.security.config.changed": "Changed",
+  "radiate.security.control.used": "Control used",
   "radiate.security.login.config": "Started",
 };
 const HOW = { password: "password", oidc: "single sign-on", saml: "SAML", token: "API token", ingress: "Home Assistant", cli: "command line", session: "signed in", open: "open server" };

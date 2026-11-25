@@ -19,9 +19,11 @@ into one record with `radiate.security.count`, so a flood of bad requests, or of
 made-up usernames, can't flood the log.
 
 A refused password sign-in for a name that matches no account records a keyed hash of
-the name, `unknown:<16 hex>`, never the text: people often type their password in the
-username box. The key (`KEY_FILE`, in the data directory) is made once per install,
-so the same mistyped name gets the same hash and repeats can still be counted.
+the name in OpenTelemetry's `user.hash` (16 hex digits), never the text: people often
+type their password in the username box. The table's `user` column, and so the API
+and the web UI, show it as `unknown:<hash>`. The key (`KEY_FILE`, in the data
+directory) is made once per install, so the same mistyped name gets the same hash and
+repeats can still be counted.
 
 Recording never raises: a full disk or a locked database costs the audit record and
 one warning, never a request or a tick.
@@ -86,10 +88,13 @@ _FREE_TEXT = {
     "user.name",
     "user.target.name",
     "url.path",
-    "source.address",
+    "client.address",
+    "user_agent.original",
     "radiate.config.key",
     "radiate.config.before",
     "radiate.config.after",
+    "radiate.control.value",
+    "radiate.person.id",
 }
 MAX_CHANGES = 20  # household settings recorded one by one; past this, one record names all
 
@@ -242,6 +247,8 @@ class SecurityLog:
         self.monotonic = monotonic
         # Where OpenTelemetry records go: `Runtime.telemetry_event`, set by the server.
         self.sink: Callable[[dict], None] | None = None
+        # `auth.audit_controls`: also record day-to-day controls. Changed live.
+        self.audit_controls = True
         self._folds: dict[tuple, _Fold] = {}
         self._pruned_at: float | None = None
         self._error_at: float | None = None
@@ -262,13 +269,17 @@ class SecurityLog:
         """A log kept in memory, for the demo without a data directory and for tests."""
         return cls(sqlite3.connect(":memory:", isolation_level=None), retention_days)
 
-    def pseudonym(self, name: str) -> str:
-        """What a sign-in records for a username that matches no account: `unknown:`
-        and 16 hex digits of HMAC-SHA256 under the install's key. The same name always
-        gives the same value on this install, and without the key it can't be reversed,
-        even for a short name."""
+    def user_hash(self, name: str) -> str:
+        """What a sign-in records, as `user.hash`, for a username that matches no
+        account: 16 hex digits of HMAC-SHA256 under the install's key. The same name
+        always gives the same value on this install, and without the key it can't be
+        reversed, even for a short name."""
         digest = hmac.new(self._key, name.encode("utf-8", "replace"), hashlib.sha256)
-        return UNKNOWN_PREFIX + digest.hexdigest()[:PSEUDONYM_HEX]
+        return digest.hexdigest()[:PSEUDONYM_HEX]
+
+    def pseudonym(self, name: str) -> str:
+        """How the table, the API and the web UI show such a name: `unknown:<hash>`."""
+        return UNKNOWN_PREFIX + self.user_hash(name)
 
     # --- recording ---------------------------------------------------------------------
 
@@ -293,7 +304,7 @@ class SecurityLog:
         if any(a.key == telemetry.SECURITY_COUNT.key for a in defn.attributes):
             a = rec["a"]
             # Not by username or path: an attacker can vary those at no cost.
-            key = (name, action, a.get("error.type"), a.get("source.address"))
+            key = (name, action, a.get("error.type"), a.get("client.address"))
             fold = self._folds.get(key)
             if fold is not None and now - fold.started < REPEAT_WINDOW_S:
                 fold.count += 1
@@ -333,6 +344,8 @@ class SecurityLog:
         a = rec["a"]
         severity = telemetry.EVENT_BY_NAME[rec["e"]].severity
         user = a.get("user.name") or a.get("user.target.name")
+        if not user and a.get("user.hash"):
+            user = UNKNOWN_PREFIX + str(a["user.hash"])
         if self.db is not None:
             try:
                 self.db.execute(
@@ -345,7 +358,7 @@ class SecurityLog:
                         a.get(telemetry.EVENT_OUTCOME.key, ""),
                         severity,
                         user,
-                        a.get("source.address"),
+                        a.get("client.address"),
                         rec["m"],
                         json.dumps(a, separators=(",", ":")),
                         self.origin,

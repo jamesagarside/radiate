@@ -87,7 +87,14 @@ def test_no_attribute_could_carry_a_person_or_a_place():
 
 
 def test_only_security_events_identify_people():
-    personal = {"user.name", "user.target.name", "source.address"}
+    personal = {
+        "user.name",
+        "user.hash",
+        "user.target.name",
+        "client.address",
+        "user_agent.original",
+        "radiate.person.id",
+    }
     for e in EVENTS:
         keys = {a.key for a in e.attributes}
         if e.name.startswith("radiate.security."):
@@ -287,8 +294,9 @@ def _every_security_event() -> list[dict]:
     who = {
         "user.name": "alice",
         "user.roles": ["admin"],
-        "source.address": "192.0.2.10",
+        "client.address": "192.0.2.10",
         "radiate.auth.method": "session",
+        "user_agent.original": "Mozilla/5.0 (X11; Linux x86_64)",
     }
     req = {"http.request.method": "PUT", "url.path": "/api/v1/layout"}
     rec = t.security_record
@@ -305,7 +313,7 @@ def _every_security_event() -> list[dict]:
             "Sign-in refused for bob: wrong password",
             {
                 "user.name": "bob",
-                "source.address": "192.0.2.10",
+                "client.address": "192.0.2.10",
                 "radiate.auth.method": "password",
                 "error.type": "bad_password",
                 "radiate.security.count": 3,
@@ -327,7 +335,7 @@ def _every_security_event() -> list[dict]:
             t.SECURITY_REQUEST_REFUSED,
             "request.refused",
             "Request refused: wrong API token",
-            {"source.address": "192.0.2.10", "error.type": "bad_token", **req},
+            {"client.address": "192.0.2.10", "error.type": "bad_token", **req},
         ),
         rec(
             t.SECURITY_ACCESS_DENIED,
@@ -374,6 +382,18 @@ def _every_security_event() -> list[dict]:
             },
         ),
         rec(
+            t.SECURITY_CONTROL_USED,
+            "setpoint.held",
+            "Lounge held at 21.5° by alice (admin)",
+            {
+                **who,
+                **req,
+                "radiate.control.kind": "setpoint",
+                "radiate.control.value": "21.5",
+                "radiate.room.id": "lounge",
+            },
+        ),
+        rec(
             t.SECURITY_LOGIN_CONFIG,
             "login.config",
             "Login on: password; API token set",
@@ -399,7 +419,7 @@ def test_a_security_record_keeps_only_its_own_attributes():
             "error.type": "bad_password",
             "password": "hunter2-hunter2",
             "radiate.settings.paths": ["x"],
-            "source.address": None,
+            "client.address": None,
         },
     )
     assert rec["a"] == {

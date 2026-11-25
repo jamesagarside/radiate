@@ -132,6 +132,7 @@ def _start_security(runtime, store, auth_cfg):
     # The key for hashing usernames that match no account lives beside radiate.db.
     data_dir = None if str(store.path) == ":memory:" else store.path.parent
     security = SecurityLog(store.db, auth_cfg.audit_days, key=load_key(data_dir))
+    security.audit_controls = auth_cfg.audit_controls
     runtime.security = security
     return security
 

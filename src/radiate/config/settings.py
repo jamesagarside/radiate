@@ -963,6 +963,16 @@ SECTIONS: list[Section] = [
                 optional=True,
             ),
             Setting(
+                "auth.audit_controls",
+                "Log day-to-day controls",
+                "bool",
+                "Also record setpoint holds, Fire lit, hot-water boosts and Away or Home in "
+                "the security log, with who and what. Never where anyone is. On by default.",
+                default=True,
+                restart=False,
+                optional=True,
+            ),
+            Setting(
                 "auth.oidc.label",
                 "Single sign-on button",
                 "text",

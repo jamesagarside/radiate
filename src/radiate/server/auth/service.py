@@ -17,7 +17,7 @@ from aiohttp import web
 
 from radiate.config.auth import AuthConfig
 from radiate.export import telemetry
-from radiate.server.security import SecurityLog
+from radiate.server.security import UNKNOWN_PREFIX, SecurityLog
 
 from .accounts import Accounts, Session, normalise_username
 from .limiter import LoginLimiter
@@ -68,6 +68,22 @@ def forwarded_client(request: web.BaseRequest, proxies: tuple) -> str:
         if not _trusted(hop, proxies):
             return hop
     return remote
+
+
+def user_agent(request: web.BaseRequest) -> str | None:
+    """The request's User-Agent, for `user_agent.original` (cleaned and cut short by the
+    security log)."""
+    return request.headers.get("User-Agent") or None
+
+
+def named(name: str | None) -> dict:
+    """Who a sign-in names, as attributes: `user.name` for an account, or `user.hash`
+    for `unknown:<hash>` (`AuthService.attempted_name`), never both."""
+    if not name:
+        return {}
+    if name.startswith(UNKNOWN_PREFIX):
+        return {"user.hash": name[len(UNKNOWN_PREFIX) :]}
+    return {"user.name": name}
 
 
 class AuthSetupError(RuntimeError):
@@ -194,8 +210,9 @@ class AuthService:
             {
                 "user.name": username,
                 "user.roles": [role],
-                "source.address": self.client_ip(request),
+                "client.address": self.client_ip(request),
                 "radiate.auth.method": how,
+                "user_agent.original": user_agent(request),
             },
         )
         return session
@@ -203,10 +220,10 @@ class AuthService:
     # --- the security log ----------------------------------------------------------
 
     def attempted_name(self, name: str) -> str:
-        """What a refused password sign-in records as `user.name`: the account's
-        username when `name` matches one, else the security log's keyed hash
-        (`unknown:...`), as a name that matches nothing is often a password typed in
-        the wrong box. The raw text is never recorded (ADR-0008)."""
+        """Who a refused password sign-in names: the account's username when `name`
+        matches one, else the security log's keyed hash as `unknown:<hash>`, as a name
+        that matches nothing is often a password typed in the wrong box. The raw text
+        is never recorded (ADR-0008). `named` turns it into attributes."""
         try:
             user = self.accounts.user(normalise_username(name))
         except ValueError:
@@ -228,9 +245,10 @@ class AuthService:
             "login",
             f"Sign-in refused{who}: {why}",
             {
-                "user.name": username,
-                "source.address": self.client_ip(request),
+                **named(username),
+                "client.address": self.client_ip(request),
                 "radiate.auth.method": METHOD_NAMES.get(method, method),
+                "user_agent.original": user_agent(request),
                 "error.type": code if code in telemetry.LOGIN_ERRORS else "bad_claims",
             },
         )
@@ -242,7 +260,10 @@ class AuthService:
             if scope == "username":
                 value = self.attempted_name(value)
             attrs = {"radiate.lockout.scope": scope}
-            attrs["user.name" if scope == "username" else "source.address"] = value
+            if scope == "username":
+                attrs.update(named(value))
+            else:
+                attrs["client.address"] = value
             self.security.record(
                 telemetry.SECURITY_LOCKOUT_STARTED,
                 "lockout.started",
@@ -280,8 +301,9 @@ class AuthService:
                 {
                     "user.name": session.username,
                     "user.roles": [session.role],
-                    "source.address": self.client_ip(request),
+                    "client.address": self.client_ip(request),
                     "radiate.auth.method": METHOD_NAMES.get(session.method, session.method),
+                    "user_agent.original": user_agent(request),
                 },
             )
 

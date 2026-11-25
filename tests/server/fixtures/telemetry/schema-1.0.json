@@ -198,6 +198,10 @@
     },
     "radiate.security.access.denied": {
       "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
         "error.type": {
           "required": true,
           "type": "string",
@@ -274,10 +278,6 @@
           "type": "int",
           "unit": "{event}"
         },
-        "source.address": {
-          "required": false,
-          "type": "string"
-        },
         "url.path": {
           "required": false,
           "type": "string"
@@ -289,12 +289,20 @@
         "user.roles": {
           "required": false,
           "type": "string[]"
+        },
+        "user_agent.original": {
+          "required": false,
+          "type": "string"
         }
       },
       "severity": "WARN"
     },
     "radiate.security.config.changed": {
       "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
         "event.action": {
           "required": true,
           "type": "string"
@@ -379,7 +387,104 @@
           "required": false,
           "type": "string[]"
         },
-        "source.address": {
+        "url.path": {
+          "required": false,
+          "type": "string"
+        },
+        "user.name": {
+          "required": false,
+          "type": "string"
+        },
+        "user.roles": {
+          "required": false,
+          "type": "string[]"
+        },
+        "user_agent.original": {
+          "required": false,
+          "type": "string"
+        }
+      },
+      "severity": "INFO"
+    },
+    "radiate.security.control.used": {
+      "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
+        "event.action": {
+          "required": true,
+          "type": "string"
+        },
+        "event.category": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "authentication",
+            "web",
+            "iam",
+            "configuration"
+          ]
+        },
+        "event.outcome": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "success",
+            "failure"
+          ]
+        },
+        "event.type": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "start",
+            "end",
+            "info",
+            "access",
+            "change",
+            "creation",
+            "deletion"
+          ]
+        },
+        "http.request.method": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.auth.method": {
+          "required": false,
+          "type": "string",
+          "values": [
+            "password",
+            "oidc",
+            "saml",
+            "session",
+            "token",
+            "ingress",
+            "open",
+            "cli"
+          ]
+        },
+        "radiate.control.kind": {
+          "required": true,
+          "type": "string",
+          "values": [
+            "setpoint",
+            "fire",
+            "boost",
+            "away",
+            "home"
+          ]
+        },
+        "radiate.control.value": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.person.id": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.room.id": {
           "required": false,
           "type": "string"
         },
@@ -394,12 +499,20 @@
         "user.roles": {
           "required": false,
           "type": "string[]"
+        },
+        "user_agent.original": {
+          "required": false,
+          "type": "string"
         }
       },
       "severity": "INFO"
     },
     "radiate.security.lockout.ended": {
       "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
         "event.action": {
           "required": true,
           "type": "string"
@@ -443,7 +556,7 @@
             "address"
           ]
         },
-        "source.address": {
+        "user.hash": {
           "required": false,
           "type": "string"
         },
@@ -456,6 +569,10 @@
     },
     "radiate.security.lockout.started": {
       "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
         "event.action": {
           "required": true,
           "type": "string"
@@ -504,7 +621,7 @@
             "address"
           ]
         },
-        "source.address": {
+        "user.hash": {
           "required": false,
           "type": "string"
         },
@@ -517,6 +634,10 @@
     },
     "radiate.security.login": {
       "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
         "event.action": {
           "required": true,
           "type": "string"
@@ -566,10 +687,6 @@
             "cli"
           ]
         },
-        "source.address": {
-          "required": false,
-          "type": "string"
-        },
         "user.name": {
           "required": true,
           "type": "string"
@@ -577,6 +694,10 @@
         "user.roles": {
           "required": true,
           "type": "string[]"
+        },
+        "user_agent.original": {
+          "required": false,
+          "type": "string"
         }
       },
       "severity": "INFO"
@@ -644,6 +765,10 @@
     },
     "radiate.security.login.failed": {
       "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
         "error.type": {
           "required": true,
           "type": "string",
@@ -719,11 +844,15 @@
           "type": "int",
           "unit": "{event}"
         },
-        "source.address": {
+        "user.hash": {
           "required": false,
           "type": "string"
         },
         "user.name": {
+          "required": false,
+          "type": "string"
+        },
+        "user_agent.original": {
           "required": false,
           "type": "string"
         }
@@ -732,6 +861,10 @@
     },
     "radiate.security.logout": {
       "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
         "event.action": {
           "required": true,
           "type": "string"
@@ -781,10 +914,6 @@
             "cli"
           ]
         },
-        "source.address": {
-          "required": false,
-          "type": "string"
-        },
         "user.name": {
           "required": true,
           "type": "string"
@@ -792,12 +921,20 @@
         "user.roles": {
           "required": false,
           "type": "string[]"
+        },
+        "user_agent.original": {
+          "required": false,
+          "type": "string"
         }
       },
       "severity": "INFO"
     },
     "radiate.security.request.refused": {
       "attributes": {
+        "client.address": {
+          "required": false,
+          "type": "string"
+        },
         "error.type": {
           "required": true,
           "type": "string",
@@ -851,11 +988,11 @@
           "type": "int",
           "unit": "{event}"
         },
-        "source.address": {
+        "url.path": {
           "required": false,
           "type": "string"
         },
-        "url.path": {
+        "user_agent.original": {
           "required": false,
           "type": "string"
         }

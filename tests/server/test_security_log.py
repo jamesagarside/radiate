@@ -92,7 +92,7 @@ async def test_a_password_sign_in_and_sign_out(client):
     assert e["outcome"] == "success" and e["severity"] == "INFO" and e["user"] == "alex"
     assert a["event.category"] == "authentication" and a["event.type"] == "start"
     assert a["user.name"] == "alex" and a["user.roles"] == ["admin"]
-    assert a["radiate.auth.method"] == "password" and a["source.address"] == "127.0.0.1"
+    assert a["radiate.auth.method"] == "password" and a["client.address"] == "127.0.0.1"
     r = await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": me["csrf"]})
     assert r.status == 200
     out = last(client.security, telemetry.SECURITY_LOGOUT)
@@ -110,7 +110,10 @@ async def test_a_refused_sign_in_says_why(client, username, password, code):
     assert e["outcome"] == "failure" and e["severity"] == "WARN"
     assert e["attributes"]["error.type"] == code
     if code == "unknown_user":
-        assert e["attributes"]["user.name"] == client.security.pseudonym(username)
+        # OpenTelemetry's user.hash stands for a name that matches no account.
+        assert e["attributes"]["user.hash"] == client.security.user_hash(username)
+        assert "user.name" not in e["attributes"]
+        assert e["user"] == client.security.pseudonym(username)  # unknown:<hash>
     else:
         assert e["attributes"]["user.name"] == username
     assert e["attributes"]["radiate.auth.method"] == "password"
@@ -138,6 +141,7 @@ async def test_an_unknown_username_is_never_recorded_as_typed(rt, caplog):
     for where in (stored, queued, logged):
         assert hashed in where
         assert typed.lower() not in where.lower()
+    assert f'"user.hash": "{login.security.user_hash(typed.lower())}"' in queued
     failed = events(login.security, telemetry.SECURITY_LOGIN_FAILED)
     # The second unknown_user refusal folds into one record, written last.
     assert [e["attributes"]["error.type"] for e in failed] == [
@@ -150,7 +154,8 @@ async def test_an_unknown_username_is_never_recorded_as_typed(rt, caplog):
     assert {e["user"] for i, e in enumerate(failed) if i != 2} == {hashed}
     assert failed[2]["user"] == "alex"  # an existing account is named as it is
     lockout = last(login.security, telemetry.SECURITY_LOCKOUT_STARTED)
-    assert lockout["attributes"]["user.name"] == hashed
+    assert lockout["attributes"]["user.hash"] == hashed.removeprefix("unknown:")
+    assert lockout["user"] == hashed
 
 
 def test_the_hash_key_is_kept_per_install(tmp_path):
@@ -206,7 +211,7 @@ async def test_an_address_lockout_names_the_address(rt):
         for name in ("a1", "a2"):
             await c.post("/api/v1/auth/login", json={"username": name, "password": WRONG_PW})
     a = last(login.security, telemetry.SECURITY_LOCKOUT_STARTED)["attributes"]
-    assert a["radiate.lockout.scope"] == "address" and a["source.address"] == "127.0.0.1"
+    assert a["radiate.lockout.scope"] == "address" and a["client.address"] == "127.0.0.1"
     assert "user.name" not in a
 
 
@@ -273,7 +278,7 @@ async def test_a_401_says_what_was_wrong(client, headers, cookie, code):
     e = last(client.security, telemetry.SECURITY_REQUEST_REFUSED)
     a = e["attributes"]
     assert a["error.type"] == code and a["url.path"] == "/api/v1/state"
-    assert a["http.request.method"] == "GET" and a["source.address"] == "127.0.0.1"
+    assert a["http.request.method"] == "GET" and a["client.address"] == "127.0.0.1"
     assert e["action"] == "request.refused" and "user.name" not in a
 
 
@@ -328,7 +333,7 @@ async def test_with_login_off_the_address_respects_trusted_proxies(rt):
         async with TestClient(TestServer(app)) as c:
             await c.get("/api/v1/state", headers={"X-Forwarded-For": "198.51.100.7"})
         a = last(security, telemetry.SECURITY_REQUEST_REFUSED)["attributes"]
-        assert a["source.address"] == expected
+        assert a["client.address"] == expected
 
 
 # --- changes ----------------------------------------------------------------------------------
@@ -470,6 +475,87 @@ async def test_changes_to_the_people_name_no_one(house):
     assert "Somebody Private" not in stored and f"people.{person}" not in stored
 
 
+async def test_day_to_day_controls_say_who_and_what(house):
+    h = await as_user(house, "sam", HOME_PW)
+    pid = house.rt.setup.site.household.people[0].id
+    calls = [
+        ("/api/v1/rooms/bedroom_1/setpoint", {"setpoint": 21.5, "duration_min": 60}),
+        ("/api/v1/rooms/bedroom_1/setpoint", {"setpoint": None}),
+        ("/api/v1/rooms/lounge/fire", {"lit": True}),
+        ("/api/v1/rooms/lounge/fire", {"lit": False}),
+        ("/api/v1/store/boost", {"minutes": 30}),
+        (f"/api/v1/people/{pid}/away", {"until": "2026-11-25T18:00"}),
+        (f"/api/v1/people/{pid}/away", {"until": None}),
+        (f"/api/v1/people/{pid}/home", {}),
+    ]
+    for path, body in calls:
+        r = await house.post(path, json=body, headers=h)
+        assert r.status == 200, (path, await r.text())
+    used = events(house.security, telemetry.SECURITY_CONTROL_USED)
+    assert [(e["action"], e["attributes"]["radiate.control.value"]) for e in used] == [
+        ("setpoint.held", "21.5"),
+        ("setpoint.cleared", "cleared"),
+        ("fire.lit", "lit"),
+        ("fire.out", "out"),
+        ("store.boosted", "30"),
+        ("away.set", "2026-11-25T18:00"),
+        ("away.cleared", "cleared"),
+        ("home.said", "home"),
+    ]
+    for e in used:
+        a = e["attributes"]
+        assert a["user.name"] == "sam" and a["user.roles"] == ["household"]
+        assert e["outcome"] == "success" and e["severity"] == "INFO"
+        assert a["event.category"] == "configuration" and a["event.type"] == "change"
+        assert not {k for k in a if "presence" in k or "location" in k or "geo" in k}
+    assert used[0]["attributes"]["radiate.room.id"] == "bedroom_1"
+    assert used[0]["attributes"]["radiate.control.kind"] == "setpoint"
+    assert used[0]["message"].endswith("held at 21.5° by sam (household)")
+    assert used[5]["attributes"]["radiate.person.id"] == pid
+
+
+async def test_controls_are_not_logged_with_audit_controls_off(house):
+    h = await as_user(house, "sam", HOME_PW)
+    house.security.audit_controls = False
+    r = await house.post("/api/v1/store/boost", json={"minutes": 20}, headers=h)
+    assert r.status == 200
+    assert not events(house.security, telemetry.SECURITY_CONTROL_USED)
+    # Mode changes are configuration, and are logged either way.
+    await house.post("/api/v1/mode", json={"mode": "frost"}, headers=h)
+    assert changes(house.security, "mode.changed")
+
+
+async def test_audit_controls_is_a_live_setting(tmp_path):
+    from radiate.config.settings import setting_for
+    from tests.server.test_settings_api import runtime as settings_runtime
+
+    _, setting = setting_for("auth.audit_controls")
+    assert setting.restart is False and setting.default is True and setting.kind == "bool"
+    rt = settings_runtime(tmp_path)
+    security = SecurityLog.memory()
+    app = create_app(rt, token=TOKEN, security=security)
+    assert security.audit_controls is True
+    async with TestClient(TestServer(app)) as c:
+        r = await c.put(
+            "/api/v1/settings/config",
+            json={"values": {"auth.audit_controls": False}},
+            headers=BEARER,
+        )
+        assert r.status == 200, await r.text()
+        assert security.audit_controls is False  # used at once, no restart
+        r = await c.post("/api/v1/store/boost", json={"minutes": 5}, headers=BEARER)
+        assert r.status == 200
+        assert not events(security, telemetry.SECURITY_CONTROL_USED)
+        r = await c.put(
+            "/api/v1/settings/config",
+            json={"values": {"auth.audit_controls": True}},
+            headers=BEARER,
+        )
+        assert r.status == 200 and security.audit_controls is True
+        await c.post("/api/v1/store/boost", json={"minutes": 5}, headers=BEARER)
+    assert events(security, telemetry.SECURITY_CONTROL_USED)
+
+
 def test_household_changes_are_setting_by_setting():
     from radiate.server.security import Change, household_changes
 
@@ -583,6 +669,53 @@ async def test_security_events_reach_the_export_and_match_the_schema(rt):
     assert "radiate.security.request.refused" in names
 
 
+def test_a_refusal_is_warn_and_success_is_info():
+    """OpenTelemetry severity follows the outcome: WARN (13) for a failure, INFO (9)
+    for a success."""
+    for e in telemetry.SECURITY_EVENTS:
+        outcome = telemetry.SECURITY_KINDS[e.name][2]
+        assert e.severity == ("WARN" if outcome == "failure" else "INFO"), e.name
+
+
+async def test_exported_security_records_follow_opentelemetry(rt):
+    """The OTLP log records: the event name in EventName, never an attribute;
+    severity number and text; client.address, user_agent.original, user.name,
+    http.request.method and url.path from the semantic conventions; the resource's
+    service.name, service.version and service.instance.id."""
+    cfg, _ = parse_export({"otlp": {"endpoint": "http://collector.invalid"}})
+    rt.otlp = OtlpExporter(cfg.otlp, rt.house_id, {})
+    login = service()
+    ua = {"User-Agent": "TestBrowser/1.0"}
+    async with TestClient(TestServer(create_app(rt, token=TOKEN, login=login))) as c:
+        await c.post("/api/v1/auth/login", json={"username": "nobody", "password": WRONG_PW})
+        await sign_in(c)
+        await c.get("/api/v1/state", headers={"Authorization": "Bearer wrong", **ua})
+    await rt.step()
+    request = rt.otlp._request("logs", rt.otlp.queues["logs"].peek(1000))
+    assert check_logs(request) == []
+    resource = {a["key"]: a["value"] for a in request["resourceLogs"][0]["resource"]["attributes"]}
+    assert resource["service.name"] == {"stringValue": "radiate"}
+    assert "service.version" in resource
+    assert resource["service.instance.id"] == {"stringValue": rt.house_id}
+    records = request["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+    security = [r for r in records if r["eventName"].startswith("radiate.security.")]
+    assert security
+    for r in security:
+        keys = {a["key"] for a in r["attributes"]}
+        assert "event.name" not in keys and "source.address" not in keys
+        assert (r["severityNumber"], r["severityText"]) in ((9, "INFO"), (13, "WARN"))
+    by_name = {r["eventName"]: {a["key"]: a["value"] for a in r["attributes"]} for r in security}
+    failed = by_name[telemetry.SECURITY_LOGIN_FAILED]
+    assert "user.hash" in failed and "user.name" not in failed
+    assert failed["client.address"] == {"stringValue": "127.0.0.1"}
+    assert by_name[telemetry.SECURITY_LOGIN]["user.name"] == {"stringValue": "alex"}
+    refused = by_name[telemetry.SECURITY_REQUEST_REFUSED]
+    assert refused["user_agent.original"] == {"stringValue": "TestBrowser/1.0"}
+    assert refused["http.request.method"] == {"stringValue": "GET"}
+    assert refused["url.path"] == {"stringValue": "/api/v1/state"}
+    assert refused["error.type"] == {"stringValue": "bad_token"}
+
+
 # --- folding, bounds, failures ----------------------------------------------------------------
 
 
@@ -593,7 +726,7 @@ def test_repeats_from_one_address_fold_into_one_record():
     )
     sent = []
     security.sink = sent.append
-    attrs = {"source.address": "192.0.2.9", "error.type": "bad_token", "url.path": "/api/v1/x"}
+    attrs = {"client.address": "192.0.2.9", "error.type": "bad_token", "url.path": "/api/v1/x"}
     for i in range(5):
         security.record(
             telemetry.SECURITY_REQUEST_REFUSED,
@@ -652,7 +785,7 @@ def test_a_log_line_is_one_parseable_line():
         'Sign-in refused for x\nevent=forged: "no"',
         {
             "user.name": 'x\nevent=forged "quote"',
-            "source.address": "192.0.2.1",
+            "client.address": "192.0.2.1",
             "radiate.auth.method": "password",
             "error.type": "unknown_user",
         },
@@ -663,7 +796,7 @@ def test_a_log_line_is_one_parseable_line():
         "event=radiate.security.login.failed action=login outcome=failure event.category="
     )
     assert 'user.name="x\\nevent=forged \\"quote\\""' in line
-    assert "source.address=192.0.2.1" in line and line.endswith('"')
+    assert "client.address=192.0.2.1" in line and line.endswith('"')
 
 
 def test_request_text_is_cleaned_before_it_is_stored():

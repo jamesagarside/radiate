@@ -94,6 +94,9 @@ class AuthConfig:
     # How long the security audit log keeps an event (ADR-0008). Used whether or not
     # login is on, as refused API requests are logged too.
     audit_days: float = 90.0
+    # Also record day-to-day controls (setpoint holds, Fire lit, hot-water boost, away
+    # and home) in the security log, with who and what. Applied live.
+    audit_controls: bool = True
     secure_cookie: str = "auto"
     public_url: str | None = None
     trusted_proxies: tuple[str, ...] = ()
@@ -252,6 +255,7 @@ def parse_auth(ctx: Any, raw: dict) -> AuthConfig:
             "session_days",
             "idle_days",
             "audit_days",
+            "audit_controls",
             "secure_cookie",
             "public_url",
             "trusted_proxies",
@@ -265,6 +269,7 @@ def parse_auth(ctx: Any, raw: dict) -> AuthConfig:
     session_days = ctx.number(raw, "session_days", 30, 1, 400, p)
     idle_days = ctx.number(raw, "idle_days", 7, 1, 400, p)
     audit_days = ctx.number(raw, "audit_days", 90, 1, 3650, p)
+    audit_controls = ctx.get(raw, "audit_controls", bool, True, p)
     if idle_days > session_days:
         ctx.err(f"{p}idle_days", "must not be more than session_days")
     secure = ctx.get(raw, "secure_cookie", str, "auto", p)
@@ -289,6 +294,7 @@ def parse_auth(ctx: Any, raw: dict) -> AuthConfig:
         session_days=session_days,
         idle_days=idle_days,
         audit_days=audit_days,
+        audit_controls=bool(audit_controls),
         secure_cookie=secure,
         public_url=public_url,
         trusted_proxies=_proxies(ctx, raw, p),

@@ -16,7 +16,7 @@ from radiate.export import telemetry
 
 from . import bridge
 from .auth import AUTH, IDENTITY, AuthService, Identity, add_routes
-from .auth.service import SESSION_COOKIE, forwarded_client, proxy_networks
+from .auth.service import SESSION_COOKIE, forwarded_client, proxy_networks, user_agent
 from .data import QueryError, data_view, export_view, series_view, to_csv
 from .permissions import ADMIN, HOUSEHOLD_SETTINGS, PUBLIC, allowed, needed_role
 from .runtime import Runtime
@@ -92,7 +92,8 @@ def client_address(request: web.BaseRequest) -> str:
 def _who(request: web.BaseRequest, ident: Identity | None) -> dict:
     """Who made a request, from where and how, for a security record."""
     out = {
-        "source.address": client_address(request),
+        "client.address": client_address(request),
+        "user_agent.original": user_agent(request),
         "http.request.method": request.method,
         "url.path": request.path,
     }
@@ -334,16 +335,67 @@ async def _post(request: web.Request, action, *args, lookup=bridge.room) -> web.
     return web.json_response(result)
 
 
+def _record_control(
+    request: web.BaseRequest,
+    action: str,
+    kind: str,
+    what: str,
+    value: str,
+    room: str | None = None,
+    person: str | None = None,
+) -> None:
+    """A day-to-day control was used: who, and what it was set to. Only with
+    `auth.audit_controls` on. Never where anyone is."""
+    security = _security(request)
+    if not getattr(security, "audit_controls", True):
+        return
+    ident = request.get(IDENTITY)
+    security.record(
+        telemetry.SECURITY_CONTROL_USED,
+        action,
+        f"{what} by {_actor(ident)}",
+        {
+            **_who(request, ident),
+            "radiate.control.kind": kind,
+            "radiate.control.value": value,
+            "radiate.room.id": room,
+            "radiate.person.id": person,
+        },
+    )
+
+
 async def set_setpoint(request: web.Request) -> web.Response:
-    return await _post(request, bridge.set_setpoint, request.match_info["room_id"])
+    room_id = request.match_info["room_id"]
+    response = await _post(request, bridge.set_setpoint, room_id)
+    # The body was checked by the bridge; aiohttp keeps it, so it reads again here.
+    value = (await _json(request)).get("setpoint")
+    name = bridge.room(_rt(request), room_id).name
+    if value is None:
+        what, action, text = f"{name} hold cleared", "setpoint.cleared", "cleared"
+    else:
+        text = f"{float(value):g}"
+        what, action = f"{name} held at {text}°", "setpoint.held"
+    _record_control(request, action, "setpoint", what, text, room=room_id)
+    return response
 
 
 async def set_fire(request: web.Request) -> web.Response:
-    return await _post(request, bridge.set_fire, request.match_info["room_id"])
+    room_id = request.match_info["room_id"]
+    response = await _post(request, bridge.set_fire, room_id)
+    lit = bool((await _json(request)).get("lit"))
+    name = bridge.room(_rt(request), room_id).name
+    what = f"Fire {'lit' if lit else 'out'} in {name}"
+    action, word = ("fire.lit", "lit") if lit else ("fire.out", "out")
+    _record_control(request, action, "fire", what, word, room=room_id)
+    return response
 
 
 async def boost_store(request: web.Request) -> web.Response:
-    return await _post(request, bridge.boost_store)
+    response = await _post(request, bridge.boost_store)
+    minutes = max(0, min(bridge.BOOST_MAX_MIN, int((await _json(request)).get("minutes", 60))))
+    what = f"Hot water boosted for {minutes} min" if minutes else "Hot water boost stopped"
+    _record_control(request, "store.boosted", "boost", what, str(minutes))
+    return response
 
 
 async def set_mode(request: web.Request) -> web.Response:
@@ -461,9 +513,18 @@ async def household_revert(request: web.Request) -> web.Response:
 
 
 async def set_away(request: web.Request) -> web.Response:
-    return await _post(
-        request, bridge.set_away, request.match_info["person_id"], lookup=bridge.person
-    )
+    pid = request.match_info["person_id"]
+    response = await _post(request, bridge.set_away, pid, lookup=bridge.person)
+    until = (await _json(request)).get("until")
+    if until is None:
+        _record_control(
+            request, "away.cleared", "away", f"{pid} away cleared", "cleared", person=pid
+        )
+    else:
+        until = str(until)
+        what = f"{pid} away until {until}"
+        _record_control(request, "away.set", "away", what, until, person=pid)
+    return response
 
 
 async def set_presence(request: web.Request) -> web.Response:
@@ -473,9 +534,10 @@ async def set_presence(request: web.Request) -> web.Response:
 
 
 async def say_home(request: web.Request) -> web.Response:
-    return await _post(
-        request, bridge.say_home, request.match_info["person_id"], lookup=bridge.person
-    )
+    pid = request.match_info["person_id"]
+    response = await _post(request, bridge.say_home, pid, lookup=bridge.person)
+    _record_control(request, "home.said", "home", f"{pid} said to be home", "home", person=pid)
+    return response
 
 
 async def set_ha_persons(request: web.Request) -> web.Response:
