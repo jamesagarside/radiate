@@ -44,7 +44,7 @@ from radiate.core import (
     decide,
 )
 from radiate.core.persist import dump_state, load_state
-from radiate.core.quiet import quiet_until
+from radiate.core.quiet import apply_quiet
 from radiate.core.types import Actions, RoomRole
 
 from .house import SimHouse
@@ -435,7 +435,7 @@ def run(
             )
             if controller == "radiate" and alive:
                 snap = _snapshot(house, reports, minute, optimum_start, plan, room_use, metering)
-                snap.quiet_until_min = quiet_until(cfg.quiet_hours, minute)
+                apply_quiet(cfg, snap)
                 if zigbee_down:
                     for inp in snap.rooms.values():
                         inp.trv_available = False

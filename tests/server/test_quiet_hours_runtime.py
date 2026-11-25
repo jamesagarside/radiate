@@ -191,3 +191,37 @@ async def test_quiet_hours_change_live_from_the_settings_view(tmp_path):
 
     rt.settings_editor.save(rt, {"values": {"house.quiet_hours": ""}})  # cleared: off
     assert rt.cfg.quiet_hours is None
+
+
+async def test_a_room_window_on_top_of_the_house_one():
+    data = reference()
+    next(r for r in data["rooms"] if r["id"] == "bedroom_1")["quiet_hours"] = "23:00-08:00"
+    rt, drv, _ = make(data, local(2026, 11, 18, 7, 0))
+    feed(drv, 15.0)
+    await rt.step()
+    state = rt.describe()
+    assert state["quiet"]["active"] is False  # the house window ended at 06:00
+    rooms = {r["id"]: r for r in state["rooms"]}
+    bed = rooms["bedroom_1"]
+    assert bed["quiet"] == {"window": "23:00-08:00", "active": True, "until": "08:00"}
+    assert bed["reason_code"] == "demand.quiet_hours"
+    assert rooms["dining"]["quiet"] == {"window": None, "active": False, "until": None}
+    assert rt.state.rooms["dining"].calling
+
+
+async def test_a_room_window_changes_live_from_the_settings_view(tmp_path):
+    data = reference(quiet=None)
+    data["house"]["data_dir"] = str(tmp_path / "data")
+    path = tmp_path / "house.yaml"
+    path.write_text(yaml.safe_dump(data))
+    rt, drv, _ = make(data, local(2026, 11, 18, 7, 0))
+    rt.settings_editor = SettingsEditor.start(
+        read_house_file(path), env=ENV, store=SettingsMemory()
+    )
+    path_key = "rooms.bedroom_1.quiet_hours"
+    view = rt.settings_editor.save(rt, {"values": {path_key: "23:00-08:00"}})
+    assert view["applied"] == [path_key]
+    assert rt.cfg.room("bedroom_1").quiet_hours == (1380, 480)
+    feed(drv, 15.0)
+    await rt.step()
+    assert rt.state.rooms["bedroom_1"].quiet and not rt.state.rooms["bedroom_1"].calling

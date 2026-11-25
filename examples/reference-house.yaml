@@ -65,6 +65,8 @@ rooms:
     actuate: true             # pilot valve: test one TRV first (spec 4.5)
     # use: in_use             # optional: in_use, occasional or unused, or
     #                         # {weekdays: ..., weekend: ...}; see docs/configuration.md
+    # quiet_hours: "23:00-08:00"  # optional: this room's own quiet hours, on top of the
+    #                         # house's: no heat, no heat sink, its valve stays still
   - id: bedroom_2
     name: Bedroom 2
     trv: trv_bedroom_2

@@ -172,6 +172,10 @@ class RoomState:
     sensor_changed_at: float | None = None
     trv_range: tuple[float, float] | None = None
     use: RoomUse | None = None  # this tick's room use, from the snapshot (spec 5.8)
+    # Quiet hours hold the room this tick (spec 5.10), and its valve settings are held
+    # as written at their start, so the valve does not move until they end.
+    quiet: bool = False
+    quiet_hold: bool = False
     # Solo latch (spec 5.8): in eco, the room passed its solo threshold while calling, so
     # it may start a burn alone and keep it running; cleared when it stops calling. A
     # room without room use has no latch: this is just "below its threshold now".
@@ -311,9 +315,16 @@ def _sensor_awaited(inp: RoomInput) -> bool:
     )
 
 
+def _quiet_until(snap: Snapshot, inp: RoomInput) -> int | None:
+    """Quiet hours hold this room (spec 5.10): the minute of day they end, or None
+    outside them or with an override. The room's own figure covers the house's."""
+    if inp.override:
+        return None
+    return inp.quiet_until_min if inp.quiet_until_min is not None else snap.quiet_until_min
+
+
 def _quiet(snap: Snapshot, inp: RoomInput) -> bool:
-    """Quiet hours hold this room (spec 5.10): inside them, and no override."""
-    return snap.quiet_until_min is not None and not inp.override
+    return _quiet_until(snap, inp) is not None
 
 
 def _target(cfg: HouseConfig, snap: Snapshot, inp: RoomInput) -> float:
@@ -505,6 +516,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         rs.preheating = False
         rs.deadline_s = None
         quiet = snap.mode is Mode.AUTO and _quiet(snap, inp)
+        rs.quiet = _quiet(snap, inp)  # in any mode: no heat sink, valve held
         if quiet and temp is not None and not rs.dist.fire:
             # Quiet hours (spec 5.10): would this room be heating now without them?
             # Optimum start waits for their end, so it never starts during them.
@@ -1032,9 +1044,16 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         if reading is None:
             reading = rs.temperature
         trv_setpoint = _trv_setpoint(rc, rs, target, heat, reading)
+        # Quiet hours (spec 5.10): the room's opening limit and setpoint are written once
+        # as they start and held until they end, unless it heats (frost, override, or
+        # the last heat sink left). Only the external temperature keeps going out.
+        hold = rs.quiet and not want_heat and not rs.dist.fire
+        if hold and rs.quiet_hold and rs.written is not None:
+            opening, trv_setpoint = rs.written.opening, rs.written.setpoint
         action = ValveAction(rc.id, trv_setpoint, opening, 100, ext)
         if rc.actuation_enabled and inp.trv_available:
             valves[rc.id] = _discipline(rs, action, now)
+        rs.quiet_hold = hold and rs.written is not None
         if rs.learning_gate in (
             "fire",
             "fire_holdoff",
@@ -1053,7 +1072,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             )
         if rc.id in quiet_held and not rs.calling and not rs.topup:
             # Last, so it is the room's reason in the API: why it is not heating.
-            until = snap.quiet_until_min or 0
+            until = _quiet_until(snap, inp) or 0
             reasons.append(
                 Reason(
                     "demand.quiet_hours",
@@ -1316,8 +1335,14 @@ def _topup_target(target: float, temp: float | None) -> float:
 
 
 def _topup_candidates(
-    cfg: HouseConfig, snap: Snapshot, st: EngineState, by_use: bool = False
+    cfg: HouseConfig,
+    snap: Snapshot,
+    st: EngineState,
+    by_use: bool = False,
+    quiet: bool = False,
 ) -> list[RoomConfig]:
+    """Rooms that may be topped up or opened as a heat sink. A room in quiet hours is
+    left out (spec 5.10); with `quiet`, only rooms in quiet hours are given."""
     out = []
     for rc in cfg.rooms:
         if not rc.controllable:
@@ -1330,6 +1355,7 @@ def _topup_candidates(
             or rs.dist.fire
             or rs.temperature is None
             or not inp.trv_available
+            or rs.quiet is not quiet
         ):
             continue
         out.append(rc)
@@ -1369,7 +1395,23 @@ def _ensure_sink(
             Reason("boiler.dump_room", f"{rc.name}: opened as a heat sink for the burner", rc.id)
         )
         if sink() >= cfg.sink_min:
-            break
+            return
+    # Rooms in quiet hours are never a heat sink while another room can be (spec 5.10).
+    # With none left, the open-path guarantee wins over quiet: the burner must not fire
+    # into shut valves, so the quiet rooms open last, in the usual order.
+    for rc in _topup_candidates(cfg, snap, st, by_use=eco, quiet=True):
+        rs = st.rooms[rc.id]
+        rs.topup = True
+        rs.topup_base = rs.temperature
+        reasons.append(
+            Reason(
+                "boiler.quiet_sink",
+                f"{rc.name}: opened in quiet hours as the last heat sink for the burner",
+                rc.id,
+            )
+        )
+        if sink() >= cfg.sink_min:
+            return
 
 
 def _allocate(

@@ -79,7 +79,7 @@ from radiate.core.outdoor import (
 from radiate.core.persist import VERSION as ENGINE_VERSION
 from radiate.core.persist import dump_state, first_start_state, load_state, saved_version
 from radiate.core.provenance import Provenance
-from radiate.core.quiet import clock_text, format_window, quiet_until
+from radiate.core.quiet import apply_quiet, clock_text, format_window
 from radiate.core.series import observed_values, tick_values
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.export import telemetry
@@ -1237,14 +1237,15 @@ class Runtime:
             inp.use = use
 
     def _apply_quiet(self, snap: Snapshot) -> None:
-        """Quiet hours (spec 5.10) in house time, and which rooms have an override.
+        """Quiet hours (spec 5.10) in house time, the house's and each room's, and
+        which rooms have an override.
 
         `snap.minute_of_day` is the driver's local wall time (`zoneinfo`, so daylight
         saving is handled), the same clock the schedules use. The core holds every room
         without an override at frost protection while quiet hours last, including a
         return warm-up (`_apply_return`), which is a next setpoint like any other.
         """
-        snap.quiet_until_min = quiet_until(self.cfg.quiet_hours, snap.minute_of_day)
+        apply_quiet(self.cfg, snap)
         for rid in self.overrides:
             inp = snap.rooms.get(rid)
             if inp is not None:
@@ -1671,6 +1672,16 @@ class Runtime:
                     # or null. `solo`: in eco, passed its solo threshold, so it may start
                     # and keep a burn on its own.
                     use=rs.use.value if rs.use is not None else None,
+                    # Quiet hours for this room (spec 5.10): its own `window` (null:
+                    # the house's only), `active` while they hold it (not with an
+                    # override), and `until`, the local HH:MM the last window ends.
+                    quiet={
+                        "window": format_window(rc.quiet_hours),
+                        "active": rs.quiet,
+                        "until": clock_text(inp.quiet_until_min)
+                        if rs.quiet and inp is not None and inp.quiet_until_min is not None
+                        else None,
+                    },
                     solo=rs.solo,
                     fire=rs.dist.fire,
                     learning=rs.learning_gate,

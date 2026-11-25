@@ -770,6 +770,16 @@ SECTIONS: list[Section] = [
                 choices=("in_use", "occasional", "unused"),
                 optional=True,
             ),
+            _text(
+                "quiet_hours",
+                "Quiet hours",
+                "A time this room doesn't heat, such as 23:00-08:00, on top of the "
+                "house's quiet hours. Its valve stays still and it isn't used to take "
+                "another room's heat, unless no other room can. Frost protection and a "
+                "setpoint you set still heat it.",
+                optional=True,
+                restart=False,
+            ),
         ),
         per_room=True,
         covers=("rooms",),

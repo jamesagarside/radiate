@@ -172,10 +172,10 @@ def test_a_burn_running_when_quiet_hours_start_finishes_its_minimum_burn():
     fired_at = next(m for m, a in out if a.boiler_state is BoilerState.FIRING)
     assert fired_at < 22 * 60 + 30
     # The rooms stop calling at 22:30, but the burner keeps its 8 minute minimum burn,
-    # with a heat sink open for it.
+    # with a heat sink open for it: every room is quiet, so a quiet room is the last one.
     for m in range(22 * 60 + 30, fired_at + 8):
         assert acts[m].heating_relay, m
-    assert any(r.code == "boiler.dump_room" for r in acts[22 * 60 + 30].reasons)
+    assert any(r.code == "boiler.quiet_sink" for r in acts[22 * 60 + 30].reasons)
     assert not st.rooms["bed"].calling
     assert not acts[fired_at + 9].heating_relay
     assert not any(a.heating_relay for m, a in out if m > fired_at + 9)

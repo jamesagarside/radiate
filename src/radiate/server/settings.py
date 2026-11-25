@@ -124,6 +124,10 @@ def apply_live(rt: Runtime, site: SiteConfig) -> None:
         suggestions=new.suggestions,
         balancing=new.balancing,
         quiet_hours=new.quiet_hours,
+        # Rooms stay as they started, but each room's quiet hours apply live.
+        rooms=tuple(
+            dataclasses.replace(rc, quiet_hours=_room_quiet(new, rc.id)) for rc in cfg.rooms
+        ),
         learning=dataclasses.replace(
             cfg.learning, learn_on_trv_fallback=new.learning.learn_on_trv_fallback
         ),
@@ -136,6 +140,13 @@ def apply_live(rt: Runtime, site: SiteConfig) -> None:
         hook(rt.cfg, site)
     for live in LIVE_HOOKS:
         live(rt, site)
+
+
+def _room_quiet(house, room_id: str) -> tuple[int, int] | None:
+    for rc in house.rooms:
+        if rc.id == room_id:
+            return rc.quiet_hours
+    return None
 
 
 @dataclass

@@ -563,6 +563,7 @@ _ROOM_KEYS = {
     "humidity",
     "trv_bias_k",
     "use",
+    "quiet_hours",
 }
 
 
@@ -680,6 +681,13 @@ def _rooms(
         # has no shower detection, so its humidity is recorded unless turned off.
         humidity = ctx.get(item, "humidity", bool, role is RoomRole.UNHEATED, p)
         bias = ctx.number(item, "trv_bias_k", DEFAULT_TRV_BIAS_K, -5, 5, p)
+        # The room's own quiet hours (spec 5.10), on top of the house's.
+        quiet, quiet_problem = parse_quiet_hours(item.get("quiet_hours"))
+        if quiet_problem:
+            ctx.err(f"{p}quiet_hours", quiet_problem)
+        if quiet is not None and role not in (RoomRole.NORMAL, RoomRole.INTERNAL_SENSOR_ONLY):
+            ctx.err(f"{p}quiet_hours", "only a room with a valve Radiate drives has quiet hours")
+            quiet = None
 
         rooms.append(
             RoomConfig(
@@ -690,6 +698,7 @@ def _rooms(
                 has_humidity=humidity,
                 trv_bias_k=bias,
                 actuation_enabled=False,
+                quiet_hours=quiet,
             )
         )
         devices[rid] = RoomDevices(trv=trv, sensor=sensor, window=window, schedule=sched)
@@ -717,6 +726,7 @@ def _rooms(
             has_humidity=r.has_humidity,
             trv_bias_k=r.trv_bias_k,
             actuation_enabled=r.id in enabled,
+            quiet_hours=r.quiet_hours,
         )
         for r in rooms
     ]

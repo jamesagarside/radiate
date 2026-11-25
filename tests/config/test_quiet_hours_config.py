@@ -70,3 +70,31 @@ def test_registered_for_the_settings_view_and_applied_live():
     assert section.id == "house"
     assert setting.kind == "text" and setting.optional and not setting.restart
     assert setting.default is None
+
+
+def rooms_site(**by_room):
+    data = yaml.safe_load(EXAMPLE.read_text())
+    for r in data["rooms"]:
+        r.update(by_room.get(r["id"], {}))
+    return parse_site(data, env=ENV)
+
+
+def test_a_room_has_its_own_window():
+    s = rooms_site(bedroom_1={"quiet_hours": "23:00-08:00"})
+    assert s.house.room("bedroom_1").quiet_hours == (1380, 480)
+    assert s.house.room("dining").quiet_hours is None
+
+
+def test_a_room_window_is_checked_and_needs_a_valve():
+    with pytest.raises(ConfigError) as err:
+        rooms_site(bedroom_1={"quiet_hours": "8am"}, stairs={"quiet_hours": "23:00-08:00"})
+    problems = "\n".join(err.value.problems)
+    assert "rooms[0].quiet_hours: '8am' is not HH:MM-HH:MM" in problems
+    assert "quiet_hours: only a room with a valve Radiate drives has quiet hours" in problems
+
+
+def test_a_room_window_is_in_the_settings_view_per_room():
+    found = setting_for("rooms.bedroom_1.quiet_hours")
+    assert found is not None
+    section, setting = found
+    assert section.per_room and not setting.restart and setting.optional

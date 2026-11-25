@@ -642,7 +642,8 @@ Code: `frost`, `hard_frost` in `decide`.
 
 **Quiet hours**:
 A nightly local time window with no heating, such as 22:30 to 06:00, which may cross midnight. Inside it every room without an override is held at the frost threshold, and optimum start waits for the end. The store, a burn finishing its minimum burn and frost protection are not affected. Off unless set ([spec 5.10](spec.md#510-quiet-hours)).
-Code: `HouseConfig.quiet_hours`, `Snapshot.quiet_until_min`, `quiet_until` in `radiate.core.quiet`, `Runtime._apply_quiet`, config key `house.quiet_hours`, API `quiet` in `state`, reason `demand.quiet_hours`.
+A room can have its own window as well, on top of the house's. A quiet room is not used as a heat sink while another room can be, and its valve is written once as its window starts and once as it ends.
+Code: `HouseConfig.quiet_hours`, `RoomConfig.quiet_hours`, `Snapshot.quiet_until_min`, `RoomInput.quiet_until_min`, `apply_quiet` in `radiate.core.quiet`, `Runtime._apply_quiet`, config keys `house.quiet_hours` and `rooms[].quiet_hours`, API `quiet` in `state` and in each room, reasons `demand.quiet_hours` and `boiler.quiet_sink`.
 _Avoid_: night mode, do not disturb, night setback (setback is a room use).
 
 **Implausible reading**:

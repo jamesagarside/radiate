@@ -67,6 +67,9 @@ class RoomConfig:
     has_humidity: bool = False
     trv_bias_k: float = -1.5  # room ≈ TRV internal + bias, for internal-sensor-only rooms
     actuation_enabled: bool = True  # spec 4.5: test on one valve first
+    # The room's own quiet hours (spec 5.10), local (start, end) minutes of day, which
+    # apply on top of the house's. None: only the house's.
+    quiet_hours: tuple[int, int] | None = None
 
     @property
     def controllable(self) -> bool:
@@ -197,6 +200,9 @@ class RoomInput:
     # The setpoint is an override someone set (the web UI, the API, Home Assistant).
     # An override wins over quiet hours (spec 5.10).
     override: bool = False
+    # Inside this room's quiet hours, the house's or its own (spec 5.10): the local
+    # minute of day the last of them ends. None outside them.
+    quiet_until_min: int | None = None
 
 
 @dataclass(slots=True)
