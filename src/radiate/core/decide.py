@@ -67,6 +67,15 @@ DEFAULT_LOCKSHIELD = 60
 MIN_OPENING_STEP = 3
 OPENING_WRITE_INTERVAL_S = 10 * 60
 BIG_OPENING_STEP = 15
+# Opening hold (spec 4.5): allocation re-solves every tick and steps a warming room down
+# as it nears its target, so a valve stepped down every few minutes (100, 66, 45 within
+# 34 min), each step big enough to pass the 10 minute rule. A lower opening limit now
+# waits this long after the last write while the room keeps wanting heat (or keeps not
+# wanting it). Opening further is not held, so heat is never delayed; nor are starting or
+# stopping a call, a top-up or a heat sink, and closing to 0. In simulation (seeds 1 to
+# 9, 5 days) 40 min cut opening changes by a third with no false re-learning; holding
+# rises too cut more but re-learned rooms more often (docs/simulation.md).
+OPENING_HOLD_S = 40 * 60
 CLOSE_BUMP = 10
 PREHEAT_MAX_S = 3 * 3600
 # Eco, a room with room use (spec 5.8): it may have waited down at its damp floor, so
@@ -144,6 +153,7 @@ class RoomState:
     setpoint_changed_at: float = -1e12
     written: ValveAction | None = None
     opening_written_at: float = -1e12
+    wanted_heat: bool = False  # calling or topped up when the opening was last decided
     learning_gate: str | None = "starting"
     topup_base: float | None = None  # temperature when the topup started
     target: float = 18.0  # effective target this tick (schedule, mode, optimum start)
@@ -1052,7 +1062,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             opening, trv_setpoint = rs.written.opening, rs.written.setpoint
         action = ValveAction(rc.id, trv_setpoint, opening, 100, ext)
         if rc.actuation_enabled and inp.trv_available:
-            valves[rc.id] = _discipline(rs, action, now)
+            valves[rc.id] = _discipline(rs, action, now, restart=want_heat != rs.wanted_heat)
+        rs.wanted_heat = want_heat
         rs.quiet_hold = hold and rs.written is not None
         if rs.learning_gate in (
             "fire",
@@ -1452,15 +1463,24 @@ def _record_lockshield(rs: RoomState, opening: int) -> None:
     hist[max(0, min(100, opening))] += 1.0
 
 
-def _discipline(rs: RoomState, action: ValveAction, now: float) -> ValveAction:
-    """Write discipline (spec 4.5): small or frequent opening changes are held back."""
+def _discipline(
+    rs: RoomState, action: ValveAction, now: float, restart: bool = False
+) -> ValveAction:
+    """Write discipline (spec 4.5): small or frequent opening changes are held back.
+
+    A change under MIN_OPENING_STEP is skipped, and at most one opening write goes out
+    per OPENING_WRITE_INTERVAL_S unless the change is BIG_OPENING_STEP or more or the new
+    limit is 0. A lower limit also waits OPENING_HOLD_S after the last write, unless the
+    room has just started or stopped wanting heat (`restart`) or the new limit is 0.
+    """
     prev = rs.written
     if prev is not None:
         change = abs(action.opening - prev.opening)
-        recent = now - rs.opening_written_at < OPENING_WRITE_INTERVAL_S
-        if change < MIN_OPENING_STEP or (
-            recent and change < BIG_OPENING_STEP and action.opening != 0
-        ):
+        since = now - rs.opening_written_at
+        recent = since < OPENING_WRITE_INTERVAL_S and change < BIG_OPENING_STEP
+        lower = 0 < action.opening < prev.opening
+        held = lower and not restart and since < OPENING_HOLD_S
+        if change < MIN_OPENING_STEP or (action.opening != 0 and (recent or held)):
             action.opening = prev.opening
         elif action.opening != prev.opening:
             if action.opening <= prev.opening - CLOSE_BUMP and action.opening > 0:

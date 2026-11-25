@@ -79,7 +79,7 @@ Top remaining gaps, most important first:
 | 4.5 Governed mode settings | done | `drivers/z2m.py` `TrvWriter` | |
 | 4.5 TRV setpoint in the TRV's frame, call bias, sink lead | done | `core/decide.py` `_trv_setpoint` | Rounded to 0.5 K, clamped 4 to 35 °C. Internal-sensor rooms also get their mirrored schedule in this frame (`drivers/live.py` `_mirror`). The TRVZB's own hysteresis (assumed 0.5 K) needs checking on the pilot valve |
 | 4.5 Schedule mirror into the TRVZB | done | `drivers/z2m.py`, `config/schedule.py` | |
-| 4.5 Write discipline (3 % step, 10 min, 15 % exception) | done | `core/decide.py` `_discipline` | |
+| 4.5 Write discipline (3 % step, 10 min, 15 % exception) | done | `core/decide.py` `_discipline` | With the opening hold: a lower limit waits 40 min within a call (`OPENING_HOLD_S`), measured in `docs/simulation.md` |
 | 4.5 Close bump | done | `core/decide.py`, `drivers/z2m.py` | |
 | 4.5 Reconciler, 3 attempts then a diagnostic | done | `drivers/z2m.py`, `drivers/live.py` `alerts` | |
 | 4.5 Summer valve exercise | missing | | |

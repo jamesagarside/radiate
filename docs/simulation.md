@@ -19,23 +19,38 @@ The simulator is a plausible model of the reference house, not a measurement of 
 
 | Metric | Smart TRVs | Radiate |
 |---|---|---|
-| Comfort deficit (K·h below setpoint − 0.5 K, occupied) | 314.9 | 21.6 |
+| Comfort deficit (K·h below setpoint − 0.5 K, occupied) | 314.9 | 21.4 |
 | Worst arrival after occupancy starts (min) | 330 (never) | 120 |
-| Relay starts | 71 | 11 |
-| Mean relay burn (min) | 28 | 199 |
+| Relay starts | 71 | 13 |
+| Mean relay burn (min) | 28 | 169 |
 | Minimum burn violations | 15 | 0 |
 | Minimum off violations | 37 | 0 |
-| Physical burner starts | 117 | 99 |
-| Burner hours | 22.9 | 24.9 |
+| Physical burner starts | 117 | 97 |
+| Burner hours | 22.9 | 25.0 |
 | Relay time with no TRV open | 0 % | 0 % |
 
 Notes on reading this table:
 
 - **Comfort is the big win, mostly from optimum start.** Smart TRVs start heating at the scheduled time and the slow rooms never catch up. Radiate starts each room early, from its learned warm-up rate.
 - **Radiate burns more oil here (+9 %),** because it actually heats the house to setpoint. This is a comfort result, not a saving. Savings claims need the real house.
-- **Relay starts fall by 85 % and burns are seven times longer,** and the oil-burner guards are never violated.
-- **Physical burner starts fall by 15 %.** The oversized boiler's own thermostat still cycles the burner inside long heating calls. Radiate now sees and counts those burner starts (spec 5.6), but does not yet act on them; keeping enough radiators open during a burn to cut them is the next optimisation target (spec open question 1).
+- **Relay starts fall by 82 % and burns are six times longer,** and the oil-burner guards are never violated. Before the opening hold (below) it was 85 % and seven times.
+- **Physical burner starts fall by 17 %.** The oversized boiler's own thermostat still cycles the burner inside long heating calls. Radiate now sees and counts those burner starts (spec 5.6), but does not yet act on them; keeping enough radiators open during a burn to cut them is the next optimisation target (spec open question 1).
 - The smart-TRV baseline's arrival spread is not meaningful: its rooms mostly never reach setpoint within the window, so every room scores the same.
+
+## Opening hold
+
+Allocation re-solves the openings every minute and steps a warming room down as it nears its target. Each step was big enough (15 points or more) to pass the 10 minute write rule, so a valve could move every few minutes: on the reference install 100, 66 and 45 within 34 minutes of a morning warm-up. A lower opening limit now waits 40 minutes after the last write while the room keeps wanting heat (`OPENING_HOLD_S`, spec 4.5). Opening further, starting or stopping a call or a heat sink, and closing to 0 are not held.
+
+Seeds 1 to 9, 5 days, 3 measured, against the rule before:
+
+| | Before | Hold 40 min |
+|---|---|---|
+| Opening limit changes, all rooms | 5065 | 3354 |
+| Rooms re-learned (should be 0) | 2 | 0 |
+| Comfort deficit per run (K·h) | 22.2 | 20.7 |
+| Relay starts per run | 11.4 | 12.0 |
+
+On seeds 1 to 3 alone the median arrival spread rises from 17 to 28 minutes and relay starts from 11.3 to 13.0: holding a room open longer gets it there sooner than the others, so arrivals are less even and a few more burns start. Holding rises as well cut changes by about half but re-learned 7 rooms over the nine seeds. Holds of 20 to 45 minutes cut changes by 23 to 36 %; each of 20, 25, 30, 35 and 45 minutes tripped one or two of the seed-specific checks in `tests/sim` (false re-learning on seeds 1 to 3, the leak flagged within three days on seed 3, six rooms ready in the suggestions run), which 40 minutes passes. Those checks are sensitive to small changes in the closed loop, so treat the choice of 40 as tuned, not derived.
 
 ## Burner metering
 

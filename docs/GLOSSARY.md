@@ -263,8 +263,12 @@ When an opening limit falls by 10 points or more, Radiate first writes the new v
 Code: `ValveAction.pre_opening`, `CLOSE_BUMP`, `TrvOptions.close_bump_delay_s`.
 
 **Write discipline**:
-The rules that hold back valve writes to protect batteries and calibration: skip changes under 3 points, at most one opening write per valve per 10 minutes unless the change is 15 points or more, and the close bump.
+The rules that hold back valve writes to protect batteries and calibration and keep valves quiet: skip changes under 3 points, at most one opening write per valve per 10 minutes unless the change is 15 points or more, the opening hold, and the close bump.
 Code: `_discipline` in `radiate.core.decide`, `MIN_OPENING_STEP`, `OPENING_WRITE_INTERVAL_S`, `BIG_OPENING_STEP`.
+
+**Opening hold**:
+Part of the write discipline: a lower opening limit waits 40 minutes after the valve's last opening write while its room keeps wanting heat (or keeps not wanting it). Opening further, starting or stopping a call or heat sink, and closing to 0 go at once.
+Code: `OPENING_HOLD_S`, `RoomState.wanted_heat`, `restart` in `_discipline`.
 
 **Reconciler**:
 The part of the TRV writer that resends a setting when the TRV's reported value disagrees with what was sent for more than 5 minutes (2 minutes for the setpoint). After three attempts it marks the setting failed (rejected) and raises an alert. A rejected setting pauses learning for the room while it lasts and for an hour after. Not reported in dry run, where nothing is sent.
