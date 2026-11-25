@@ -53,7 +53,9 @@ class LoginLimiter:
             self._wait(f"a:{address}", self.per_address, now),
         )
 
-    def failed(self, username: str, address: str) -> None:
+    def failed(self, username: str, address: str) -> list[tuple[str, str, float]]:
+        """Count a failure. Returns the lockouts it started, for the security log:
+        (`username` or `address`, which one, seconds it lasts)."""
         now = self.clock()
         if len(self._fails) >= MAX_KEYS:
             for key in list(self._fails):
@@ -62,6 +64,15 @@ class LoginLimiter:
                 self._fails.pop(next(iter(self._fails)))
         for key in (f"u:{username}", f"a:{address}"):
             self._fails.setdefault(key, deque()).append(now)
+        started = []
+        for scope, key, limit, value in (
+            ("username", f"u:{username}", self.per_user, username),
+            ("address", f"a:{address}", self.per_address, address),
+        ):
+            # A locked key takes no more failures, so it reaches its limit only once.
+            if len(self._recent(key, now)) == limit:
+                started.append((scope, value, self._wait(key, limit, now)))
+        return started
 
     def succeeded(self, username: str) -> None:
         self._fails.pop(f"u:{username}", None)

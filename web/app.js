@@ -18,6 +18,7 @@ import { createHouse } from "./house.js";
 import { createGuide, guideNote } from "./guide.js";
 import { createSettings } from "./settings.js";
 import { failText, pendingValue, sendChange } from "./pending.js";
+import { createSecurity } from "./security.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -1289,6 +1290,15 @@ const rawData = createData({
 });
 let dataOffered = null;
 
+// Security log (security.js): the last section of the Settings view, for admins only.
+// The server answers GET audit only for an admin, so the section stays hidden for
+// others. Raw data shows sensor data only.
+const security = createSecurity({
+  transport,
+  isAuthError: (err) => err instanceof AuthError,
+  onAuth: () => askForToken(),
+});
+
 // Guide view (guide.js): how to read and work Radiate, at #guide, with each section
 // at #guide/<name>. Static text, so it is always offered.
 const guide = createGuide({ root: $("guide") });
@@ -1316,7 +1326,12 @@ const settings = createSettings({
     h.focus({ preventScroll: true });
     h.scrollIntoView({ block: "start" });
   },
+  moreSections: () => (security.offered ? [{ id: "security-log", title: "Security log" }] : []),
 });
+const settingsView = {
+  show() { settings.show(); security.show(); },
+  hide() { settings.hide(); security.hide(); },
+};
 let settingsOffered = null;
 
 // Each view besides the house: its element, whether the server offers it, and its module.
@@ -1324,7 +1339,7 @@ const VIEWS = {
   devices: { offered: () => devicesOffered === true, module: devices },
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
   savings: { offered: () => savingsOffered === true, module: savings },
-  settings: { offered: () => settingsOffered === true, module: settings },
+  settings: { offered: () => settingsOffered === true, module: settingsView },
   data: { offered: () => dataOffered === true, module: rawData },
   guide: { offered: () => true, module: guide },
 };
@@ -1386,6 +1401,7 @@ async function offerViews() {
     savingsOffered === true ? true : savings.available(),
     settingsOffered === true ? true : settings.available(),
     dataOffered === true ? true : rawData.available(),
+    security.available(),
   ]);
   devicesOffered = d;
   suggestionsOffered = s;

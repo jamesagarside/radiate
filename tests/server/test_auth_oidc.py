@@ -175,6 +175,13 @@ def refused(r) -> bool:
     return r.status == 302 and r.headers["Location"] == f"{PUBLIC}/login?error=sso"
 
 
+def why(c) -> tuple[str, str | None]:
+    """The last refused sign-in in the security log: (error.type, user.name)."""
+    events = c.login.security.query(outcome="failure")["events"]
+    last = next(e for e in events if e["event"] == "radiate.security.login.failed")
+    return last["attributes"]["error.type"], last["attributes"].get("user.name")
+
+
 # --- the happy path ----------------------------------------------------------------------
 
 
@@ -218,6 +225,7 @@ async def test_user_in_no_mapped_group_is_refused(radiate, idp):
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q, "guest", ("other",))))
     assert (await radiate.get("/api/v1/state")).status == 401
+    assert why(radiate) == ("not_permitted", "guest")
 
 
 async def test_groups_from_userinfo_when_not_in_the_id_token(radiate, idp):
@@ -232,6 +240,7 @@ async def test_userinfo_for_another_subject_is_refused(radiate, idp):
     idp.userinfo = {"sub": "someone-else", "groups": ["heating-admins"]}
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("bad_claims", None)
 
 
 # --- ID token validation -----------------------------------------------------------------
@@ -241,6 +250,7 @@ async def test_bad_signature(radiate, idp):
     idp.sign_with = RSAKey.generate_key(2048, parameters={"kid": "k1"})
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("bad_signature", None)
 
 
 async def test_hmac_signed_with_the_client_secret_is_refused(radiate, idp):
@@ -249,12 +259,14 @@ async def test_hmac_signed_with_the_client_secret_is_refused(radiate, idp):
     idp.alg = "HS256"
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("bad_signature", None)
 
 
 async def test_wrong_audience(radiate, idp):
     idp.overrides = {"aud": "some-other-client"}
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("wrong_audience", None)
 
 
 async def test_several_audiences_need_azp(radiate, idp):
@@ -271,24 +283,28 @@ async def test_expired_token(radiate, idp):
     idp.overrides = {"iat": now - 3600, "exp": now - 600}
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("expired", None)
 
 
 async def test_wrong_issuer(radiate, idp):
     idp.overrides = {"iss": "https://evil.example"}
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("wrong_issuer", None)
 
 
 async def test_wrong_nonce(radiate, idp):
     idp.overrides = {"nonce": "not-the-one-sent"}
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("bad_nonce", None)
 
 
 async def test_missing_exp(radiate, idp):
     idp.overrides = {"exp": None}
     q = await start(radiate)
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("bad_claims", None)
 
 
 # --- state ---------------------------------------------------------------------------------
@@ -300,12 +316,14 @@ async def test_replayed_state_is_refused(radiate, idp):
     radiate.session.cookie_jar.clear()
     radiate.session.cookie_jar.update_cookies({OIDC_COOKIE: q["state"][0]})
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("bad_state", None)
 
 
 async def test_unknown_state_is_refused(radiate, idp):
     q = await start(radiate)
     q2 = {**q, "state": ["made-up"]}
     assert refused(await callback(radiate, q2, idp.approve(q)))
+    assert why(radiate) == ("bad_state", None)
 
 
 async def test_state_must_match_this_browser(radiate, idp):
@@ -313,6 +331,7 @@ async def test_state_must_match_this_browser(radiate, idp):
     q = await start(radiate)
     radiate.session.cookie_jar.clear()
     assert refused(await callback(radiate, q, idp.approve(q)))
+    assert why(radiate) == ("bad_state", None)
 
 
 async def test_provider_error_is_refused(radiate, idp):
@@ -323,6 +342,7 @@ async def test_provider_error_is_refused(radiate, idp):
         allow_redirects=False,
     )
     assert refused(r)
+    assert why(radiate) == ("provider_error", None)
 
 
 async def test_token_clients_unaffected_with_oidc(radiate):

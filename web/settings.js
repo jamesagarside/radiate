@@ -262,7 +262,10 @@ function control(f, id, describedBy, onChange) {
   return { node, get: () => parseInput(f, input.value), focus: () => input.focus(), input };
 }
 
-export function createSettings({ transport, isAuthError, onAuth, onOpenSetup, onShowSchedules }) {
+// `moreSections` lists sections drawn outside this module, after the house file's
+// (the Security log), as [{ id, title }] for the contents. Each one's heading is
+// `s-<id>-h`, so #settings/<id> reaches it as it does the others.
+export function createSettings({ transport, isAuthError, onAuth, onOpenSetup, onShowSchedules, moreSections = () => [] }) {
   let view = null;
   let open = false;
   let loading = false;
@@ -330,7 +333,7 @@ export function createSettings({ transport, isAuthError, onAuth, onOpenSetup, on
     renderAll(saved);
 
     const toc = $("settings-toc");
-    toc.replaceChildren(...view.sections.map((sec) => el("li", {}, el("a", { href: `#settings/${sec.id}`, text: sec.title }))));
+    toc.replaceChildren(...[...view.sections, ...moreSections()].map((sec) => el("li", {}, el("a", { href: `#settings/${sec.id}`, text: sec.title }))));
     const list = $("settings-sections");
     list.replaceChildren(...view.sections.map(section));
     if (pendingFocus) {

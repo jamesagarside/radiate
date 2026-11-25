@@ -138,6 +138,10 @@ Decisions made along the way:
 
 The role from `GET /api/v1/auth/me` decides what is shown. A control the role can't use stays in place, disabled, with a short tag: "Read only" for a viewer, "Ask an admin" for a household member. Nothing is left to fail with "Not saved". The server enforces the same table, so the UI is never the only check.
 
+## Amendment: the security log (November 2026)
+
+Every sign-in, refusal, sign-out, session end, lockout and `radiate users` change is now recorded with who and from where, in `radiate.db`, the process log and the OpenTelemetry export. See [ADR-0008](0008-security-audit-log.md). The behaviour above is unchanged.
+
 ## Revisit if
 
 - People need a finer split than three roles, such as a guest who may set their own room only.
