@@ -565,6 +565,12 @@ def safe_endpoint(url: str) -> str:
     return f"{p.scheme}://{host}{port}{p.path}"
 
 
+def _is_security(event: Any) -> bool:
+    """A security audit record (`radiate.security.*`), which `export.otlp.security:
+    false` keeps out of the export."""
+    return isinstance(event, dict) and str(event.get("e", "")).startswith(telemetry.SECURITY_PREFIX)
+
+
 # --- exporter --------------------------------------------------------------------------
 
 
@@ -620,7 +626,8 @@ class OtlpExporter:
     ) -> None:
         """Queue one tick: its series `values`, the day's running `totals` (ledger
         fields, counted since `totals_start`) and `events`, each a record from
-        `radiate.export.telemetry`'s builders or a (code, message, room) tuple."""
+        `radiate.export.telemetry`'s builders or a (code, message, room) tuple.
+        Security events are left out with `export.otlp.security: false`."""
         if not self.cfg.enabled:
             return
         if "metrics" in self.cfg.signals and (values or totals):
@@ -631,6 +638,8 @@ class OtlpExporter:
         if "logs" in self.cfg.signals and events:
             out = []
             for ev in events:
+                if not self.wants(ev):
+                    continue
                 if isinstance(ev, dict):
                     out.append({"t": wall, **ev} if "t" not in ev else dict(ev))
                 else:
@@ -638,6 +647,12 @@ class OtlpExporter:
                     out.append({"t": wall, **telemetry.reason_record(code, msg, room)})
             self.queues["logs"].extend(out)
         self._report_lost(wall)
+
+    def wants(self, event: Any) -> bool:
+        """Whether an event is sent at all: not a security event with
+        `export.otlp.security: false`. Radiate's own security log keeps those
+        regardless (ADR-0008)."""
+        return self.cfg.security or not _is_security(event)
 
     def record_day(
         self,

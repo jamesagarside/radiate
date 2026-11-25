@@ -513,8 +513,12 @@ class Runtime:
     def telemetry_event(self, record: dict) -> None:
         """Queue an OpenTelemetry log record (`radiate.export.telemetry`'s builders) made
         outside the tick; it goes with the next tick, at the time it happened."""
-        if self.otlp is not None and len(self._otlp_events) < OTLP_EVENTS_MAX:
-            self._otlp_events.append({"t": self.wall(), **record})
+        if self.otlp is None or len(self._otlp_events) >= OTLP_EVENTS_MAX:
+            return
+        wants = getattr(self.otlp, "wants", None)
+        if callable(wants) and not wants(record):
+            return  # a security event with export.otlp.security: false
+        self._otlp_events.append({"t": self.wall(), **record})
 
     def settings(self) -> dict:
         """Settings a person can see, and `demand_mode` they can change at runtime."""

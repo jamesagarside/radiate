@@ -133,6 +133,18 @@ def test_daily_figures_can_be_timed_and_turned_off():
     ]
 
 
+def test_security_events_have_their_own_export_switch():
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x"}})
+    assert problems == [] and cfg.otlp.security is True
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x", "security": False}})
+    assert problems == [] and cfg.otlp.security is False
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x", "security": "false"}})
+    assert problems == [] and cfg.otlp.security is False  # from the environment
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x", "security": "no"}})
+    assert problems == ["export.otlp.security: expected true or false"]
+    assert cfg.otlp.security is True
+
+
 def test_settings_schema_covers_every_key():
     keys = {item["key"] for item in OTLP_SETTINGS}
     cfg, problems = parse_export({"otlp": {"endpoint": "https://x"}})
@@ -151,6 +163,7 @@ def test_settings_schema_covers_every_key():
         "dataset",
         "daily_metrics",
         "daily_timestamp",
+        "security",
     }
     for item in OTLP_SETTINGS:
         assert item["help"] and "—" not in item["help"]

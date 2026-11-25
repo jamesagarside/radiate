@@ -1288,17 +1288,14 @@ const rawData = createData({
 });
 let dataOffered = null;
 
-// Security log (security.js): at the foot of the Raw data view, for admins only. The
-// server answers GET audit only for an admin, so the section stays hidden for others.
+// Security log (security.js): the last section of the Settings view, for admins only.
+// The server answers GET audit only for an admin, so the section stays hidden for
+// others. Raw data shows sensor data only.
 const security = createSecurity({
   transport,
   isAuthError: (err) => err instanceof AuthError,
   onAuth: () => askForToken(),
 });
-const rawDataView = {
-  show() { rawData.show(); security.show(); },
-  hide() { rawData.hide(); security.hide(); },
-};
 
 // Guide view (guide.js): how to read and work Radiate, at #guide, with each section
 // at #guide/<name>. Static text, so it is always offered.
@@ -1327,7 +1324,12 @@ const settings = createSettings({
     h.focus({ preventScroll: true });
     h.scrollIntoView({ block: "start" });
   },
+  moreSections: () => (security.offered ? [{ id: "security-log", title: "Security log" }] : []),
 });
+const settingsView = {
+  show() { settings.show(); security.show(); },
+  hide() { settings.hide(); security.hide(); },
+};
 let settingsOffered = null;
 
 // Each view besides the house: its element, whether the server offers it, and its module.
@@ -1335,8 +1337,8 @@ const VIEWS = {
   devices: { offered: () => devicesOffered === true, module: devices },
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
   savings: { offered: () => savingsOffered === true, module: savings },
-  settings: { offered: () => settingsOffered === true, module: settings },
-  data: { offered: () => dataOffered === true, module: rawDataView },
+  settings: { offered: () => settingsOffered === true, module: settingsView },
+  data: { offered: () => dataOffered === true, module: rawData },
   guide: { offered: () => true, module: guide },
 };
 

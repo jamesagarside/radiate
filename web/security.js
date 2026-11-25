@@ -1,7 +1,8 @@
 // Security log: sign-ins, refusals and changes, newest first, from GET /api/v1/audit
-// (ADR-0008). It sits at the foot of the Raw data view and only admins see it: the
-// server answers 403 to anyone else and the section stays hidden. Filters by outcome
-// and by user go to the server; "Show older" pages back by event ID.
+// (ADR-0008). It is the last section of the Settings view (#settings/security-log)
+// and only admins see it: the server answers 403 to anyone else and the section stays
+// hidden. Filters by outcome and by user go to the server; "Show older" pages back by
+// event ID.
 
 const $ = (id) => document.getElementById(id);
 const NONE = "–";
@@ -150,8 +151,11 @@ export function createSecurity({ transport, isAuthError, onAuth }) {
       } catch {
         offered = false;
       }
-      $("security").hidden = !offered;
+      $("s-security-log").hidden = !offered;
       if (offered) render();
+      return offered;
+    },
+    get offered() {
       return offered;
     },
     show() {

@@ -281,8 +281,9 @@ USER_NAME = Attribute(
     "user.name",
     STRING,
     "Who: the Radiate username, or the user the single sign-on provider named. For a "
-    "refused sign-in, the name that was tried. Left out when no one is known, and for "
-    "the API token, ingress and the command line.",
+    "refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed "
+    "hash when the name matches no account, never the text typed. Left out when no one "
+    "is known, and for the API token, ingress and the command line.",
     convention="ECS",
 )
 USER_ROLES = Attribute(
@@ -406,14 +407,32 @@ CONFIG_AREA = Attribute(
     "radiate.config.area",
     STRING,
     "What changed: the settings saved from the web UI, the household setup, the "
-    "layout, or learned models.",
+    "layout, learned models, or the heating or demand mode.",
     required=True,
-    values=("settings", "household", "layout", "learning"),
+    values=("settings", "household", "layout", "learning", "mode"),
 )
 CONFIG_PATHS = Attribute(
     "radiate.settings.paths",
     STRINGS,
-    "For settings, which ones changed, as house-file paths. Never their values.",
+    "For settings and the household, which changed, as house-file paths. Settings "
+    "never carry their values, as a value can be a secret.",
+)
+CONFIG_KEY = Attribute(
+    "radiate.config.key",
+    STRING,
+    "For a mode or one household setting, the one that changed: `mode` (the heating "
+    "mode), `demand_mode`, or a house-file path such as `household.rooms.lounge.adjust`.",
+)
+CONFIG_BEFORE = Attribute(
+    "radiate.config.before",
+    STRING,
+    "With `radiate.config.key`, its value before the change, as text (JSON for a list "
+    "or mapping), cut to 256 characters. Left out for the people in the household.",
+)
+CONFIG_AFTER = Attribute(
+    "radiate.config.after",
+    STRING,
+    "With `radiate.config.key`, its value after the change, as `radiate.config.before`.",
 )
 ROOM_IDS = Attribute("radiate.room.ids", STRINGS, "For learning, the rooms that were reset.")
 LOGIN_ON = Attribute(
@@ -733,6 +752,7 @@ PRESENCE_CHANGED = "radiate.presence.changed"
 LEARNING_INVALIDATED = "radiate.learning.invalidated"
 SETTINGS_CHANGED = "radiate.settings.changed"
 EXPORT_DROPPED = "radiate.export.dropped"
+SECURITY_PREFIX = "radiate.security."
 SECURITY_LOGIN = "radiate.security.login"
 SECURITY_LOGIN_FAILED = "radiate.security.login.failed"
 SECURITY_LOGOUT = "radiate.security.logout"
@@ -912,12 +932,26 @@ SECURITY_EVENTS: tuple[EventDef, ...] = (
     EventDef(
         SECURITY_CONFIG_CHANGED,
         "INFO",
-        "Someone changed how Radiate runs: settings, the household setup, the layout, or "
-        "learned models. Who and what, never a value. Security audit.",
-        "`Settings saved by alice: boiler.min_burn_min`.",
-        (*_SEC, *_WHO, CONFIG_AREA, CONFIG_PATHS, ROOM_IDS, HTTP_METHOD, URL_PATH),
+        "Someone changed how Radiate runs: settings, the household setup, the layout, "
+        "learned models, or the heating or demand mode. Who and what. Old and new values "
+        "only for a mode and the household, which hold no secret; one record for each "
+        "household setting changed, or one naming them all past 20. Security audit.",
+        "`Settings saved by alice (admin): boiler.min_burn_min`, or `Demand mode changed "
+        "from eco to comfort by sam (household)`.",
+        (
+            *_SEC,
+            *_WHO,
+            CONFIG_AREA,
+            CONFIG_PATHS,
+            CONFIG_KEY,
+            CONFIG_BEFORE,
+            CONFIG_AFTER,
+            ROOM_IDS,
+            HTTP_METHOD,
+            URL_PATH,
+        ),
         "`settings.saved`, `settings.reverted`, `household.saved`, `household.reverted`, "
-        "`layout.saved`, `learning.reset`.",
+        "`layout.saved`, `learning.reset`, `mode.changed`.",
     ),
     EventDef(
         SECURITY_LOGIN_CONFIG,

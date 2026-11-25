@@ -19,7 +19,7 @@ from radiate.config.auth import AuthConfig
 from radiate.export import telemetry
 from radiate.server.security import SecurityLog
 
-from .accounts import Accounts, Session
+from .accounts import Accounts, Session, normalise_username
 from .limiter import LoginLimiter
 from .oidc import OidcClient
 from .saml import INSTALL_HINT, SamlServiceProvider
@@ -202,6 +202,17 @@ class AuthService:
 
     # --- the security log ----------------------------------------------------------
 
+    def attempted_name(self, name: str) -> str:
+        """What a refused password sign-in records as `user.name`: the account's
+        username when `name` matches one, else the security log's keyed hash
+        (`unknown:...`), as a name that matches nothing is often a password typed in
+        the wrong box. The raw text is never recorded (ADR-0008)."""
+        try:
+            user = self.accounts.user(normalise_username(name))
+        except ValueError:
+            user = None
+        return user.username if user is not None else self.security.pseudonym(name)
+
     def login_failed(
         self,
         request: web.BaseRequest,
@@ -225,8 +236,11 @@ class AuthService:
         )
 
     def lockouts(self, started: list[tuple[str, str, float]]) -> None:
-        """Record lockouts the limiter just started, and their end when it comes."""
+        """Record lockouts the limiter just started, and their end when it comes. A
+        username lockout names the account, or the hash of a name that matches none."""
         for scope, value, seconds in started:
+            if scope == "username":
+                value = self.attempted_name(value)
             attrs = {"radiate.lockout.scope": scope}
             attrs["user.name" if scope == "username" else "source.address"] = value
             self.security.record(

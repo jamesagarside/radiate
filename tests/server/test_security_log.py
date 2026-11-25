@@ -109,8 +109,70 @@ async def test_a_refused_sign_in_says_why(client, username, password, code):
     e = last(client.security, telemetry.SECURITY_LOGIN_FAILED)
     assert e["outcome"] == "failure" and e["severity"] == "WARN"
     assert e["attributes"]["error.type"] == code
-    assert e["attributes"]["user.name"] == username
+    if code == "unknown_user":
+        assert e["attributes"]["user.name"] == client.security.pseudonym(username)
+    else:
+        assert e["attributes"]["user.name"] == username
     assert e["attributes"]["radiate.auth.method"] == "password"
+
+
+async def test_an_unknown_username_is_never_recorded_as_typed(rt, caplog):
+    """A name that matches no account is often a password in the wrong box: the table,
+    the export queue and the process log hold only its keyed hash, lockouts included."""
+    caplog.set_level(logging.DEBUG)
+    cfg, _ = parse_export({"otlp": {"endpoint": "http://collector.invalid"}})
+    rt.otlp = OtlpExporter(cfg.otlp, rt.house_id, {})
+    typed = "Hunter2-Typed-In-The-Wrong-Box"
+    login = service(limiter=LoginLimiter(per_user=2, per_address=50, window_s=60))
+    async with TestClient(TestServer(create_app(rt, token=TOKEN, login=login))) as c:
+        for _ in range(3):  # two refusals, a lockout, then refused while locked
+            await c.post("/api/v1/auth/login", json={"username": typed, "password": WRONG_PW})
+        await c.post("/api/v1/auth/login", json={"username": "ALEX", "password": WRONG_PW})
+    login.security._flush(0.0, force=True)  # write the folded repeat now, not in a minute
+    await rt.step()
+    stored = json.dumps(login.security.query(limit=500))
+    queued = json.dumps(list(rt.otlp.queues["logs"]))
+    logged = caplog.text
+    hashed = login.security.pseudonym(typed.lower())
+    assert hashed.startswith("unknown:") and len(hashed) == len("unknown:") + 16
+    for where in (stored, queued, logged):
+        assert hashed in where
+        assert typed.lower() not in where.lower()
+    failed = events(login.security, telemetry.SECURITY_LOGIN_FAILED)
+    # The second unknown_user refusal folds into one record, written last.
+    assert [e["attributes"]["error.type"] for e in failed] == [
+        "unknown_user",
+        "rate_limited",
+        "bad_password",
+        "unknown_user",
+    ]
+    assert failed[3]["attributes"]["radiate.security.count"] == 1
+    assert {e["user"] for i, e in enumerate(failed) if i != 2} == {hashed}
+    assert failed[2]["user"] == "alex"  # an existing account is named as it is
+    lockout = last(login.security, telemetry.SECURITY_LOCKOUT_STARTED)
+    assert lockout["attributes"]["user.name"] == hashed
+
+
+def test_the_hash_key_is_kept_per_install(tmp_path):
+    from radiate.server.security import KEY_FILE, load_key
+
+    first = SecurityLog.memory()
+    first._key = load_key(tmp_path)
+    again = SecurityLog(None, key=load_key(tmp_path))
+    (tmp_path / "elsewhere").mkdir()
+    other = SecurityLog(None, key=load_key(tmp_path / "elsewhere"))
+    assert first.pseudonym("bob") == again.pseudonym("bob")  # same install, same hash
+    assert first.pseudonym("bob") != first.pseudonym("rob")
+    assert first.pseudonym("bob") != other.pseudonym("bob")  # another install's key
+    assert (tmp_path / KEY_FILE).stat().st_mode & 0o777 == 0o600
+
+
+def test_an_unreadable_key_falls_back_to_one_for_this_run(tmp_path, caplog):
+    from radiate.server.security import KEY_FILE, load_key
+
+    (tmp_path / KEY_FILE).write_text("not hex\n")
+    assert len(load_key(tmp_path)) == 32
+    assert "unknown usernames are hashed with a key for this run only" in caplog.text
 
 
 async def test_a_malformed_sign_in_is_a_bad_request(client):
@@ -312,6 +374,135 @@ async def test_settings_changes_name_paths_never_values(tmp_path):
     assert "new-mqtt-secret-55" not in json.dumps(security.query())
 
 
+HOME_PW = "kettle on the hob"
+
+
+@pytest.fixture
+async def house(tmp_path):
+    """A server with the household setup, and a household user, sam."""
+    from tests.server.test_household_setup import make
+
+    runtime = make(tmp_path)
+    await runtime.step()
+    accounts = Accounts(Store(":memory:").db)
+    accounts.add_user("alex", ADMIN_PW, "admin")
+    accounts.add_user("sam", HOME_PW, "household")
+    login = AuthService(AuthConfig(enabled=True), accounts)
+    async with TestClient(TestServer(create_app(runtime, token=TOKEN, login=login))) as c:
+        c.rt, c.security = runtime, login.security
+        yield c
+
+
+async def as_user(c, username: str, password: str) -> dict:
+    c.session.cookie_jar.clear()
+    me = await sign_in(c, username, password)
+    return {"X-CSRF-Token": me["csrf"]}
+
+
+def changes(security: SecurityLog, action: str) -> list[dict]:
+    return [e for e in events(security, telemetry.SECURITY_CONFIG_CHANGED) if e["action"] == action]
+
+
+async def test_a_household_demand_mode_change_names_who_and_both_values(house):
+    h = await as_user(house, "sam", HOME_PW)
+    before = house.rt.effective_demand_mode.value
+    after = "comfort" if before == "eco" else "eco"
+    r = await house.post("/api/v1/settings", json={"demand_mode": after}, headers=h)
+    assert r.status == 200, await r.text()
+    e = changes(house.security, "mode.changed")[-1]
+    a = e["attributes"]
+    assert a["user.name"] == "sam" and a["user.roles"] == ["household"]
+    assert a["radiate.config.area"] == "mode" and a["radiate.config.key"] == "demand_mode"
+    assert a["radiate.config.before"] == before and a["radiate.config.after"] == after
+    assert e["message"] == f"Demand mode changed from {before} to {after} by sam (household)"
+    # Choosing what is already in use changes nothing, and records nothing.
+    n = len(changes(house.security, "mode.changed"))
+    await house.post("/api/v1/settings", json={"demand_mode": after}, headers=h)
+    assert len(changes(house.security, "mode.changed")) == n
+    # Back to the house file's.
+    await house.post("/api/v1/settings", json={"demand_mode": None}, headers=h)
+    back = changes(house.security, "mode.changed")[-1]
+    assert back["attributes"]["radiate.config.after"] == house.rt.effective_demand_mode.value
+    assert back["message"].endswith(": following the house file")
+
+
+async def test_a_heating_mode_change_names_who_and_both_values(house):
+    h = await as_user(house, "sam", HOME_PW)
+    assert (await house.post("/api/v1/mode", json={"mode": "frost"}, headers=h)).status == 200
+    a = changes(house.security, "mode.changed")[-1]["attributes"]
+    assert a["radiate.config.key"] == "mode" and a["user.name"] == "sam"
+    assert a["radiate.config.before"] == "auto" and a["radiate.config.after"] == "frost"
+
+
+async def test_a_room_adjustment_is_logged_with_old_and_new_values(house):
+    h = await as_user(house, "sam", HOME_PW)
+    section = (await (await house.get("/api/v1/household")).json())["household"]
+    late = {"days": ["mon", "tue"], "keep": "warm", "from": "22:30", "to": "23:00"}
+    section["rooms"]["kitchen"]["adjust"] = [late]
+    r = await house.put("/api/v1/household", json={"household": section}, headers=h)
+    assert r.status == 200, await r.text()
+    [e] = changes(house.security, "household.saved")
+    a = e["attributes"]
+    assert a["user.name"] == "sam" and a["radiate.config.area"] == "household"
+    assert a["radiate.config.key"] == "household.rooms.kitchen.adjust"
+    assert a["radiate.settings.paths"] == ["household.rooms.kitchen.adjust"]
+    assert a["radiate.config.before"] == "none"
+    assert json.loads(a["radiate.config.after"]) == [late]
+    assert e["message"].startswith(
+        "Household setup saved by sam (household): household.rooms.kitchen.adjust from none to "
+    )
+
+
+async def test_changes_to_the_people_name_no_one(house):
+    h = await as_user(house, "alex", ADMIN_PW)
+    section = (await (await house.get("/api/v1/household")).json())["household"]
+    person = next(iter(section["people"]))
+    section["people"][person]["name"] = "Somebody Private"
+    section["temperatures"]["in_use"] = 20
+    r = await house.put("/api/v1/household", json={"household": section}, headers=h)
+    assert r.status == 200, await r.text()
+    saved = changes(house.security, "household.saved")
+    by_key = {e["attributes"]["radiate.config.key"]: e["attributes"] for e in saved}
+    assert set(by_key) == {"household.people", "household.temperatures.in_use"}
+    assert "radiate.config.before" not in by_key["household.people"]
+    assert by_key["household.temperatures.in_use"]["radiate.config.after"] == "20"
+    stored = json.dumps(house.security.query(limit=500))
+    assert "Somebody Private" not in stored and f"people.{person}" not in stored
+
+
+def test_household_changes_are_setting_by_setting():
+    from radiate.server.security import Change, household_changes
+
+    before = {"temperatures": {"in_use": 19, "night": 14}, "rooms": {"a": {"use": "in_use"}}}
+    after = {"temperatures": {"in_use": 19.5, "night": 14}, "rooms": {"a": {"use": "unused"}}}
+    after["rooms"]["a"]["people"] = ["p1"]
+    assert household_changes(before, after) == [
+        Change("household.rooms.a.people", None, None),
+        Change("household.rooms.a.use", "in_use", "unused"),
+        Change("household.temperatures.in_use", "19", "19.5"),
+    ]
+    assert household_changes(before, before) == []
+
+
+async def test_security_events_can_be_kept_out_of_the_export(rt, caplog):
+    caplog.set_level(logging.INFO)
+    cfg, _ = parse_export({"otlp": {"endpoint": "http://collector.invalid", "security": False}})
+    rt.otlp = OtlpExporter(cfg.otlp, rt.house_id, {})
+    security = SecurityLog.memory()
+    async with TestClient(TestServer(create_app(rt, token=TOKEN, security=security))) as c:
+        await c.get("/api/v1/state")
+        r = await c.post("/api/v1/mode", json={"mode": "frost"}, headers=BEARER)
+        assert r.status == 200
+    await rt.step()
+    queued = list(rt.otlp.queues["logs"])
+    assert not [q for q in queued if q["e"].startswith("radiate.security.")]
+    assert telemetry.MODE_CHANGED in {q["e"] for q in queued}  # the rest still goes
+    # Recorded locally regardless: the table and the process log.
+    assert events(security, telemetry.SECURITY_REQUEST_REFUSED)
+    assert changes(security, "mode.changed")
+    assert "event=radiate.security.request.refused" in caplog.text
+
+
 # --- the API and who may read it -----------------------------------------------------------
 
 
@@ -489,6 +680,28 @@ def test_request_text_is_cleaned_before_it_is_stored():
     )
     name = events(security)[0]["user"]
     assert name.startswith("a?b?") and len(name) == 256
+
+
+# --- the web UI -----------------------------------------------------------------------------
+
+
+def _view(html: str, cls: str) -> str:
+    """The markup of one view in index.html, from its opening tag to the next view's."""
+    start = html.index(f'<section class="{cls}"')
+    end = html.index('\n  <section class="', start + 1)
+    return html[start:end]
+
+
+def test_the_security_log_is_under_settings_not_raw_data():
+    from pathlib import Path
+
+    web = Path(__file__).resolve().parents[2] / "web"
+    html = (web / "index.html").read_text()
+    settings, data = _view(html, "settings-view"), _view(html, "data-view")
+    assert 'id="s-security-log"' in settings and 'id="security-body"' in settings
+    assert "security" not in data.lower()  # Raw data shows sensor data only
+    app = (web / "app.js").read_text()
+    assert "rawDataView" not in app and 'id: "security-log"' in app
 
 
 # --- the command line and the start -------------------------------------------------------

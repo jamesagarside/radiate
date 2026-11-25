@@ -348,6 +348,10 @@
             "cli"
           ]
         },
+        "radiate.config.after": {
+          "required": false,
+          "type": "string"
+        },
         "radiate.config.area": {
           "required": true,
           "type": "string",
@@ -355,8 +359,17 @@
             "settings",
             "household",
             "layout",
-            "learning"
+            "learning",
+            "mode"
           ]
+        },
+        "radiate.config.before": {
+          "required": false,
+          "type": "string"
+        },
+        "radiate.config.key": {
+          "required": false,
+          "type": "string"
         },
         "radiate.room.ids": {
           "required": false,

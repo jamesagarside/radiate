@@ -13,6 +13,7 @@ export:
     protocol: http/protobuf             # or http/json
     interval_s: 60
     daily_timestamp: end_of_day         # or day_close
+    security: true                      # false keeps security events out of the export
 ```
 
 `OTLP_SETTINGS` describes every key (type, default, limits, help) for a settings form.
@@ -60,6 +61,9 @@ class OtlpConfig:
     # The once-a-day summary and savings gauges (telemetry `radiate.daily.*`).
     daily_metrics: bool = True
     daily_timestamp: str = "end_of_day"  # one of DAILY_TIMESTAMPS
+    # The security audit events (telemetry `radiate.security.*`, ADR-0008). Off keeps
+    # them out of the export only: Radiate's own security log records them regardless.
+    security: bool = True
 
     def url(self, signal: str) -> str:
         return f"{self.endpoint.rstrip('/')}/v1/{signal}"
@@ -159,6 +163,14 @@ OTLP_SETTINGS: tuple[dict[str, Any], ...] = (
         "choices": list(DAILY_TIMESTAMPS),
         "help": "When daily figures are timed: end_of_day, the day's last second in the "
         "house's time zone; day_close, when Radiate closed the day, a minute or so later.",
+    },
+    {
+        "key": "security",
+        "type": "bool",
+        "default": True,
+        "help": "Send security events (radiate.security.*): sign-ins, refusals and changes, "
+        "with usernames and client addresses. Radiate's own security log keeps them either "
+        "way. Needs logs in signals.",
     },
 )
 
@@ -274,6 +286,7 @@ def _otlp(raw: Any, problems: list[str]) -> OtlpConfig | None:
         dataset = "radiate"
     daily_metrics = _bool(raw, "daily_metrics", True, problems, p)
     daily_timestamp = _choice(raw, "daily_timestamp", "end_of_day", DAILY_TIMESTAMPS, problems, p)
+    security = _bool(raw, "security", True, problems, p)
     return OtlpConfig(
         endpoint=endpoint,
         enabled=enabled,
@@ -288,6 +301,7 @@ def _otlp(raw: Any, problems: list[str]) -> OtlpConfig | None:
         dataset=dataset,
         daily_metrics=daily_metrics,
         daily_timestamp=daily_timestamp,
+        security=security,
     )
 
 

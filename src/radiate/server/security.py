@@ -18,19 +18,29 @@ them. Repeats of a refusal of one kind from one address within a minute are fold
 into one record with `radiate.security.count`, so a flood of bad requests, or of
 made-up usernames, can't flood the log.
 
+A refused password sign-in for a name that matches no account records a keyed hash of
+the name, `unknown:<16 hex>`, never the text: people often type their password in the
+username box. The key (`KEY_FILE`, in the data directory) is made once per install,
+so the same mistyped name gets the same hash and repeats can still be counted.
+
 Recording never raises: a full disk or a locked database costs the audit record and
 one warning, never a request or a tick.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
+import os
 import re
+import secrets
 import sqlite3
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from radiate.export import telemetry
@@ -46,6 +56,11 @@ MAX_TEXT = 256  # longest string kept from a request (a username, a path)
 QUERY_LIMIT = 500
 ORIGIN_SERVER = "server"
 ORIGIN_CLI = "cli"
+# The per-install key for usernames that match no account, in the data directory.
+KEY_FILE = "audit.key"
+KEY_BYTES = 32
+UNKNOWN_PREFIX = "unknown:"
+PSEUDONYM_HEX = 16  # 64 bits of HMAC-SHA256: plenty to tell attempts apart
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -67,7 +82,109 @@ CREATE INDEX IF NOT EXISTS audit_log_at ON audit_log (at);
 _PLAIN = re.compile(r"^[A-Za-z0-9_.:/@+,=\-\[\]]+$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 # The attributes that can come from a request, and so are cleaned and cut short.
-_FREE_TEXT = {"user.name", "user.target.name", "url.path", "source.address"}
+_FREE_TEXT = {
+    "user.name",
+    "user.target.name",
+    "url.path",
+    "source.address",
+    "radiate.config.key",
+    "radiate.config.before",
+    "radiate.config.after",
+}
+MAX_CHANGES = 20  # household settings recorded one by one; past this, one record names all
+
+
+@dataclass(frozen=True, slots=True)
+class Change:
+    """One setting that changed, for a `config.changed` record. `before` and `after`
+    are None where values are not recorded (the people in the household)."""
+
+    path: str
+    before: str | None
+    after: str | None
+
+
+def value_text(value: Any) -> str:
+    """A setting's value as the security log records it: plain text for a string or a
+    number, JSON for anything else, `none` for no value."""
+    if value is None:
+        return "none"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:g}"
+    if isinstance(value, int):
+        return str(value)
+    return json.dumps(value, separators=(",", ":"), sort_keys=True, default=str)
+
+
+def _flat(section: Mapping[str, Any], prefix: str) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in section.items():
+        path = f"{prefix}.{key}"
+        if isinstance(value, Mapping) and value:
+            out.update(_flat(value, path))
+        else:
+            out[path] = value
+    return out
+
+
+def household_changes(before: Mapping[str, Any], after: Mapping[str, Any]) -> list[Change]:
+    """What a household save changed, setting by setting, as house-file paths
+    (`household.rooms.lounge.adjust`), from two `household_section`s.
+
+    Who lives in the house is personal data, so a change under `people`, or to the
+    people a room is for, is recorded by its path without values, and a person's ID
+    never appears: every change to the people is the one path `household.people`.
+    """
+    old, new = _flat(before, "household"), _flat(after, "household")
+    out: list[Change] = []
+    people_changed = False
+    for path in sorted(old.keys() | new.keys()):
+        a, b = old.get(path), new.get(path)
+        if a == b:
+            continue
+        if path.startswith("household.people"):
+            people_changed = True
+        elif path.endswith(".people"):
+            out.append(Change(path, None, None))
+        else:
+            out.append(Change(path, value_text(a), value_text(b)))
+    if people_changed:
+        out.append(Change("household.people", None, None))
+    return sorted(out, key=lambda c: c.path)
+
+
+def load_key(data_dir: str | Path | None) -> bytes:
+    """The per-install key for pseudonyms, from `<data_dir>/audit.key`, made on first
+    use and readable by Radiate's user only. Without a data directory (the demo), or if
+    the file can't be read or written, a key for this process only, with a warning:
+    the same name then hashes differently after a restart."""
+    if data_dir is None:
+        return secrets.token_bytes(KEY_BYTES)
+    path = Path(data_dir) / KEY_FILE
+    try:
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            key = bytes.fromhex(path.read_text(encoding="ascii").strip())
+            if len(key) < KEY_BYTES:
+                raise ValueError("too short") from None
+            return key
+        key = secrets.token_bytes(KEY_BYTES)
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(key.hex() + "\n")
+        return key
+    except (OSError, ValueError) as err:
+        LOG.warning(
+            "security log: can't use %s (%s); unknown usernames are hashed with a key for "
+            "this run only",
+            path,
+            type(err).__name__,
+        )
+        return secrets.token_bytes(KEY_BYTES)
 
 
 def clean(value: str, limit: int = MAX_TEXT) -> str:
@@ -114,8 +231,11 @@ class SecurityLog:
         origin: str = ORIGIN_SERVER,
         clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
+        key: bytes | None = None,
     ):
         self.db = db
+        # For `pseudonym`: `load_key(data_dir)`, or a key for this process only.
+        self._key = key or secrets.token_bytes(KEY_BYTES)
         self.retention_s = retention_days * 86400
         self.origin = origin
         self.clock = clock
@@ -141,6 +261,14 @@ class SecurityLog:
     def memory(cls, retention_days: float = 90.0) -> SecurityLog:
         """A log kept in memory, for the demo without a data directory and for tests."""
         return cls(sqlite3.connect(":memory:", isolation_level=None), retention_days)
+
+    def pseudonym(self, name: str) -> str:
+        """What a sign-in records for a username that matches no account: `unknown:`
+        and 16 hex digits of HMAC-SHA256 under the install's key. The same name always
+        gives the same value on this install, and without the key it can't be reversed,
+        even for a short name."""
+        digest = hmac.new(self._key, name.encode("utf-8", "replace"), hashlib.sha256)
+        return UNKNOWN_PREFIX + digest.hexdigest()[:PSEUDONYM_HEX]
 
     # --- recording ---------------------------------------------------------------------
 

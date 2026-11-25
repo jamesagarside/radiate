@@ -868,6 +868,15 @@ SECTIONS: list[Section] = [
                 choices=("end_of_day", "day_close"),
                 optional=True,
             ),
+            Setting(
+                "export.otlp.security",
+                "Send security events",
+                "bool",
+                "Sign-ins, refusals and changes, with usernames and client addresses. Off "
+                "keeps them out of the export; the security log below keeps them either "
+                "way. On by default.",
+                optional=True,
+            ),
         ),
         covers=("export.otlp.headers",),
     ),

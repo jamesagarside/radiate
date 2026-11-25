@@ -115,14 +115,6 @@ body[data-link="stale"] .data-view { opacity: 0.55; }
 .rd-export-list dd { margin: 0; font-size: 0.88rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .rd-export-list [data-kind="warn"] dd { color: var(--warn); }
 
-/* The security log (admins only): a table of events, refusals tagged in amber. */
-.sl-filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
-.sl-filters .rd-field { min-width: 180px; }
-.sl-table th, .sl-table td { text-align: left; vertical-align: top; }
-.sl-table .sl-detail { white-space: normal; min-width: 24ch; max-width: 60ch; overflow-wrap: anywhere; }
-.sl-table tr[data-kind="warn"] th { box-shadow: inset 4px 0 0 var(--warn); padding-left: 8px; }
-.badge[data-kind="refused"] { background: var(--warn-soft); color: var(--warn); }
-
 @media (hover: hover) and (pointer: fine) {
   .rd-result:hover { background: var(--surface-2); }
   .rd-key:not([aria-pressed="true"]):hover { color: var(--text); border-color: var(--muted); }

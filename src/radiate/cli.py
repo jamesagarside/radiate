@@ -127,9 +127,11 @@ def _state_store(runtime, args):
 
 def _start_security(runtime, store, auth_cfg):
     """The security audit log (ADR-0008), whether or not login is on."""
-    from radiate.server.security import SecurityLog
+    from radiate.server.security import SecurityLog, load_key
 
-    security = SecurityLog(store.db, auth_cfg.audit_days)
+    # The key for hashing usernames that match no account lives beside radiate.db.
+    data_dir = None if str(store.path) == ":memory:" else store.path.parent
+    security = SecurityLog(store.db, auth_cfg.audit_days, key=load_key(data_dir))
     runtime.security = security
     return security
 

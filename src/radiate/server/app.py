@@ -11,6 +11,7 @@ from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
+from radiate.config.household import household_section
 from radiate.export import telemetry
 
 from . import bridge
@@ -21,7 +22,7 @@ from .permissions import ADMIN, HOUSEHOLD_SETTINGS, PUBLIC, allowed, needed_role
 from .runtime import Runtime
 from .savings import savings_view
 from .schedules import schedules_view
-from .security import SecurityLog
+from .security import MAX_CHANGES, Change, SecurityLog, household_changes
 from .suggestions import suggestions_view
 
 RUNTIME = web.AppKey("runtime", Runtime)
@@ -164,22 +165,66 @@ def _record_change(
     action: str,
     area: str,
     message: str,
+    detail: str = "",
     paths: list[str] | None = None,
     rooms: list[str] | None = None,
+    change: Change | None = None,
 ) -> None:
-    """A change to how Radiate runs: who made it and what, never a value."""
+    """A change to how Radiate runs: who made it and what. Old and new values only in
+    `change`, which callers give only for settings that can't hold a secret."""
     ident = request.get(IDENTITY)
+    text = f"{message} by {_actor(ident)}" + (f": {detail}" if detail else "")
     _security(request).record(
         telemetry.SECURITY_CONFIG_CHANGED,
         action,
-        f"{message} by {_actor(ident)}",
+        text,
         {
             **_who(request, ident),
             "radiate.config.area": area,
             "radiate.settings.paths": sorted(paths) if paths is not None else None,
             "radiate.room.ids": rooms,
+            "radiate.config.key": change.path if change is not None else None,
+            "radiate.config.before": change.before if change is not None else None,
+            "radiate.config.after": change.after if change is not None else None,
         },
     )
+
+
+def _record_mode(
+    request: web.BaseRequest, key: str, label: str, before: str, after: str, note: str = ""
+) -> None:
+    """The heating or demand mode changed, from the controls: who, and from what to what."""
+    _record_change(
+        request,
+        "mode.changed",
+        "mode",
+        f"{label} changed from {before} to {after}",
+        note,
+        change=Change(key, before, after),
+    )
+
+
+def _household_section(rt: Runtime) -> dict:
+    """The household in use, as the house file's section, to tell what a save changed."""
+    setup = getattr(rt, "setup", None)
+    site = getattr(setup, "site", None)
+    current = getattr(site, "household", None)
+    return household_section(current) if current is not None else {}
+
+
+def _record_household(request: web.BaseRequest, action: str, message: str, before: dict) -> None:
+    """A household save or revert: one record for each setting it changed, with old and
+    new values (not for the people), or one naming them all past `MAX_CHANGES`."""
+    changes = household_changes(before, _household_section(_rt(request)))
+    paths = [c.path for c in changes]
+    if not changes or len(changes) > MAX_CHANGES:
+        n = len(changes)
+        detail = "nothing changed" if not n else f"{n} settings"
+        _record_change(request, action, "household", message, detail, paths=paths)
+        return
+    for c in changes:
+        detail = c.path if c.before is None else f"{c.path} from {c.before} to {c.after}"
+        _record_change(request, action, "household", message, detail, paths=[c.path], change=c)
 
 
 def _refused(request: web.Request, needed: str) -> web.Response:
@@ -302,7 +347,12 @@ async def boost_store(request: web.Request) -> web.Response:
 
 
 async def set_mode(request: web.Request) -> web.Response:
-    return await _post(request, bridge.set_mode)
+    rt = _rt(request)
+    before = rt.mode.value
+    response = await _post(request, bridge.set_mode)
+    if rt.mode.value != before:
+        _record_mode(request, "mode", "Heating mode", before, rt.mode.value)
+    return response
 
 
 async def reset_learning(request: web.Request) -> web.Response:
@@ -395,16 +445,18 @@ async def household_save(request: web.Request) -> web.Response:
             raise _http_error(err) from err
         if not setup.only_adjustments(await _json(request)):
             return _refused(request, ADMIN)
+    before = _household_section(_rt(request))
     response = await _household(request, "PUT", with_body=True)
     if response.status == 200:
-        _record_change(request, "household.saved", "household", "Household setup saved")
+        _record_household(request, "household.saved", "Household setup saved", before)
     return response
 
 
 async def household_revert(request: web.Request) -> web.Response:
+    before = _household_section(_rt(request))
     response = await _household(request, "DELETE", with_body=False)
     if response.status == 200:
-        _record_change(request, "household.reverted", "household", "Household setup reverted")
+        _record_household(request, "household.reverted", "Household setup reverted", before)
     return response
 
 
@@ -442,7 +494,14 @@ async def set_settings(request: web.Request) -> web.Response:
     role = _role(request)
     if role != ADMIN and not set(await _json(request)) <= HOUSEHOLD_SETTINGS:
         return _refused(request, ADMIN)
-    return await _post(request, bridge.set_settings)
+    rt = _rt(request)
+    before = (rt.demand_mode, rt.effective_demand_mode)
+    response = await _post(request, bridge.set_settings)
+    if (rt.demand_mode, rt.effective_demand_mode) != before:
+        note = "following the house file" if rt.demand_mode is None else ""
+        after = rt.effective_demand_mode.value
+        _record_mode(request, "demand_mode", "Demand mode", before[1].value, after, note)
+    return response
 
 
 async def _config(request: web.Request, method: str, with_body: bool) -> web.Response:
@@ -463,7 +522,8 @@ async def _config(request: web.Request, method: str, with_body: bool) -> web.Res
                     request,
                     f"settings.{verb}",
                     "settings",
-                    f"Settings {verb}: {', '.join(sorted(changed))}",
+                    f"Settings {verb}",
+                    ", ".join(sorted(changed)),
                     paths=changed,
                 )
         return web.json_response(view)

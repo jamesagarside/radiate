@@ -103,7 +103,8 @@ async def login(request: web.Request) -> web.Response:
     wait = auth.limiter.retry_after(key, address)
     if wait > 0:
         seconds = math.ceil(wait)
-        auth.login_failed(request, "local", "rate_limited", f"locked for another {seconds} s", key)
+        why = f"locked for another {seconds} s"
+        auth.login_failed(request, "local", "rate_limited", why, auth.attempted_name(key))
         return web.json_response(
             {"error": "locked", "retry_after_s": seconds},
             status=429,
@@ -119,10 +120,12 @@ async def login(request: web.Request) -> web.Response:
     ok = await asyncio.to_thread(verify_password, candidate, stored)
     if user is None or not ok:
         started = auth.limiter.failed(key, address)
+        # The account's name, or a keyed hash of one that matches none: never the text.
         if user is None:
-            auth.login_failed(request, "local", "unknown_user", "no such user", key)
+            who = auth.attempted_name(key)
+            auth.login_failed(request, "local", "unknown_user", "no such user", who)
         else:
-            auth.login_failed(request, "local", "bad_password", "wrong password", key)
+            auth.login_failed(request, "local", "bad_password", "wrong password", user.username)
         auth.lockouts(started)
         return web.json_response({"error": "invalid"}, status=401)
     auth.limiter.succeeded(key)
