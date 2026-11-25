@@ -28,10 +28,11 @@ To change the schema:
 
 Radiate never sends the name of a person or a place. Rooms are sent by ID and name, people only as counts, and the house by a random ID. A settings change sends which settings changed, never their values, as a value can be a secret.
 
-The one exception is the security audit events, `radiate.security.*` ([ADR-0008](adr/0008-security-audit-log.md)). A security record that doesn't say who and from where is no use, so these carry `user.name` (the Radiate username, or the user a single sign-on provider named) and `source.address` (the client's IP address, from `X-Forwarded-For` only through `auth.trusted_proxies`). No other event carries either. No event ever carries a password, an API token, a session ID, a CSRF token or any other secret: each record keeps only the attributes its event lists below, and the tests check every record, the stored audit log and the process log for them. The same events are kept in Radiate's own security log whether or not the export is on.
+The one exception is the security audit events, `radiate.security.*` ([ADR-0008](adr/0008-security-audit-log.md)). A security record that doesn't say who and from where is no use, so these carry `user.name` (the Radiate username, or the user a single sign-on provider named), `client.address` (the client's IP address, from `X-Forwarded-For` only through `auth.trusted_proxies`) and `user_agent.original`. No other event carries any of them. No event ever carries a password, an API token, a session ID, a CSRF token or any other secret: each record keeps only the attributes its event lists below, and the tests check every record, the stored audit log and the process log for them. The same events are kept in Radiate's own security log whether or not the export is on.
 
-- **Refused sign-ins.** A refused password sign-in, or a lockout, names the account when the name typed matches one. When it matches none, it records `unknown:` and 16 hex digits of an HMAC-SHA256 of the name instead of the text, as a name that matches nothing is often a password typed in the wrong box. The key is made once per install and kept in the data directory as `audit.key`, readable by Radiate's user only, and never leaves the house, so the same mistyped name always gives the same value (repeats can be counted) but the value can't be turned back into the name, even for a short one, without that file. A name a single sign-on provider asserted is recorded as it is: the provider checked it, and it was never typed into Radiate.
+- **Refused sign-ins.** A refused password sign-in, or a lockout, names the account when the name typed matches one. When it matches none, it sends no `user.name`, only OpenTelemetry's `user.hash`: 16 hex digits of an HMAC-SHA256 of the name, as a name that matches nothing is often a password typed in the wrong box. Radiate's own security log shows it as `unknown:` and the hash. The key is made once per install and kept in the data directory as `audit.key`, readable by Radiate's user only, and never leaves the house, so the same mistyped name always gives the same value (repeats can be counted) but the value can't be turned back into the name, even for a short one, without that file. A name a single sign-on provider asserted is recorded as it is: the provider checked it, and it was never typed into Radiate.
 - **Changes with values.** A change to the heating mode or the demand mode, and each setting changed in the household setup (a room adjustment from the week view, a temperature), carries `radiate.config.key` with its old and new values in `radiate.config.before` and `radiate.config.after`. None of these can hold a secret. Changes to the people in the household are recorded as `household.people`, with no values and no person's ID. Settings saved in the Settings view still carry only their paths.
+- **Day-to-day controls.** With `auth.audit_controls` on, the default, a setpoint hold, Fire lit or out, a hot-water boost, and Away or Home are `radiate.security.control.used` records: who, which control, what it was set to, and the room or the household member's ID (`radiate.person.id`). Never where anyone is: presence reported by Home Assistant is not recorded here.
 - **Keeping them in the house.** `export.otlp.security: false` keeps every security event out of the export, while the rest is sent. Radiate still records them in its own security log and the process log.
 
 ## Resource
@@ -64,6 +65,20 @@ A record's time is when it happened. A mode or settings change made through the 
 
 Security events (`radiate.security.*`) follow ECS: `event.category` is `authentication`, `web`, `iam` or `configuration`, `event.type` says what within it (`start`, `end`, `info`, `access`, `change`, `creation`, `deletion`), and `event.outcome` is `success` or `failure`, so an Elastic Security rule or a SIEM reads them without mapping. Refusals of one kind from one address within a minute are folded: the first is sent at once, and one more record carries `radiate.security.count`, how many followed it. Room events carry `radiate.room.id`, and `radiate.room.name` when the room is in the house file.
 
+### OpenTelemetry conformance
+
+Security events follow the OpenTelemetry Logs data model and semantic conventions wherever a convention exists, checked against the semantic conventions registry in November 2026:
+
+- **Event name** in the LogRecord's `EventName` field (protobuf field 12), never an attribute. The tests encode a request and compare it byte for byte with the official `opentelemetry-proto` classes.
+- **Severity**: `SeverityNumber` 9 with `SeverityText` `INFO` for a success, 13 with `WARN` for a failure (a refused sign-in or request, a 403, a lockout starting). A test checks every security event against its outcome.
+- **Who**: `user.name`, `user.roles` and, for a name that matches no account, `user.hash`, all from the `user` registry.
+- **From where**: `client.address` (stable). The conventions use it for the client behind any intermediaries when observed from the server, which is what Radiate records once it has followed `X-Forwarded-For` through `auth.trusted_proxies`. `source.address` is for the network source and is not used.
+- **The request**: `http.request.method`, `url.path` and `user_agent.original`. A failure's class is in `error.type`, with low-cardinality values such as `bad_password` or `bad_token`.
+- **Resource**: `service.name`, `service.version` and `service.instance.id`, as listed under [Resource](#resource).
+- **Everything Radiate-specific** is under `radiate.`: the auth method, lockout scope and duration, the config and control attributes, `radiate.person.id`, `radiate.security.count`.
+
+Where OpenTelemetry has no convention, ECS names are used instead, as Elastic Security reads them: `event.action`, `event.category`, `event.type`, `event.outcome`, `event.reason`, `user.target.name` and `user.target.roles`. OpenTelemetry defines none of these, and the `user` attributes are still at development stability, so a future release of the conventions may name them differently; the schema version will say if Radiate follows.
+
 <!-- generated: events -->
 | Event | Severity | `event.action` | Description |
 |---|---|---|---|
@@ -86,6 +101,7 @@ Security events (`radiate.security.*`) follow ECS: `event.category` is `authenti
 | `radiate.security.lockout.ended` | INFO | `lockout.ended`. | A sign-in lockout ended. Security audit. |
 | `radiate.security.user.changed` | INFO | `user.added`, `user.removed`, `user.password_reset`, `user.role_changed`. | A user was added, removed, given a new password or a new role, with `radiate users`. Security audit. |
 | `radiate.security.config.changed` | INFO | `settings.saved`, `settings.reverted`, `household.saved`, `household.reverted`, `layout.saved`, `learning.reset`, `mode.changed`. | Someone changed how Radiate runs: settings, the household setup, the layout, learned models, or the heating or demand mode. Who and what. Old and new values only for a mode and the household, which hold no secret; one record for each household setting changed, or one naming them all past 20. Security audit. |
+| `radiate.security.control.used` | INFO | `setpoint.held`, `setpoint.cleared`, `fire.lit`, `fire.out`, `store.boosted`, `away.set`, `away.cleared`, `home.said`. | Someone used a day-to-day control: held a room's setpoint or cleared it, said a fire was lit or out, boosted the hot water, or said someone was away or home. Who and what, never where anyone is. Only with `auth.audit_controls` on, the default. Security audit. |
 | `radiate.security.login.config` | INFO | `login.config`. | How Radiate lets people in, at every start. Security audit. |
 <!-- end generated: events -->
 
@@ -198,10 +214,11 @@ Someone signed in: with a password, OIDC or SAML. Security audit. Severity INFO 
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `user.name` (ECS) | string | required | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed hash when the name matches no account, never the text typed. Left out when no one is known, and for the API token, ingress and the command line. |
-| `user.roles` (ECS) | string[] | required | Their Radiate role: `admin`, `household` or `viewer`. |
-| `source.address` (OpenTelemetry) | string | optional | The client's IP address: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `user.name` (OpenTelemetry) | string | required | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.roles` (OpenTelemetry) | string[] | required | Their Radiate role: `admin`, `household` or `viewer`. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
 | `radiate.auth.method` | string | required | How the person signed in, or how the request was authenticated. One of `password`, `oidc`, `saml`, `session`, `token`, `ingress`, `open`, `cli`. |
+| `user_agent.original` (OpenTelemetry) | string | optional | The request's User-Agent header, cut to 256 characters. |
 
 #### `radiate.security.login.failed`
 
@@ -213,9 +230,11 @@ A sign-in was refused, with why. Security audit. Severity WARN (13). Body: `Sign
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `user.name` (ECS) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed hash when the name matches no account, never the text typed. Left out when no one is known, and for the API token, ingress and the command line. |
-| `source.address` (OpenTelemetry) | string | optional | The client's IP address: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `user.name` (OpenTelemetry) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.hash` (OpenTelemetry) | string | optional | For a refused password sign-in or a lockout whose name matches no account: 16 hex digits of HMAC-SHA256 of the name under a per-install key, instead of `user.name`, as such a name is often a password typed in the wrong box. The same name always gives the same hash on one install. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
 | `radiate.auth.method` | string | required | How the person signed in, or how the request was authenticated. One of `password`, `oidc`, `saml`, `session`, `token`, `ingress`, `open`, `cli`. |
+| `user_agent.original` (OpenTelemetry) | string | optional | The request's User-Agent header, cut to 256 characters. |
 | `error.type` (OpenTelemetry) | string | required | Why the sign-in was refused. One of `bad_request`, `bad_password`, `unknown_user`, `rate_limited`, `bad_state`, `provider_error`, `bad_signature`, `wrong_issuer`, `wrong_audience`, `expired`, `bad_nonce`, `bad_claims`, `replayed`, `no_user`, `not_permitted`. |
 | `radiate.security.count` | int, `{event}` | optional | How many identical events this record stands for, when repeats within a minute were folded into one. Left out for one. |
 
@@ -229,10 +248,11 @@ Someone signed out. Security audit. Severity INFO (9). Body: `Signed out: alice`
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `user.name` (ECS) | string | required | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed hash when the name matches no account, never the text typed. Left out when no one is known, and for the API token, ingress and the command line. |
-| `user.roles` (ECS) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
-| `source.address` (OpenTelemetry) | string | optional | The client's IP address: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `user.name` (OpenTelemetry) | string | required | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.roles` (OpenTelemetry) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
 | `radiate.auth.method` | string | optional | How the person signed in, or how the request was authenticated. One of `password`, `oidc`, `saml`, `session`, `token`, `ingress`, `open`, `cli`. |
+| `user_agent.original` (OpenTelemetry) | string | optional | The request's User-Agent header, cut to 256 characters. |
 
 #### `radiate.security.session.ended`
 
@@ -244,8 +264,8 @@ Sessions ended without signing out: they expired, or a password, role or account
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `user.name` (ECS) | string | required | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed hash when the name matches no account, never the text typed. Left out when no one is known, and for the API token, ingress and the command line. |
-| `user.roles` (ECS) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
+| `user.name` (OpenTelemetry) | string | required | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.roles` (OpenTelemetry) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
 | `radiate.auth.method` | string | optional | How the person signed in, or how the request was authenticated. One of `password`, `oidc`, `saml`, `session`, `token`, `ingress`, `open`, `cli`. |
 | `event.reason` (ECS) | string | required | Why the session ended: it reached `auth.session_days`, it was idle for `auth.idle_days`, or the user's password, role or account changed. One of `expired`, `idle`, `password_reset`, `role_changed`, `user_removed`. |
 | `radiate.sessions.ended` | int, `{session}` | required | How many sessions ended. |
@@ -260,7 +280,8 @@ An API request or a stream connection was refused for missing or wrong credentia
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `source.address` (OpenTelemetry) | string | optional | The client's IP address: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `user_agent.original` (OpenTelemetry) | string | optional | The request's User-Agent header, cut to 256 characters. |
 | `error.type` (OpenTelemetry) | string | required | What was wrong: no credentials, a wrong API token, or a session cookie that is unknown, expired or signed out. One of `no_credentials`, `bad_token`, `bad_session`. |
 | `http.request.method` (OpenTelemetry) | string | optional | The request's HTTP method. |
 | `url.path` (OpenTelemetry) | string | optional | The request's path, never its query string. |
@@ -276,10 +297,11 @@ An authenticated request was refused (403): the role may not make it, the CSRF t
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `user.name` (ECS) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed hash when the name matches no account, never the text typed. Left out when no one is known, and for the API token, ingress and the command line. |
-| `user.roles` (ECS) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
-| `source.address` (OpenTelemetry) | string | optional | The client's IP address: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `user.name` (OpenTelemetry) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.roles` (OpenTelemetry) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
 | `radiate.auth.method` | string | optional | How the person signed in, or how the request was authenticated. One of `password`, `oidc`, `saml`, `session`, `token`, `ingress`, `open`, `cli`. |
+| `user_agent.original` (OpenTelemetry) | string | optional | The request's User-Agent header, cut to 256 characters. |
 | `error.type` (OpenTelemetry) | string | required | Why: the role may not make the request, the CSRF token was missing or wrong, or the browser's Origin was another site's. One of `forbidden`, `csrf`, `origin`. |
 | `radiate.auth.needed_role` | string | optional | The lowest role that may make the request. One of `viewer`, `household`, `admin`. |
 | `http.request.method` (OpenTelemetry) | string | optional | The request's HTTP method. |
@@ -296,8 +318,9 @@ Too many failed password sign-ins locked a username or a client address. Securit
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `user.name` (ECS) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed hash when the name matches no account, never the text typed. Left out when no one is known, and for the API token, ingress and the command line. |
-| `source.address` (OpenTelemetry) | string | optional | The client's IP address: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `user.name` (OpenTelemetry) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.hash` (OpenTelemetry) | string | optional | For a refused password sign-in or a lockout whose name matches no account: 16 hex digits of HMAC-SHA256 of the name under a per-install key, instead of `user.name`, as such a name is often a password typed in the wrong box. The same name always gives the same hash on one install. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
 | `radiate.lockout.scope` | string | required | What is locked: a username, after 5 failures in 15 minutes, or a client address, after 20. One of `username`, `address`. |
 | `radiate.lockout.duration` | double, `s` | required | How long the lockout lasts. |
 
@@ -311,8 +334,9 @@ A sign-in lockout ended. Security audit. Severity INFO (9). Body: `Sign-in locko
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `user.name` (ECS) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed hash when the name matches no account, never the text typed. Left out when no one is known, and for the API token, ingress and the command line. |
-| `source.address` (OpenTelemetry) | string | optional | The client's IP address: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `user.name` (OpenTelemetry) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.hash` (OpenTelemetry) | string | optional | For a refused password sign-in or a lockout whose name matches no account: 16 hex digits of HMAC-SHA256 of the name under a per-install key, instead of `user.name`, as such a name is often a password typed in the wrong box. The same name always gives the same hash on one install. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
 | `radiate.lockout.scope` | string | required | What is locked: a username, after 5 failures in 15 minutes, or a client address, after 20. One of `username`, `address`. |
 
 #### `radiate.security.user.changed`
@@ -339,16 +363,39 @@ Someone changed how Radiate runs: settings, the household setup, the layout, lea
 | `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
 | `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
 | `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
-| `user.name` (ECS) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried, or `unknown:` and a keyed hash when the name matches no account, never the text typed. Left out when no one is known, and for the API token, ingress and the command line. |
-| `user.roles` (ECS) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
-| `source.address` (OpenTelemetry) | string | optional | The client's IP address: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `user.name` (OpenTelemetry) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.roles` (OpenTelemetry) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
 | `radiate.auth.method` | string | optional | How the person signed in, or how the request was authenticated. One of `password`, `oidc`, `saml`, `session`, `token`, `ingress`, `open`, `cli`. |
+| `user_agent.original` (OpenTelemetry) | string | optional | The request's User-Agent header, cut to 256 characters. |
 | `radiate.config.area` | string | required | What changed: the settings saved from the web UI, the household setup, the layout, learned models, or the heating or demand mode. One of `settings`, `household`, `layout`, `learning`, `mode`. |
 | `radiate.settings.paths` | string[] | optional | For settings and the household, which changed, as house-file paths. Settings never carry their values, as a value can be a secret. |
 | `radiate.config.key` | string | optional | For a mode or one household setting, the one that changed: `mode` (the heating mode), `demand_mode`, or a house-file path such as `household.rooms.lounge.adjust`. |
 | `radiate.config.before` | string | optional | With `radiate.config.key`, its value before the change, as text (JSON for a list or mapping), cut to 256 characters. Left out for the people in the household. |
 | `radiate.config.after` | string | optional | With `radiate.config.key`, its value after the change, as `radiate.config.before`. |
 | `radiate.room.ids` | string[] | optional | For learning, the rooms that were reset. |
+| `http.request.method` (OpenTelemetry) | string | optional | The request's HTTP method. |
+| `url.path` (OpenTelemetry) | string | optional | The request's path, never its query string. |
+
+#### `radiate.security.control.used`
+
+Someone used a day-to-day control: held a room's setpoint or cleared it, said a fire was lit or out, boosted the hot water, or said someone was away or home. Who and what, never where anyone is. Only with `auth.audit_controls` on, the default. Security audit. Severity INFO (9). Body: `Lounge held at 21.5° by sam (household)`.
+
+| Attribute | Type | | Description |
+|---|---|---|---|
+| `event.action` (ECS) | string | required | The reason code, such as `boiler.lead`, or the action for events without one. |
+| `event.category` (ECS) | string | required | ECS category: `authentication` for signing in and credentials, `web` for a request refused after it was authenticated, `iam` for user management, `configuration` for changes to how Radiate runs. One of `authentication`, `web`, `iam`, `configuration`. |
+| `event.type` (ECS) | string | required | ECS type within the category. One of `start`, `end`, `info`, `access`, `change`, `creation`, `deletion`. |
+| `event.outcome` (ECS) | string | required | Whether what was tried succeeded. One of `success`, `failure`. |
+| `user.name` (OpenTelemetry) | string | optional | Who: the Radiate username, or the user the single sign-on provider named. For a refused password sign-in or a lockout, the account tried; a name that matches no account is never recorded, `user.hash` stands for it. Left out when no one is known, and for the API token, ingress and the command line. |
+| `user.roles` (OpenTelemetry) | string[] | optional | Their Radiate role: `admin`, `household` or `viewer`. |
+| `client.address` (OpenTelemetry) | string | optional | The client's IP address, behind any trusted proxies: the connection's, or from X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. Left out for the command line. |
+| `radiate.auth.method` | string | optional | How the person signed in, or how the request was authenticated. One of `password`, `oidc`, `saml`, `session`, `token`, `ingress`, `open`, `cli`. |
+| `user_agent.original` (OpenTelemetry) | string | optional | The request's User-Agent header, cut to 256 characters. |
+| `radiate.control.kind` | string | required | Which day-to-day control was used. One of `setpoint`, `fire`, `boost`, `away`, `home`. |
+| `radiate.control.value` | string | optional | What it was set to: the setpoint in °C or `cleared`, `lit` or `out`, the boost's minutes (0 stops it), the local time someone counts as away until or `cleared`, or `home`. Never where anyone is. |
+| `radiate.room.id` | string | optional | The room's ID from the house file. |
+| `radiate.person.id` | string | optional | For Away and Home, the household member's ID from the house file. |
 | `http.request.method` (OpenTelemetry) | string | optional | The request's HTTP method. |
 | `url.path` (OpenTelemetry) | string | optional | The request's path, never its query string. |
 
@@ -475,7 +522,7 @@ Amended in place before release: 1.0 was merged but never deployed or turned on 
 
 - The `event.name` attribute is gone. The event name is in the log record's event name field (OpenTelemetry's `event_name`) only, as current OpenTelemetry semantic conventions have it.
 - `radiate.auth.denied`, a count of refused requests each tick, is gone. The security audit events, `radiate.security.*`, report each refusal with its reason, who and from where ([ADR-0008](adr/0008-security-audit-log.md)).
-- Added: the eleven `radiate.security.*` events and their ECS and OpenTelemetry attributes, including `radiate.config.key`, `radiate.config.before` and `radiate.config.after` on `radiate.security.config.changed`, and its `mode` area.
+- Added: the twelve `radiate.security.*` events and their OpenTelemetry and ECS attributes (`client.address`, never `source.address`; `user.hash` for an unknown username; `user_agent.original`), `radiate.security.control.used` for day-to-day controls, and `radiate.config.key`, `radiate.config.before` and `radiate.config.after` on `radiate.security.config.changed`, and its `mode` area.
 - Added: `export.otlp.security` (default `true`), which keeps security events out of the export when `false`.
 
 The first versioned schema. Before it, the export sent no `radiate.schema.version`. These are breaking changes from what earlier builds sent:

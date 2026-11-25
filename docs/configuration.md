@@ -259,6 +259,7 @@ User login for the web UI ([ADR-0006](adr/0006-user-login.md)). Without this sec
 | `session_days` | 30 | A session ends this many days after sign-in, 1 to 400 |
 | `idle_days` | 7 | A session ends after this many days without use, 1 to `session_days` |
 | `audit_days` | 90 | How long the [security log](deployment.md#security-log) keeps an event, 1 to 3650. It applies whether or not `enabled` is on, as refused API requests are logged too |
+| `audit_controls` | `true` | Also record day-to-day controls in the security log: setpoint holds, Fire lit, hot-water boosts, Away and Home, with who and what, never where anyone is. Changed from the Settings view, it applies at once. Mode and household changes are recorded either way |
 | `secure_cookie` | `auto` | `auto` marks the session cookie `Secure` when the request came over HTTPS (directly, or from a trusted proxy that says so). `always` or `never` override it; use `never` only on a LAN for testing |
 | `public_url` | none | The address people use, such as `https://heating.example.org`. Required for single sign-on, which builds its redirect addresses from it. Must be `https` unless the host is `localhost` |
 | `trusted_proxies` | none | IP addresses or networks of your reverse proxies. Only requests from these have their `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` headers believed |
