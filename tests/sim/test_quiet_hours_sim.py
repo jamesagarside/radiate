@@ -4,12 +4,13 @@ import dataclasses
 
 import pytest
 
+from radiate.core import DAMP_FLOOR_C
 from radiate.core.quiet import quiet_until
+from radiate.sim.compare import FLOOR_SLACK_K
 from radiate.sim.reference import house_config
 from radiate.sim.runner import run
 
 QUIET = (22 * 60 + 30, 6 * 60)
-FROST_C = 7.0
 
 
 def night_starts(result) -> list[int]:
@@ -26,13 +27,15 @@ def runs():
     return out
 
 
-def test_the_boiler_never_starts_in_quiet_hours(runs):
-    assert night_starts(runs["normal"])  # on a cold night the house would heat
-    assert night_starts(runs["quiet"]) == []
+def test_fewer_burns_start_in_quiet_hours(runs):
+    # On a cold night the house heats to its 16 °C night setpoints; with quiet hours
+    # only to hold the damp floor.
+    assert night_starts(runs["normal"])
+    assert len(night_starts(runs["quiet"])) < len(night_starts(runs["normal"]))
 
 
-def test_guards_hold_and_rooms_stay_above_frost(runs):
+def test_guards_hold_and_rooms_stay_at_the_damp_floor(runs):
     r = runs["quiet"]
     assert r.guard_violations == 0
     assert r.max_starts_in_hour <= 3
-    assert r.min_room[0] > FROST_C
+    assert r.min_room[0] >= DAMP_FLOOR_C - FLOOR_SLACK_K

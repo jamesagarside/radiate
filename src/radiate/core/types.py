@@ -150,9 +150,13 @@ class HouseConfig:
     hysteresis_k: float = 0.3
     internal_sensor_hysteresis_k: float = 1.0
     # Quiet hours (spec 5.10): a local (start, end) in minutes of day, which may cross
-    # midnight, with no heating but frost protection. None: off. The caller works out
+    # midnight, with no heating but to hold the damp floor. None: off. The caller works out
     # whether it applies now and says so in `Snapshot.quiet_until_min`.
     quiet_hours: tuple[int, int] | None = None
+    # Preferred heat sinks (spec 5.4): room ids tried first, in order, when the burner
+    # needs somewhere for its heat; `heat_sinks_quiet` while the house's quiet hours hold.
+    heat_sinks: tuple[str, ...] = ()
+    heat_sinks_quiet: tuple[str, ...] = ()
 
     def room(self, room_id: str) -> RoomConfig:
         for r in self.rooms:
@@ -242,7 +246,7 @@ class Snapshot:
     heating_burner: bool | None = None
     store_burner: bool | None = None
     # Inside quiet hours (spec 5.10): the local minute of day they end. None outside
-    # them. Rooms without an override heat only for frost protection meanwhile, and
+    # them. Rooms without an override heat only to hold the damp floor meanwhile, and
     # optimum start waits for the end. The store is not affected.
     quiet_until_min: int | None = None
 

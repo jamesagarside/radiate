@@ -1242,7 +1242,7 @@ class Runtime:
 
         `snap.minute_of_day` is the driver's local wall time (`zoneinfo`, so daylight
         saving is handled), the same clock the schedules use. The core holds every room
-        without an override at frost protection while quiet hours last, including a
+        without an override at the damp floor while quiet hours last, including a
         return warm-up (`_apply_return`), which is a next setpoint like any other.
         """
         apply_quiet(self.cfg, snap)

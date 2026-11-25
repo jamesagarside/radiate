@@ -472,7 +472,7 @@ The temperature a room's schedule, or an override, asks for now.
 Symbol `T_set`, °C. Code: `RoomInput.setpoint`.
 
 **Target**:
-The temperature Radiate is heating a room towards this tick: the setpoint, the next setpoint while preheating, or the frost threshold in `off` and `frost` modes and during quiet hours.
+The temperature Radiate is heating a room towards this tick: the setpoint, the next setpoint while preheating, the frost threshold in `off` and `frost` modes, or the damp floor during quiet hours.
 Code: `RoomState.target`, API `rooms[].target`.
 
 **Override**:
@@ -561,6 +561,11 @@ A room opened as somewhere for the burner's heat to go, because too few radiator
 Code: `_ensure_sink`, reason `boiler.dump_room`, API `rooms[].topup` with `extend` false, UI badge "Heat sink".
 _Avoid_: dump room.
 
+**Preferred heat sinks**:
+Rooms the house wants opened first, in order, when the burner needs a heat sink: one list for the house's quiet hours, one for other times. Other rooms follow in the usual order, and a room in quiet hours still opens only when no other room can.
+Code: `HouseConfig.heat_sinks`, `HouseConfig.heat_sinks_quiet`, `prefer` in `_topup_candidates`, config keys `house.heat_sinks.quiet_hours` and `house.heat_sinks.other_times`.
+_Avoid_: spare heat rooms, dump rooms.
+
 **Open-path guarantee**:
 During lead and firing, the rooms calling or topped up, each counted as one fully open radiator, plus the bypass equivalent must add up to at least the sink minimum (default 1.5 fully open radiators). If not, Radiate opens heat sinks.
 Code: `HouseConfig.sink_min`, `_ensure_sink`.
@@ -645,7 +650,7 @@ The boiler start forced by a room below the frost threshold.
 Code: `frost`, `hard_frost` in `decide`.
 
 **Quiet hours**:
-A nightly local time window with no heating, such as 22:30 to 06:00, which may cross midnight. Inside it every room without an override is held at the frost threshold, and optimum start waits for the end. The store, a burn finishing its minimum burn and frost protection are not affected. Off unless set ([spec 5.10](spec.md#510-quiet-hours)).
+A nightly local time window with no heating, such as 22:30 to 06:00, which may cross midnight. Inside it every room without an override is held at the damp floor (12 °C), or its setpoint if lower, and optimum start waits for the end. The store, a burn finishing its minimum burn and frost protection are not affected. Off unless set ([spec 5.10](spec.md#510-quiet-hours)).
 A room can have its own window as well, on top of the house's. A quiet room is not used as a heat sink while another room can be, and its valve is written once as its window starts and once as it ends.
 Code: `HouseConfig.quiet_hours`, `RoomConfig.quiet_hours`, `Snapshot.quiet_until_min`, `RoomInput.quiet_until_min`, `apply_quiet` in `radiate.core.quiet`, `Runtime._apply_quiet`, config keys `house.quiet_hours` and `rooms[].quiet_hours`, API `quiet` in `state` and in each room, reasons `demand.quiet_hours` and `boiler.quiet_sink`.
 _Avoid_: night mode, do not disturb, night setback (setback is a room use).

@@ -365,6 +365,44 @@ def parse_quiet_hours(raw: Any) -> tuple[tuple[int, int] | None, str | None]:
     return (start, end), None
 
 
+HEAT_SINK_TIMES = ("quiet_hours", "other_times")
+
+
+def _heat_sinks(
+    ctx: _Ctx, raw: Any, rooms: list[RoomConfig], devices: dict[str, RoomDevices]
+) -> dict[str, tuple[str, ...]]:
+    """`house.heat_sinks` (spec 5.4): preferred heat sinks, `quiet_hours` while the
+    house's quiet hours hold and `other_times` otherwise, each an ordered list of ids of
+    rooms with a valve Radiate drives."""
+    if raw is None:
+        raw = {}  # an absent section is checked as empty, like the others
+    if not isinstance(raw, dict):
+        ctx.err("house.heat_sinks", "expected a mapping with quiet_hours and other_times")
+        return {}
+    ctx.unknown(raw, set(HEAT_SINK_TIMES), "house.heat_sinks.")
+    valved = {
+        r.id
+        for r in rooms
+        if r.controllable and devices.get(r.id) is not None and devices[r.id].trv is not None
+    }
+    out: dict[str, tuple[str, ...]] = {}
+    for key in HEAT_SINK_TIMES:
+        value = raw.get(key)
+        path = f"house.heat_sinks.{key}"
+        if value is None:
+            continue
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            ctx.err(path, "expected a list of room ids")
+            continue
+        for rid in value:
+            if rid not in valved:
+                ctx.err(path, f"{rid!r} is not a room with a valve Radiate drives")
+        if len(set(value)) != len(value):
+            ctx.err(path, "a room is listed twice")
+        out[key] = tuple(value)
+    return out
+
+
 # --- sections --------------------------------------------------------------------------
 
 
@@ -1210,6 +1248,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "history_days",
             "fire_flag_hours",
             "quiet_hours",
+            "heat_sinks",
         },
         "house.",
     )
@@ -1245,6 +1284,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     quiet_hours, quiet_problem = parse_quiet_hours(house.get("quiet_hours"))
     if quiet_problem:
         ctx.err("house.quiet_hours", quiet_problem)
+    sinks = _heat_sinks(ctx, house.get("heat_sinks"), rooms, devices)
     cfg = HouseConfig(
         rooms=tuple(rooms),
         boiler=_boiler(ctx, ctx.section(data, "boiler")),
@@ -1253,6 +1293,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         suggestions=_suggestions(ctx, ctx.section(data, "suggestions")),
         balancing=balancing,
         quiet_hours=quiet_hours,
+        heat_sinks=sinks.get("other_times", ()),
+        heat_sinks_quiet=sinks.get("quiet_hours", ()),
     )
     mqtt = _mqtt(ctx, ctx.section(data, "mqtt"))
     shelly = _shelly(ctx, ctx.section(data, "shelly"))

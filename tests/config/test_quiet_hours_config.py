@@ -98,3 +98,34 @@ def test_a_room_window_is_in_the_settings_view_per_room():
     assert found is not None
     section, setting = found
     assert section.per_room and not setting.restart and setting.optional
+
+
+def test_preferred_heat_sinks():
+    s = site(heat_sinks={"quiet_hours": ["dining"], "other_times": ["bedroom_3", "lounge"]})
+    assert s.house.heat_sinks_quiet == ("dining",)
+    assert s.house.heat_sinks == ("bedroom_3", "lounge")
+    assert site().house.heat_sinks == () and site().house.heat_sinks_quiet == ()
+
+
+def test_preferred_heat_sinks_are_checked():
+    with pytest.raises(ConfigError) as err:
+        site(
+            heat_sinks={
+                "quiet_hours": ["dining", "stairs", "attic"],
+                "other_times": ["lounge", "lounge"],
+                "evenings": [],
+            }
+        )
+    problems = "\n".join(err.value.problems)
+    assert "house.heat_sinks.quiet_hours: 'stairs' is not a room with a valve" in problems
+    assert "house.heat_sinks.quiet_hours: 'attic' is not a room with a valve" in problems
+    assert "house.heat_sinks.other_times: a room is listed twice" in problems
+    assert "house.heat_sinks.evenings" in problems
+    with pytest.raises(ConfigError):
+        site(heat_sinks={"quiet_hours": "dining"})
+
+
+def test_preferred_heat_sinks_are_in_the_settings_view():
+    for key in ("quiet_hours", "other_times"):
+        section, setting = setting_for(f"house.heat_sinks.{key}")
+        assert section.id == "house" and setting.kind == "list" and not setting.restart

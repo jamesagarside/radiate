@@ -1,4 +1,4 @@
-"""Quiet hours: a nightly window with no heating except frost protection (spec 5.10).
+"""Quiet hours: a nightly window with no heating but to hold the damp floor (spec 5.10).
 
 The window is local wall-clock minutes, `(start, end)`, and may cross midnight
 ("22:30-06:00" is `(1350, 360)`). Pure: the caller works out the house's local minute

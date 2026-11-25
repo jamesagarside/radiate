@@ -136,7 +136,7 @@ def test_the_valve_is_written_once_at_the_start_and_once_at_the_end():
     settings = {m: (a.valves["bed"].opening, a.valves["bed"].setpoint) for m, a, *_ in out}
     night = {settings[m] for m in list(range(23 * 60, 1440)) + list(range(0, 8 * 60))}
     assert len(night) == 1
-    assert night.pop()[1] == 7.0  # held at frost protection
+    assert night.pop()[1] == 12.0  # held at the damp floor
     assert settings[22 * 60 + 59] != settings[23 * 60]  # written as the window starts
     assert settings[8 * 60] != settings[7 * 60 + 59]  # and as it ends
 

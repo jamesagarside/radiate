@@ -124,6 +124,8 @@ def apply_live(rt: Runtime, site: SiteConfig) -> None:
         suggestions=new.suggestions,
         balancing=new.balancing,
         quiet_hours=new.quiet_hours,
+        heat_sinks=new.heat_sinks,
+        heat_sinks_quiet=new.heat_sinks_quiet,
         # Rooms stay as they started, but each room's quiet hours apply live.
         rooms=tuple(
             dataclasses.replace(rc, quiet_hours=_room_quiet(new, rc.id)) for rc in cfg.rooms

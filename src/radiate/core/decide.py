@@ -340,8 +340,9 @@ def _quiet(snap: Snapshot, inp: RoomInput) -> bool:
 def _target(cfg: HouseConfig, snap: Snapshot, inp: RoomInput) -> float:
     if snap.mode is Mode.AUTO:
         if _quiet(snap, inp):
-            # Frost protection only, as in the `frost` mode; never above the setpoint.
-            return min(inp.setpoint, cfg.boiler.frost_c)
+            # Held at the damp floor (spec 5.10, decided 2026-11-25), never above the
+            # setpoint. Frost protection below it applies as always.
+            return min(inp.setpoint, cfg.boiler.damp_floor_c)
         return inp.setpoint
     return cfg.boiler.frost_c
 
@@ -1084,13 +1085,14 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         if rc.id in quiet_held and not rs.calling and not rs.topup:
             # Last, so it is the room's reason in the API: why it is not heating.
             until = _quiet_until(snap, inp) or 0
+            floor = min(inp.setpoint, bcfg.damp_floor_c)
             reasons.append(
                 Reason(
                     "demand.quiet_hours",
-                    f"{rc.name}: quiet hours, no heating until {clock_text(until)} "
-                    "(frost protection stays on)",
+                    f"{rc.name}: quiet hours until {clock_text(until)}, "
+                    f"heating only below {floor:.0f} °C",
                     rc.id,
-                    values={"until_min": float(until)},
+                    values={"until_min": float(until), "floor_c": floor},
                 )
             )
 
@@ -1351,9 +1353,11 @@ def _topup_candidates(
     st: EngineState,
     by_use: bool = False,
     quiet: bool = False,
+    prefer: tuple[str, ...] = (),
 ) -> list[RoomConfig]:
     """Rooms that may be topped up or opened as a heat sink. A room in quiet hours is
-    left out (spec 5.10); with `quiet`, only rooms in quiet hours are given."""
+    left out (spec 5.10); with `quiet`, only rooms in quiet hours are given, those with
+    a quiet window of their own last. Rooms in `prefer` come first, in its order."""
     out = []
     for rc in cfg.rooms:
         if not rc.controllable:
@@ -1371,11 +1375,14 @@ def _topup_candidates(
             continue
         out.append(rc)
 
-    # Coldest relative to setpoint first; with `by_use`, rooms in use first (spec 5.8).
-    # Without room use every rank is 0, so the order is the same as without `by_use`.
-    def key(rc: RoomConfig) -> tuple[int, float]:
+    # Preferred rooms first (spec 5.4), then coldest relative to setpoint; with `by_use`,
+    # rooms in use first (spec 5.8). Without room use every rank is 0, so the order is
+    # the same as without `by_use`.
+    def key(rc: RoomConfig) -> tuple[int, int, int, float]:
         rs = st.rooms[rc.id]
-        return (_SINK_RANK[rs.use] if by_use else 0, rs.temperature - rs.target)
+        rank = prefer.index(rc.id) if rc.id in prefer else len(prefer)
+        own = 1 if quiet and rc.quiet_hours is not None else 0
+        return (rank, own, _SINK_RANK[rs.use] if by_use else 0, rs.temperature - rs.target)
 
     out.sort(key=key)
     return out
@@ -1398,7 +1405,10 @@ def _ensure_sink(
 
     if sink() >= cfg.sink_min:
         return
-    for rc in _topup_candidates(cfg, snap, st, by_use=eco):
+    # Preferred heat sinks (spec 5.4): the house's list for quiet hours while the house
+    # window holds, its other list otherwise.
+    prefer = cfg.heat_sinks_quiet if snap.quiet_until_min is not None else cfg.heat_sinks
+    for rc in _topup_candidates(cfg, snap, st, by_use=eco, prefer=prefer):
         rs = st.rooms[rc.id]
         rs.topup = True
         rs.topup_base = rs.temperature
@@ -1410,7 +1420,7 @@ def _ensure_sink(
     # Rooms in quiet hours are never a heat sink while another room can be (spec 5.10).
     # With none left, the open-path guarantee wins over quiet: the burner must not fire
     # into shut valves, so the quiet rooms open last, in the usual order.
-    for rc in _topup_candidates(cfg, snap, st, by_use=eco, quiet=True):
+    for rc in _topup_candidates(cfg, snap, st, by_use=eco, quiet=True, prefer=prefer):
         rs = st.rooms[rc.id]
         rs.topup = True
         rs.topup_base = rs.temperature

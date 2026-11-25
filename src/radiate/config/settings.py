@@ -202,9 +202,28 @@ SECTIONS: list[Section] = [
                 "house.quiet_hours",
                 "Quiet hours",
                 "A nightly time with no heating, such as 22:30-06:00. Rooms heat only "
-                "to keep above frost protection, and morning warm-up starts when it "
+                "to keep above 12 °C, and morning warm-up starts when it "
                 "ends. A setpoint you set yourself still heats, and hot water is not "
                 "affected. Leave it empty to heat through the night.",
+                optional=True,
+                restart=False,
+            ),
+            Setting(
+                "house.heat_sinks.quiet_hours",
+                "Heat sinks in quiet hours",
+                "list",
+                "Rooms to open first, in order, when the burner needs somewhere for its "
+                "heat during quiet hours, such as at the end of a minimum burn. Room ids, "
+                "such as dining. Other rooms follow; rooms with their own quiet hours last.",
+                optional=True,
+                restart=False,
+            ),
+            Setting(
+                "house.heat_sinks.other_times",
+                "Heat sinks at other times",
+                "list",
+                "Rooms to open first, in order, when the burner needs somewhere for its "
+                "heat outside quiet hours, such as an office. Room ids. Other rooms follow.",
                 optional=True,
                 restart=False,
             ),
@@ -775,8 +794,8 @@ SECTIONS: list[Section] = [
                 "Quiet hours",
                 "A time this room doesn't heat, such as 23:00-08:00, on top of the "
                 "house's quiet hours. Its valve stays still and it isn't used to take "
-                "another room's heat, unless no other room can. Frost protection and a "
-                "setpoint you set still heat it.",
+                "another room's heat, unless no other room can. It still heats to keep "
+                "above 12 °C, and a setpoint you set still heats it.",
                 optional=True,
                 restart=False,
             ),

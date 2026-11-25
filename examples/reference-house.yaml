@@ -13,10 +13,16 @@ house:
   # the entity in the Radiate integration's options. "both" prefers the Zigbee sensor.
   # outdoor_source: home_assistant         # zigbee (default), home_assistant or both
   # outdoor_stale_after_min: 180           # older Home Assistant readings count as missing
-  # Quiet hours: no heating in this local time, which may cross midnight, except
-  # frost protection and a setpoint someone sets by hand. Morning warm-up starts when
-  # it ends. Hot water follows its own windows. Leave it out to heat through the night.
+  # Quiet hours: no heating in this local time, which may cross midnight, except to
+  # keep rooms above 12 °C and a setpoint someone sets by hand. Morning warm-up starts
+  # when it ends. Hot water follows its own windows. Leave it out to heat through the night.
   # quiet_hours: "22:30-06:00"
+  # Preferred heat sinks: rooms opened first, in order, when the burner needs somewhere
+  # for its heat (the end of a minimum burn, say). One list for quiet hours, one for
+  # other times. Room ids of rooms with a valve. Other rooms follow in the usual order.
+  # heat_sinks:
+  #   quiet_hours: [dining]
+  #   other_times: [bedroom_3]
   data_dir: ./data                       # SQLite state and the export queue
 
 mqtt:

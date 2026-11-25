@@ -847,7 +847,7 @@ function statusLine(s, minBurn) {
         return `Boiler idle. ${names(waiting)} ${verb} waiting to share a burn with other rooms.${water}`;
       }
       // Quiet hours (spec 5.10). Older servers don't send `quiet`.
-      if (s.quiet?.active) return `Quiet hours until ${s.quiet.until}. Heating only for frost protection.${water}`;
+      if (s.quiet?.active) return `Quiet hours until ${s.quiet.until}. Heating only to keep rooms above 12°.${water}`;
       return water ? `Heating idle.${water}` : "Boiler idle. Rooms are within comfort.";
     case "lead":
       return `Opening valves before calling the burner.${calling.length ? ` Heating ${names(calling)}.` : ""}${water}`;

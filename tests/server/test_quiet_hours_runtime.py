@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
 import yaml
 
 from radiate.config import parse_site
@@ -107,8 +108,8 @@ async def test_inside_the_window_rooms_rest_and_the_state_says_why():
     bed = next(r for r in state["rooms"] if r["id"] == "bedroom_1")
     assert not bed["calling"] and not bed["preheating"]
     assert bed["reason_code"] == "demand.quiet_hours"
-    assert bed["reason"].startswith("Bedroom 1: quiet hours, no heating until 06:00")
-    assert bed["target"] == rt.cfg.boiler.frost_c
+    assert bed["reason"] == "Bedroom 1: quiet hours until 06:00, heating only below 12 °C"
+    assert bed["target"] == rt.cfg.boiler.damp_floor_c
 
 
 async def test_outside_the_window():
@@ -225,3 +226,24 @@ async def test_a_room_window_changes_live_from_the_settings_view(tmp_path):
     feed(drv, 15.0)
     await rt.step()
     assert rt.state.rooms["bedroom_1"].quiet and not rt.state.rooms["bedroom_1"].calling
+
+
+async def test_preferred_heat_sinks_change_live(tmp_path):
+    data = reference(quiet=None)
+    data["house"]["data_dir"] = str(tmp_path / "data")
+    path = tmp_path / "house.yaml"
+    path.write_text(yaml.safe_dump(data))
+    rt, _, _ = make(data, local(2026, 11, 18, 7, 0))
+    rt.settings_editor = SettingsEditor.start(
+        read_house_file(path), env=ENV, store=SettingsMemory()
+    )
+    values = {
+        "house.heat_sinks.quiet_hours": ["dining"],
+        "house.heat_sinks.other_times": ["bedroom_3"],
+    }
+    view = rt.settings_editor.save(rt, {"values": values})
+    assert sorted(view["applied"]) == sorted(values)
+    assert rt.cfg.heat_sinks_quiet == ("dining",) and rt.cfg.heat_sinks == ("bedroom_3",)
+    with pytest.raises(SettingsError) as err:
+        rt.settings_editor.save(rt, {"values": {"house.heat_sinks.other_times": ["stairs"]}})
+    assert err.value.status == 400

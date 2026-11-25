@@ -104,13 +104,26 @@ def test_no_room_calls_and_the_boiler_stays_off():
     reasons = [r for r in out[-1][1].reasons if r.code == "demand.quiet_hours"]
     assert {r.room_id for r in reasons} == {"bed", "loo"}
     bed = next(r for r in reasons if r.room_id == "bed")
-    assert (
-        bed.message == "Bedroom 1: quiet hours, no heating until 06:00 (frost protection stays on)"
-    )
-    assert bed.values == {"until_min": 360.0}
-    # Held at frost protection: the TRV is told 7 °C, so it keeps its own valve shut.
-    assert st.rooms["bed"].target == 7.0
-    assert out[-1][1].valves["bed"].setpoint == 7.0
+    assert bed.message == "Bedroom 1: quiet hours until 06:00, heating only below 12 °C"
+    assert bed.values == {"until_min": 360.0, "floor_c": 12.0}
+    # Held at the damp floor: the TRV is told 12 °C, so it keeps its own valve shut.
+    assert st.rooms["bed"].target == 12.0
+    assert out[-1][1].valves["bed"].setpoint == 12.0
+
+
+def test_a_room_below_the_damp_floor_heats_back_to_it():
+    def chilly(minute):
+        return {"bed": room(11.5), "loo": RoomInput(trv_temperature=17.0, setpoint=20.0)}
+
+    st, out = run(2 * 60, 10, chilly)
+    assert st.rooms["bed"].calling and st.rooms["bed"].target == 12.0
+    assert out[-1][1].heating_relay
+
+    def cool(minute):
+        return {"bed": room(12.5), "loo": RoomInput(trv_temperature=17.0, setpoint=20.0)}
+
+    st, out = run(2 * 60, 10, cool)
+    assert not st.rooms["bed"].calling and not out[-1][1].heating_relay
 
 
 def test_the_same_house_heats_outside_quiet_hours():
