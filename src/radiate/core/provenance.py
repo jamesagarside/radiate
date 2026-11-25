@@ -122,17 +122,21 @@ class Invalidation:
 
 def _dry_run_unmetered(p: Provenance, now: Conditions) -> bool:
     """Learned in a dry run without burner metering, or before the conditions were
-    recorded, now that the burner is metered.
+    recorded, now that the burner is metered or Radiate runs the boiler.
 
     Until learner version 2, a dry run learned as if the relay ran the boiler, which can
     leave a confident model far off (a heating gain of 0.15 K/h against a measured 6 K/h).
     A save without provenance cannot say whether it was learned in a dry run; a new
-    configuration starts in one, so it is taken as one. Only once the burner is
-    metered: that is when heat can be seen whether or not Radiate runs the boiler, so the
-    room can learn again straight away; without metering the model is kept, and change
-    detection corrects it over a few burns.
+    configuration starts in one, so it is taken as one. Two moments end the wait: the
+    burner is metered, so heat can be seen whether or not Radiate runs the boiler; or
+    Radiate takes over the boiler (dry run off), so its own relay shows when heat flows.
+    Either way the room can learn again straight away, from priors, rather than carry a
+    wrong model into control (owner decision, 2026-11-25).
+
+    Fires once: a reset clears the provenance, and from learner version 2 nothing counts
+    a `DRY_RELAY` update (the `heat_unknown` gate), so the fresh model never matches.
     """
-    return now.metered and p.count(DRY_RELAY, UNKNOWN) > 0
+    return (now.metered or now.live) and p.count(DRY_RELAY, UNKNOWN) > 0
 
 
 RULES: tuple[Invalidation, ...] = (
