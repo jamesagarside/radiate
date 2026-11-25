@@ -221,8 +221,13 @@ def test_rule_dry_run_unmetered():
     assert rule.applies(Provenance(learner=1, updates={UNKNOWN: 3}), metered)
     assert rule.applies(Provenance(updates={DRY_RELAY: 1, LIVE_BURNER: 900}), metered)
     assert rule.applies(Provenance(updates={DRY_RELAY: 3}), Conditions(live=False, metered=True))
-    # Not until the burner is metered: there is nothing better to learn from yet.
-    assert not rule.applies(Provenance(updates={DRY_RELAY: 3}), unmetered)
+    # Or once Radiate takes over the boiler, metered or not (owner, 2026-11-25).
+    assert rule.applies(Provenance(updates={DRY_RELAY: 3}), unmetered)
+    assert rule.applies(Provenance(learner=1, updates={UNKNOWN: 3}), unmetered)
+    # Not in a dry run without metering: there is nothing better to learn from yet.
+    dry = Conditions(live=False, metered=False)
+    assert not rule.applies(Provenance(updates={DRY_RELAY: 3}), dry)
+    assert not rule.applies(Provenance(learner=1, updates={UNKNOWN: 3}), dry)
     # Heat that was seen is fine, in a dry run or not.
     for key in (DRY_BURNER, LIVE_BURNER, LIVE_RELAY):
         assert not rule.applies(Provenance(updates={key: 500}), metered)
@@ -251,11 +256,12 @@ def test_dry_run_models_are_reset_once_the_burner_is_metered(name):
     data["rooms"]["bedroom_1"]["est"]["theta"][0] = 0.15  # as the live house had
     st, _ = load_state(cfg, data, now=10.0)
     kept = {rid: list(rs.est.theta) for rid, rs in st.rooms.items()}
-    acts = tick(st, cfg, 1, burner=None)  # metering not read yet: nothing reset
+    # Still in a dry run, metering not read yet: nothing reset.
+    acts = tick(st, cfg, 1, burner=None, live=False)
     assert not [r for r in acts.reasons if r.code == "learning.invalidated"]
     assert all(st.rooms[rid].est.theta == theta for rid, theta in kept.items())
 
-    acts = tick(st, cfg, 2, burner=False)
+    acts = tick(st, cfg, 2, burner=False, live=False)
     reset = {r.room_id: r.message for r in acts.reasons if r.code == "learning.invalidated"}
     learned = {rid for rid, raw in data["rooms"].items() if raw["est"]["samples"] > 0}
     assert set(reset) == learned
@@ -269,9 +275,50 @@ def test_dry_run_models_are_reset_once_the_burner_is_metered(name):
         assert rs.est.theta == fresh.rooms[rid].est.theta and rs.est.samples == 0
         assert rs.lag_samples == [] and rs.lockshield_hist == [0.0] * 101
         assert rs.learned == Provenance()
-    # Once: the fresh models carry no invalid learning.
-    acts = tick(st, cfg, 3, burner=False)
+    # Once: the fresh models carry no invalid learning, nor does taking over later.
+    acts = tick(st, cfg, 3, burner=False, live=False)
     assert not [r for r in acts.reasons if r.code == "learning.invalidated"]
+    acts = tick(st, cfg, 4, burner=False)
+    assert not [r for r in acts.reasons if r.code == "learning.invalidated"]
+
+
+@pytest.mark.parametrize("name", V1_FIXTURES)
+def test_dry_run_models_are_reset_when_radiate_takes_over_unmetered(name):
+    # An install without burner metering (owner, 2026-11-25): the dry run's models are
+    # reset when dry run is turned off, not kept until the burner is metered.
+    cfg = house_config()
+    data = fixture(name)
+    st, _ = load_state(cfg, data, now=10.0)
+    kept = {rid: list(rs.est.theta) for rid, rs in st.rooms.items()}
+    for m in range(1, 4):  # still a dry run without metering: nothing reset
+        acts = tick(st, cfg, m, burner=None, live=False)
+        assert not [r for r in acts.reasons if r.code == "learning.invalidated"]
+    assert all(st.rooms[rid].est.theta == theta for rid, theta in kept.items())
+
+    acts = tick(st, cfg, 4, burner=None)  # dry run off: Radiate runs the boiler
+    reset = {r.room_id for r in acts.reasons if r.code == "learning.invalidated"}
+    learned = {rid for rid, raw in data["rooms"].items() if raw["est"]["samples"] > 0}
+    assert learned and reset == learned
+    fresh = EngineState.new(cfg)
+    for rid in learned:
+        assert st.rooms[rid].est.theta == fresh.rooms[rid].est.theta
+        assert st.rooms[rid].learned == Provenance()
+    # Once: not again live, nor after a return to dry run and back.
+    for m, live in ((5, True), (6, False), (7, True)):
+        acts = tick(st, cfg, m, burner=None, live=live)
+        assert not [r for r in acts.reasons if r.code == "learning.invalidated"]
+
+
+def test_takeover_rule_does_not_fire_again_after_live_learning():
+    # A house run live without metering learns under `live_relay` only, so the rule has
+    # nothing to name, live or back in a dry run.
+    cfg = house_config()
+    st = run("radiate", days=1, warmup_days=0, seed=3, metering=False).engine
+    counted = set().union(*(rs.learned.updates for rs in st.rooms.values()))
+    assert counted == {LIVE_RELAY}
+    for m, live in ((10_000, True), (10_001, False), (10_002, True)):
+        acts = tick(st, cfg, m, burner=None, live=live)
+        assert not [r for r in acts.reasons if r.code == "learning.invalidated"]
 
 
 def test_dry_run_rule_only_resets_rooms_it_names():

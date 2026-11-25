@@ -333,7 +333,7 @@ Code: `LEARNER_VERSION`, `Provenance.learner`.
 _Avoid_: schema version, which is the saved format (`persist.VERSION`).
 
 **Invalidation rule**:
-A rule, shipped with a release, that declares some learned values invalid, such as learning from a dry run without burner metering once the burner is metered (`dry_run_unmetered`). Checked for every room each tick; a room it names goes back to its priors, and no other room does.
+A rule, shipped with a release, that declares some learned values invalid, such as learning from a dry run without burner metering once the burner is metered or Radiate takes over the boiler (`dry_run_unmetered`). Checked for every room each tick; a room it names goes back to its priors, and no other room does.
 Code: `Invalidation`, `RULES`, `invalid` in `radiate.core.provenance`, decision `learning.invalidated`.
 _Avoid_: learning reset, which a person asks for.
 
