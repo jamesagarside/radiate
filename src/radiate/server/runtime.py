@@ -79,6 +79,7 @@ from radiate.core.outdoor import (
 from radiate.core.persist import VERSION as ENGINE_VERSION
 from radiate.core.persist import dump_state, first_start_state, load_state, saved_version
 from radiate.core.provenance import Provenance
+from radiate.core.quiet import apply_quiet, clock_text, format_window
 from radiate.core.series import observed_values, tick_values
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.export import telemetry
@@ -1235,6 +1236,31 @@ class Runtime:
                 use = RoomUse.IN_USE
             inp.use = use
 
+    def _apply_quiet(self, snap: Snapshot) -> None:
+        """Quiet hours (spec 5.10) in house time, the house's and each room's, and
+        which rooms have an override.
+
+        `snap.minute_of_day` is the driver's local wall time (`zoneinfo`, so daylight
+        saving is handled), the same clock the schedules use. The core holds every room
+        without an override at the damp floor while quiet hours last, including a
+        return warm-up (`_apply_return`), which is a next setpoint like any other.
+        """
+        apply_quiet(self.cfg, snap)
+        for rid in self.overrides:
+            inp = snap.rooms.get(rid)
+            if inp is not None:
+                inp.override = True
+
+    def quiet_view(self) -> dict:
+        """`quiet` in the state: the window as set, and whether it applies now."""
+        snap = self.last_snapshot
+        until = snap.quiet_until_min if snap is not None else None
+        return {
+            "window": format_window(self.cfg.quiet_hours),
+            "active": until is not None,
+            "until": clock_text(until) if until is not None else None,
+        }
+
     def _weekday(self) -> int:
         """The house's local weekday, Monday = 0, as the driver reads its schedules."""
         get = getattr(self.driver, "wall_weekday", None)
@@ -1294,6 +1320,7 @@ class Runtime:
         self._apply_return(snap)
         self._damp_floor(snap)
         self._apply_use(snap)
+        self._apply_quiet(snap)
         # Always explicit, so the tick history records the mode each tick was decided in.
         snap.demand_mode = self.effective_demand_mode
         burn_start = self.state.ledger.burn_start
@@ -1645,6 +1672,16 @@ class Runtime:
                     # or null. `solo`: in eco, passed its solo threshold, so it may start
                     # and keep a burn on its own.
                     use=rs.use.value if rs.use is not None else None,
+                    # Quiet hours for this room (spec 5.10): its own `window` (null:
+                    # the house's only), `active` while they hold it (not with an
+                    # override), and `until`, the local HH:MM the last window ends.
+                    quiet={
+                        "window": format_window(rc.quiet_hours),
+                        "active": rs.quiet,
+                        "until": clock_text(inp.quiet_until_min)
+                        if rs.quiet and inp is not None and inp.quiet_until_min is not None
+                        else None,
+                    },
                     solo=rs.solo,
                     fire=rs.dist.fire,
                     learning=rs.learning_gate,
@@ -1687,6 +1724,9 @@ class Runtime:
             "minute_of_day": self.driver.wall_minutes(),
             "mode": self.mode.value,  # the user's choice; `away.frost` says if it is held
             "away": self.away_view(),
+            # Quiet hours (spec 5.10): `window` as "22:30-06:00" or null when off,
+            # `active` while they hold, and `until`, the local HH:MM they end.
+            "quiet": self.quiet_view(),
             "outdoor": snap.outdoor if snap else None,
             # Where `outdoor` came from: `source` (`zigbee`, `home_assistant`, `simulated`
             # or null when 5 °C is assumed), its age, and the last Home Assistant report.
