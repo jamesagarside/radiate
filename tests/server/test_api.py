@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 from aiohttp import WSMsgType
 from aiohttp.test_utils import TestClient, TestServer
@@ -269,3 +271,35 @@ async def test_state_reports_the_burner(client):
     assert "burner" in state["boiler"] and "burner" in state["store"]
     today = state["accounting"]["today"]
     assert {"relay_hours", "litres_relay", "burner"} <= set(today)
+
+
+async def test_state_explains_each_room_model(client):
+    """The fields the room card's "What Radiate has learned" reads (additive)."""
+    rt = client.rt
+
+    def model():
+        return next(r for r in rt.describe()["rooms"] if r["id"] == "lounge")["model"]
+
+    m = model()
+    rs = rt.state.rooms["lounge"]
+    assert 0.0 <= m["loss_confidence"] <= 1.0
+    assert m["lag_measured"] == len(rs.lag_samples)
+    assert m["lockshield_learned"] is rs.lockshield_learned
+    assert m["relearns"] == rs.est.relearns
+    # Alone, the radiator gets more of the flow than with most of the house open.
+    assert m["heating_kph"]["alone"] > m["heating_kph"]["with_house"] > 0
+    # A warmer setpoint next: what optimum start allows to reach it.
+    rs.temperature = 17.0
+    rooms = rt.last_snapshot.rooms
+    inp = rooms["lounge"]
+    rooms["lounge"] = dataclasses.replace(inp, next_setpoint=21.0, next_setpoint_in_s=7200.0)
+    w = model()["warm_up"]
+    assert (w["from_c"], w["to_c"], w["in_min"]) == (17.0, 21.0, 120)
+    assert w["min"] is None or w["min"] > 0
+    assert w["quiet_until_min"] is None
+    # In quiet hours, optimum start waits for their end (spec 5.10).
+    rooms["lounge"] = dataclasses.replace(rooms["lounge"], quiet_until_min=360)
+    assert model()["warm_up"]["quiet_until_min"] == 360
+    # No warmer setpoint next: nothing to warm up to.
+    rooms["lounge"] = dataclasses.replace(inp, next_setpoint=16.0, next_setpoint_in_s=7200.0)
+    assert model()["warm_up"] is None

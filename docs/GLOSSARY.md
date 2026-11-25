@@ -282,6 +282,7 @@ Code: `TrvOptions.schedule_mirror`, `WeekSchedule.trvzb_payload`, config key `tr
 
 **Room model**:
 The first-order model Radiate learns for each controllable room: `dT/dt = a * drive - b * (T - T_out) + d`.
+The web UI explains it per room under "What Radiate has learned" on the room card (`web/learned.js`), and for the house in the Guide's "What the room model is".
 Code: `RoomEstimator` in `radiate.core.estimator`.
 
 **Heating gain**:

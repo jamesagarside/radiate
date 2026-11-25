@@ -28,6 +28,8 @@ def test_expected_files(site):
         "static/app.css",
         "static/app.js",
         "static/pending.js",
+        "static/learned.js",
+        "static/security.js",
         "static/week.js",
         "static/household.js",
         "static/setup.js",
@@ -63,6 +65,7 @@ def test_static_assets_have_no_root_relative_urls(site):
     for name in (
         "app.js",
         "pending.js",
+        "learned.js",
         "week.js",
         "household.js",
         "setup.js",

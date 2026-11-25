@@ -18,6 +18,7 @@ import { createHouse } from "./house.js";
 import { createGuide, guideNote } from "./guide.js";
 import { createSettings } from "./settings.js";
 import { failText, pendingValue, sendChange } from "./pending.js";
+import { learnedRows, rawText, stillLearning } from "./learned.js";
 import { createSecurity } from "./security.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
@@ -455,21 +456,45 @@ function renderRoom(r) {
   const meta = n.querySelector(".meta");
   if (r.model) {
     const learn = r.learning ? LEARNING[r.learning] || r.learning : "learning";
-    meta.textContent = "";
-    for (const t of [
-      `gain ${r.model.a.toFixed(1)} K/h`,
-      `lag ${Math.round(r.model.arrival_lag_min)} min`,
-      `confidence ${Math.round(r.model.confidence * 100)}%`,
-      learn,
-    ]) {
-      const s = document.createElement("span");
-      s.textContent = t;
-      meta.appendChild(s);
-    }
+    meta.textContent = learn[0].toUpperCase() + learn.slice(1);
   } else {
     meta.textContent = r.humidity != null ? `${r.humidity}% RH` : "";
   }
   renderFire(n, r);
+  renderLearned(n, r);
+}
+
+// "What Radiate has learned": the room model in words (learned.js). The rows are
+// rebuilt only when their words change; they hold nothing focusable, and the guide
+// link sits outside them, so focus survives each tick.
+function renderLearned(n, r) {
+  const box = n.querySelector(".learned");
+  box.hidden = !r.model;
+  if (!r.model) return;
+  const notes = (last?.learning_notes ?? []).filter((x) => x.room_id === r.id);
+  const rows = learnedRows(r, { outdoor: last?.outdoor, minute_of_day: last?.minute_of_day, notes });
+  const learning = stillLearning(r.model);
+  n.querySelector(".learned-tag").hidden = !learning;
+  const status = n.querySelector(".learned-status");
+  status.hidden = !learning;
+  status.textContent = r.model.samples === 0
+    ? "Still learning. Nothing learned yet, so Radiate uses typical values for now."
+    : "Still learning. These numbers will change as Radiate sees this room warm up and cool down more often.";
+  n.querySelector(".learned-raw").textContent = rawText(r.model);
+  const key = JSON.stringify(rows);
+  const list = n.querySelector(".learned-rows");
+  if (list.dataset.key === key) return;
+  list.dataset.key = key;
+  list.textContent = "";
+  for (const row of rows) {
+    const div = document.createElement("div");
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dt.textContent = row.label;
+    dd.textContent = row.text;
+    div.append(dt, dd);
+    list.appendChild(div);
+  }
 }
 
 // Away, per person (household setup). The server says who counts as away; this only
