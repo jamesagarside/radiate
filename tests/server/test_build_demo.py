@@ -29,6 +29,7 @@ def test_expected_files(site):
         "static/app.js",
         "static/pending.js",
         "static/learned.js",
+        "static/security.js",
         "static/week.js",
         "static/household.js",
         "static/setup.js",
