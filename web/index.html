@@ -443,6 +443,7 @@
           <li><a href="#guide/modes">Heating modes, Eco and Comfort</a></li>
           <li><a href="#guide/away">When someone is away</a></li>
           <li><a href="#guide/fire">Open fires and range cookers</a></li>
+          <li><a href="#guide/room-model">What the room model is</a></li>
           <li><a href="#guide/learning">What learning is</a></li>
           <li><a href="#guide/not-heating">Why a room isn't heating</a></li>
           <li><a href="#guide/devices">Devices</a></li>
@@ -528,7 +529,7 @@
             </div>
           </div>
           <p>The Opening limit bar is the most the room's valve may open. Radiate sets it so that rooms warming together get their heat at about the same time, instead of the radiators nearest the boiler taking most of it. The valve's own thermostat still opens and closes within that limit. The bar is faded while the room isn't taking heat.</p>
-          <p>The small print at the bottom of a card is what Radiate has learned about the room. See <a class="help-link" href="#guide/learning">What learning is</a>.</p>
+          <p>The small print at the bottom of a card says whether Radiate is learning the room right now, or why not. Under it, "What Radiate has learned" opens to show what Radiate knows about the room, in words. See <a class="help-link" href="#guide/room-model">What the room model is</a>.</p>
         </section>
 
         <section class="g-sec" id="g-warmer" aria-labelledby="g-warmer-h">
@@ -602,10 +603,25 @@
           <p>A range cooker, such as an Aga, is learned as steady background heat. The kitchen keeps learning, and a burst of heat from cooking pauses it for an hour ("learning paused: cooking").</p>
         </section>
 
+        <section class="g-sec" id="g-room-model" aria-labelledby="g-room-model-h">
+          <h3 class="section-h" id="g-room-model-h" tabindex="-1">What the room model is</h3>
+          <p>For each room it controls, Radiate keeps a room model: a few numbers that describe how that room heats up and cools down. It learns them by watching the room's temperature, the outdoor temperature and the boiler, a reading a minute.</p>
+          <dl class="g-terms g-wide">
+            <div><dt>Warms up</dt><dd>How many degrees an hour the radiator adds with the boiler on and the valve open. It adds less when most of the house is heating, as the hot water is shared between more radiators.</dd></div>
+            <div><dt>Cools down</dt><dd>How fast the room loses heat to the outside. It cools faster the colder it is outside, so Radiate gives it for a 10° difference between inside and outside.</dd></div>
+            <div><dt>Other heat</dt><dd>Steady warmth that isn't from the radiator, such as a range cooker.</dd></div>
+            <div><dt>Heat arrives</dt><dd>How long the hot water takes to reach the radiator after the boiler fires. Rooms near the boiler get it first.</dd></div>
+            <div><dt>How sure</dt><dd>How much Radiate has seen. A new room starts from typical values and reads "Still learning" until it has seen enough warm-ups and cool-downs. Being sure means Radiate has plenty of data, not that the room behaves the same every day.</dd></div>
+          </dl>
+          <p>Radiate uses the model in three ways. It starts warming a room early enough to reach its next temperature on time, so a slow room starts sooner. It sets how far each valve opens, so rooms warming together get there at about the same time instead of the ones nearest the boiler taking the heat. And between burns it leaves each valve at the opening that room usually needs, so the house stays balanced if Radiate stops.</p>
+          <p>Suggestions and Savings also use the model, once Radiate is sure enough of it. This is different from the house model at the top of the House page, which is only a drawing.</p>
+          <p>The model keeps changing slowly as the seasons change. If a room starts warming differently, for example after a radiator is bled or replaced, Radiate notices and relearns it. If a room's learning was started again, for example after an update, the room card says when and why for 14 days.</p>
+        </section>
+
         <section class="g-sec" id="g-learning" aria-labelledby="g-learning-h">
           <h3 class="section-h" id="g-learning-h" tabindex="-1">What learning is</h3>
           <p>Radiate learns each room: how fast its radiator warms it, how fast it cools, and how long heat takes to reach it. It uses this to start warming in time, and to share the heat so rooms reach their temperatures together.</p>
-          <p>The small print on a room card shows it, for example "gain 3.1 K/h, lag 12 min, confidence 64%, learning". Gain is how many degrees an hour the radiator can add. Lag is how long heat takes to arrive once the boiler fires. Confidence is how sure Radiate is of the room. The Learning box on The house now is the average over the rooms Radiate controls.</p>
+          <p>Open "What Radiate has learned" on a room card to see what it knows about that room. <a class="help-link" href="#guide/room-model">What the room model is</a> explains the numbers. The Learning box on The house now is how sure Radiate is, on average, over the rooms it controls.</p>
           <p>Learning pauses whenever something other than the radiator is warming or cooling the room. The small print says why:</p>
           <dl class="g-terms g-words">
             <div><dt>fire, fire cooling</dt><dd>The open fire is lit, and for 4 hours after.</dd></div>
@@ -829,6 +845,15 @@
       <footer class="meta"></footer>
       <button class="btn fire" hidden>Fire lit</button>
       <p class="action-error fire-error" role="alert" hidden></p>
+      <details class="learned" hidden>
+        <summary><span class="learned-title">What Radiate has learned</span><span class="learned-tag" hidden>Still learning</span></summary>
+        <div class="learned-body">
+          <p class="learned-status" hidden></p>
+          <dl class="learned-rows"></dl>
+          <p class="learned-raw"></p>
+          <p class="learned-help"><a class="help-link" href="#guide/room-model">What the room model is</a></p>
+        </div>
+      </details>
     </article>
   </template>
 

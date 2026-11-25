@@ -359,6 +359,31 @@ main { max-width: 1340px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .meta { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .fire { justify-self: start; }
 
+/* What Radiate has learned: the room model in words, behind a disclosure at the foot
+   of the card. Nothing moves but the chevron; the body appears in place. */
+.learned { border-top: 1px solid var(--line); margin-top: 2px; }
+.learned > summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 0 0; cursor: pointer;
+  list-style: none; font-family: var(--display); font-weight: 600; font-size: 0.9rem;
+}
+.learned > summary::-webkit-details-marker { display: none; }
+.learned > summary::before {
+  content: ""; width: 7px; height: 7px; border-right: 2px solid var(--text); border-bottom: 2px solid var(--text);
+  transform: rotate(-45deg); transition: transform 160ms var(--ease-out); flex: none; margin-right: 2px;
+}
+.learned[open] > summary::before { transform: rotate(45deg); }
+.learned > summary:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
+.learned-tag { font-family: var(--body); font-size: 0.72rem; font-weight: 600; padding: 2px 7px; background: var(--cool-soft); color: var(--cool); }
+.learned-body { display: grid; gap: 8px; padding-top: 8px; font-size: 0.84rem; }
+.learned-status { color: var(--cool); font-weight: 600; }
+.learned-rows { margin: 0; display: grid; font-variant-numeric: tabular-nums; }
+.learned-rows > div { padding: 6px 0; border-top: 1px solid var(--line); }
+.learned-rows > div:first-child { border-top: 0; padding-top: 0; }
+.learned-rows dt { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+.learned-rows dd { margin: 2px 0 0; line-height: 1.4; }
+.learned-raw { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.learned-help { font-size: 0.84rem; }
+
 /* People: away per person. Away is a calm, user-made state, so it is cool like a held
    setpoint; due back is warming up, amber like preheating. */
 .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
@@ -755,6 +780,7 @@ body[data-link="stale"] .status { color: var(--warn); }
   @starting-style { .signin, .login-plate, .account-menu { transform: none; } }
   .setup-step { transition: opacity 150ms ease; }
   @starting-style { .setup-step { transform: none; } }
+  .learned > summary::before { transition: none; }
   .meter-fill { transition: background-color 150ms ease; }
   .view-tab, .alerts-devices, .attention-link { transition: color 150ms ease, border-color 150ms ease; }
   .view-tab:active, .alerts-devices:active, .attention-link:active { transform: none; }
@@ -770,6 +796,7 @@ body[data-link="stale"] .status { color: var(--warn); }
   .setup-adv summary { padding-block: 12px; }
   .seg button { min-width: 44px; }
   .notice-more summary { padding-block: 12px; }
+  .learned > summary { min-height: 44px; padding-top: 0; }
   .step { width: 44px; height: 44px; }
   .link { padding-block: 13px; margin-block: -13px; }
   .week-form select, .week-form input { min-height: 44px; }

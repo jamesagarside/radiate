@@ -65,9 +65,10 @@ from radiate.core import (
     decide,
 )
 from radiate.core.bootstrap import bootstrap, needs_bootstrap
-from radiate.core.decide import reset_learned
+from radiate.core.decide import preheat_supply, reset_learned, warm_up_s
 from radiate.core.history import compact_actions, tick_data
 from radiate.core.outdoor import (
+    DEFAULT_OUTDOOR_C,
     DEFAULT_STALE_AFTER_S,
     OutdoorChoice,
     OutdoorReading,
@@ -80,6 +81,7 @@ from radiate.core.persist import VERSION as ENGINE_VERSION
 from radiate.core.persist import dump_state, first_start_state, load_state, saved_version
 from radiate.core.provenance import Provenance
 from radiate.core.series import observed_values, tick_values
+from radiate.core.suggestions import loss_confidence
 from radiate.core.types import BoilerState, DemandMode, RoomRole, RoomUse
 from radiate.export import telemetry
 from radiate.server import layout
@@ -641,6 +643,35 @@ class Runtime:
                         rid,
                     ),
                 )
+
+    def _warm_up_view(self, rs, inp) -> dict | None:
+        """What optimum start allows for this room to warm from its reading now to its
+        next setpoint, when that is warmer. `min` is None when the model says the room
+        barely warms, so optimum start would start as soon as it can."""
+        nxt = inp.next_setpoint if inp else None
+        if rs.temperature is None or nxt is None or inp.next_setpoint_in_s is None:
+            return None
+        if nxt <= rs.temperature + self.cfg.hysteresis_k:
+            return None
+        snap = self.last_snapshot
+        out = snap.outdoor if snap and snap.outdoor is not None else DEFAULT_OUTDOOR_C
+        need = warm_up_s(self.cfg, rs, rs.temperature, nxt, out)
+        return {
+            "from_c": round(rs.temperature, 1),
+            "to_c": nxt,
+            "in_min": round(inp.next_setpoint_in_s / 60),
+            "min": None if need is None else round(need / 60),
+        }
+
+    def _heating_view(self, rs) -> dict:
+        """The room's warming rate from its radiator, K/h at full opening: `alone`, the
+        only radiator taking heat, and `with_house`, most of the house heating at once
+        (as optimum start assumes). Both before any heat loss."""
+        a = rs.est.a
+        return {
+            "alone": round(a * preheat_supply(self.cfg, 1.0), 2),
+            "with_house": round(a * preheat_supply(self.cfg), 2),
+        }
 
     def fire_expires_in_min(self, room_id: str, now: float) -> int | None:
         until = self.fire_until.get(room_id)
@@ -1656,6 +1687,19 @@ class Runtime:
                         "samples": rs.est.samples,
                         "arrival_lag_min": round(rs.arrival_lag_s / 60, 1),
                         "lockshield": rs.lockshield,
+                        # For explaining the model in words. `loss_confidence`: as
+                        # `confidence`, for the loss rate `b`. `lag_measured`: arrivals the
+                        # lag is the median of (0: the 8 min default). `lockshield_learned`:
+                        # false while the cap is the 60 % default. `relearns`: changes
+                        # detected since priors. `heating_kph`: the radiator's warming
+                        # rate, alone and with most of the house heating. `warm_up`: what
+                        # optimum start allows to warm to the next setpoint, if warmer.
+                        "loss_confidence": round(loss_confidence(rs.est), 2),
+                        "lag_measured": len(rs.lag_samples),
+                        "lockshield_learned": rs.lockshield_learned,
+                        "relearns": rs.est.relearns,
+                        "heating_kph": self._heating_view(rs),
+                        "warm_up": self._warm_up_view(rs, scheduled),
                         # Where it was learned (ADR-0007): learning updates by condition
                         # (`live_burner`, `live_relay`, `dry_burner`, `dry_relay`,
                         # `unknown`), the learner version and the dates of the first and

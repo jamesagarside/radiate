@@ -63,6 +63,7 @@ TRV_MAX_C = 35.0
 SINK_LEAD_K = 1.0  # top-up and dump rooms: TRV setpoint at least this above its reading
 TOPUP_K = 0.3
 DEFAULT_LOCKSHIELD = 60
+LOCKSHIELD_MIN_WEIGHT = 30.0  # histogram weight before the lockshield cap is learned
 MIN_OPENING_STEP = 3
 OPENING_WRITE_INTERVAL_S = 10 * 60
 BIG_OPENING_STEP = 15
@@ -73,6 +74,7 @@ PREHEAT_MAX_S = 3 * 3600
 # 3 h let rooms in use arrive late, 3.5 h started more burns.
 PREHEAT_USE_MAX_S = 3.25 * 3600
 PREHEAT_MARGIN = 1.2
+PREHEAT_OPEN_SHARE = 0.8  # share of radiators optimum start assumes open at once
 INTERNAL_SENSOR_MAX_CONFIDENCE = 0.5  # spec 4.6: the TRV sits beside the radiator
 LOCKSHIELD_DECAY = 0.9995  # per firing sample: half-life of about 23 hours of firing
 REJECTED_HOLD_S = 3600.0  # learning stays paused this long after a TRV rejected a setting
@@ -187,9 +189,14 @@ class RoomState:
         return s[len(s) // 2]
 
     @property
+    def lockshield_learned(self) -> bool:
+        """Whether the lockshield cap comes from this room's openings, not the default."""
+        return sum(self.lockshield_hist) >= LOCKSHIELD_MIN_WEIGHT
+
+    @property
     def lockshield(self) -> int:
         total = sum(self.lockshield_hist)
-        if total < 30:
+        if total < LOCKSHIELD_MIN_WEIGHT:
             return DEFAULT_LOCKSHIELD
         acc = 0.0
         for opening, weight in enumerate(self.lockshield_hist):
@@ -1116,16 +1123,28 @@ def _preheat_due(
         horizon = PREHEAT_MAX_S
     if nxt is None or in_s is None or in_s > horizon or nxt <= temp + cfg.hysteresis_k:
         return False
-    # Assume most of the house heats at once (mornings), so the supply factor is low.
-    n = sum(1 for r in cfg.rooms if r.controllable)
-    supply = supply_factor(0.8 * n, cfg.supply_kappa, cfg.bypass_equivalent)
-    rate = rs.est.a * supply - rs.est.b * (temp - out) + rs.est.d
+    need_s = warm_up_s(cfg, rs, temp, nxt, out)
+    return need_s is None or need_s >= in_s
+
+
+def preheat_supply(cfg: HouseConfig, open_rooms: float | None = None) -> float:
+    """The supply factor optimum start assumes: most of the house heats at once
+    (mornings), so it is low. `open_rooms` gives it for that many open radiators instead."""
+    if open_rooms is None:
+        open_rooms = PREHEAT_OPEN_SHARE * sum(1 for r in cfg.rooms if r.controllable)
+    return supply_factor(open_rooms, cfg.supply_kappa, cfg.bypass_equivalent)
+
+
+def warm_up_s(cfg: HouseConfig, rs: RoomState, temp: float, to: float, out: float) -> float | None:
+    """How long optimum start allows for a room to warm from `temp` to `to` with `out`
+    outside: the time at the room model's warming rate, with a margin, plus the arrival
+    lag and the valve lead. None when the model says the room barely warms at all, so
+    optimum start starts as soon as the change is within its horizon."""
+    rate = rs.est.a * preheat_supply(cfg) - rs.est.b * (temp - out) + rs.est.d
     if rate <= 0.05:
-        return True
-    need_s = (
-        (nxt - temp) / rate * 3600 * PREHEAT_MARGIN + rs.arrival_lag_s + cfg.boiler.valve_lead_s
-    )
-    return need_s >= in_s
+        return None
+    gap = max(0.0, to - temp)
+    return gap / rate * 3600 * PREHEAT_MARGIN + rs.arrival_lag_s + cfg.boiler.valve_lead_s
 
 
 def _trv_step(value: float, up: bool = False) -> float:

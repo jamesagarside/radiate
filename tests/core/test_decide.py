@@ -382,3 +382,17 @@ def test_runtime_demand_mode_overrides_the_configuration():
     eco = _with_mode(DemandMode.COMFORT)
     acts = _demand(eco, _learned(eco), {**WARM, "loo": 18.8}, mode=DemandMode.ECO)
     assert not acts.heating_relay
+
+
+def test_warm_up_is_what_optimum_start_allows():
+    from radiate.core.decide import PREHEAT_MARGIN, preheat_supply, warm_up_s
+
+    rs = _learned().rooms["bed"]
+    lag = rs.arrival_lag_s + CFG.boiler.valve_lead_s
+    rate = rs.est.a * preheat_supply(CFG) - rs.est.b * (17.0 - 5.0) + rs.est.d
+    assert warm_up_s(CFG, rs, 17.0, 20.0, 5.0) == 3.0 / rate * 3600 * PREHEAT_MARGIN + lag
+    # Fewer radiators open: more flow each.
+    assert preheat_supply(CFG, 1.0) > preheat_supply(CFG)
+    # A room that barely warms: no figure, so optimum start starts as soon as it can.
+    rs.est.theta[0] = 0.1
+    assert warm_up_s(CFG, rs, 17.0, 20.0, -10.0) is None
