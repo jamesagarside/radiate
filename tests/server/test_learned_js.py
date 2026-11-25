@@ -172,6 +172,30 @@ def test_still_learning_and_edges(tmp_path):
     assert r["note-1764000000"][1].endswith("Lounge: reset.")
 
 
+def test_quiet_hours_hold_the_warm_up(tmp_path):
+    # 05:00 now, 21° due at 07:00 with 2 h 30 min needed, quiet hours until 06:00.
+    ctx = {**CTX, "minute_of_day": 300}
+    held = lounge(
+        warm_up={"from_c": 17.5, "to_c": 21.0, "in_min": 120, "min": 150, "quiet_until_min": 360}
+    )
+    # Quiet until 05:30, start due at 05:45 anyway: quiet hours don't change it.
+    clear = lounge(
+        warm_up={"from_c": 17.5, "to_c": 21.0, "in_min": 120, "min": 75, "quiet_until_min": 330}
+    )
+    slow = lounge(
+        warm_up={"from_c": 17.5, "to_c": 21.0, "in_min": 120, "min": 400, "quiet_until_min": 360}
+    )
+    out = run([[held, ctx], [clear, ctx], [slow, ctx]], tmp_path)
+    assert (
+        "To get from 17.5° to 21.0° by 07:00, it allows about 2 h 30 min, so it would start "
+        "now. Quiet hours hold it until 06:00, so it starts then, and may get there after "
+        "07:00." in out[0]["rows"]["uses"][1]
+    )
+    uses = out[1]["rows"]["uses"][1]
+    assert "so it starts warming at about 05:45." in uses and "Quiet" not in uses
+    assert "so it starts as soon as quiet hours end at 06:00." in out[2]["rows"]["uses"][1]
+
+
 def test_words_for_every_demo_room(tmp_path):
     s = DemoSession()
     s.step(400)

@@ -44,6 +44,7 @@ from radiate.core import (
     decide,
 )
 from radiate.core.persist import dump_state, load_state
+from radiate.core.quiet import apply_quiet
 from radiate.core.types import Actions, RoomRole
 
 from .house import SimHouse
@@ -231,6 +232,8 @@ class Result:
     min_room: tuple[float, float, str] = (math.inf, 0.0, "")
     # Room-minutes with the true temperature below the damp floor (12 °C).
     below_floor_min: float = 0.0
+    # Simulated times of the measured relay starts, in seconds.
+    relay_starts_at: list[float] = field(default_factory=list)
 
     @property
     def oil_litres(self) -> float:
@@ -387,7 +390,7 @@ def run(
 
     relay_prev = False
     relay_changed_at = 0.0
-    relay_starts_at: list[float] = []
+    relay_starts_at = res.relay_starts_at
     period_tracking: dict[str, dict[str, float]] = {}
     total = days * DAY
     measure_from = warmup_days * DAY
@@ -432,6 +435,7 @@ def run(
             )
             if controller == "radiate" and alive:
                 snap = _snapshot(house, reports, minute, optimum_start, plan, room_use, metering)
+                apply_quiet(cfg, snap)
                 if zigbee_down:
                     for inp in snap.rooms.values():
                         inp.trv_available = False

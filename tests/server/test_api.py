@@ -296,6 +296,10 @@ async def test_state_explains_each_room_model(client):
     w = model()["warm_up"]
     assert (w["from_c"], w["to_c"], w["in_min"]) == (17.0, 21.0, 120)
     assert w["min"] is None or w["min"] > 0
+    assert w["quiet_until_min"] is None
+    # In quiet hours, optimum start waits for their end (spec 5.10).
+    rooms["lounge"] = dataclasses.replace(rooms["lounge"], quiet_until_min=360)
+    assert model()["warm_up"]["quiet_until_min"] == 360
     # No warmer setpoint next: nothing to warm up to.
     rooms["lounge"] = dataclasses.replace(inp, next_setpoint=16.0, next_setpoint_in_s=7200.0)
     assert model()["warm_up"] is None

@@ -263,8 +263,12 @@ When an opening limit falls by 10 points or more, Radiate first writes the new v
 Code: `ValveAction.pre_opening`, `CLOSE_BUMP`, `TrvOptions.close_bump_delay_s`.
 
 **Write discipline**:
-The rules that hold back valve writes to protect batteries and calibration: skip changes under 3 points, at most one opening write per valve per 10 minutes unless the change is 15 points or more, and the close bump.
+The rules that hold back valve writes to protect batteries and calibration and keep valves quiet: skip changes under 3 points, at most one opening write per valve per 10 minutes unless the change is 15 points or more, the opening hold, and the close bump.
 Code: `_discipline` in `radiate.core.decide`, `MIN_OPENING_STEP`, `OPENING_WRITE_INTERVAL_S`, `BIG_OPENING_STEP`.
+
+**Opening hold**:
+Part of the write discipline: a lower opening limit waits 40 minutes after the valve's last opening write while its room keeps wanting heat (or keeps not wanting it). Opening further, starting or stopping a call or heat sink, and closing to 0 go at once.
+Code: `OPENING_HOLD_S`, `RoomState.wanted_heat`, `restart` in `_discipline`.
 
 **Reconciler**:
 The part of the TRV writer that resends a setting when the TRV's reported value disagrees with what was sent for more than 5 minutes (2 minutes for the setpoint). After three attempts it marks the setting failed (rejected) and raises an alert. A rejected setting pauses learning for the room while it lasts and for an hour after. Not reported in dry run, where nothing is sent.
@@ -330,7 +334,7 @@ Code: `LEARNER_VERSION`, `Provenance.learner`.
 _Avoid_: schema version, which is the saved format (`persist.VERSION`).
 
 **Invalidation rule**:
-A rule, shipped with a release, that declares some learned values invalid, such as learning from a dry run without burner metering once the burner is metered (`dry_run_unmetered`). Checked for every room each tick; a room it names goes back to its priors, and no other room does.
+A rule, shipped with a release, that declares some learned values invalid, such as learning from a dry run without burner metering once the burner is metered or Radiate takes over the boiler (`dry_run_unmetered`). Checked for every room each tick; a room it names goes back to its priors, and no other room does.
 Code: `Invalidation`, `RULES`, `invalid` in `radiate.core.provenance`, decision `learning.invalidated`.
 _Avoid_: learning reset, which a person asks for.
 
@@ -449,7 +453,7 @@ Code: `HouseConfig.comfort_horizon_s`.
 _Avoid_: comfort limit (that is the boiler's pooling threshold in K).
 
 **Optimum start**:
-Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag. It looks up to three hours ahead (3.25 hours in `eco` for a room with room use, which may have waited down at its damp floor), or as far as the return warm-up for a return.
+Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag. It looks up to three hours ahead (3.25 hours in `eco` for a room with room use, which may have waited down at its damp floor), or as far as the return warm-up for a return. It never starts during quiet hours.
 Code: `_preheat_due`, `PREHEAT_MAX_S`, `PREHEAT_USE_MAX_S`, `RoomInput.preheat_max_s`, `RoomState.preheating`, UI badge "Preheating".
 _Avoid_: preheat as a noun for the feature; use "preheating" for the room state.
 
@@ -469,12 +473,13 @@ The temperature a room's schedule, or an override, asks for now.
 Symbol `T_set`, °C. Code: `RoomInput.setpoint`.
 
 **Target**:
-The temperature Radiate is heating a room towards this tick: the setpoint, the next setpoint while preheating, or the frost threshold in `off` and `frost` modes.
+The temperature Radiate is heating a room towards this tick: the setpoint, the next setpoint while preheating, the frost threshold in `off` and `frost` modes, or the damp floor during quiet hours.
 Code: `RoomState.target`, API `rooms[].target`.
 
 **Override**:
 A setpoint set through the API, the web UI's setpoint control or the Home Assistant climate entity that replaces the schedule until the next scheduled change, for a set time, or until cleared. Saved across restarts. The UI calls it a hold ("Held until 22:30") and clearing it "Resume schedule".
-Code: `Runtime.overrides`, API `POST /api/v1/rooms/{id}/setpoint`, `rooms[].override` in `state`.
+An override wins over quiet hours.
+Code: `Runtime.overrides`, `RoomInput.override`, API `POST /api/v1/rooms/{id}/setpoint`, `rooms[].override` in `state`.
 
 **Calling**:
 A room Radiate wants heated: it started calling when its gap passed the hysteresis and stops when it reaches its target.
@@ -556,6 +561,11 @@ _Avoid_: heat sink for this case; the UI status line says "topping up Bedroom 2 
 A room opened as somewhere for the burner's heat to go, because too few radiators are open. Older text called it a dump room, and the reason code keeps that name.
 Code: `_ensure_sink`, reason `boiler.dump_room`, API `rooms[].topup` with `extend` false, UI badge "Heat sink".
 _Avoid_: dump room.
+
+**Preferred heat sinks**:
+Rooms the house wants opened first, in order, when the burner needs a heat sink: one list for the house's quiet hours, one for other times. Other rooms follow in the usual order, and a room in quiet hours still opens only when no other room can.
+Code: `HouseConfig.heat_sinks`, `HouseConfig.heat_sinks_quiet`, `prefer` in `_topup_candidates`, config keys `house.heat_sinks.quiet_hours` and `house.heat_sinks.other_times`.
+_Avoid_: spare heat rooms, dump rooms.
 
 **Open-path guarantee**:
 During lead and firing, the rooms calling or topped up, each counted as one fully open radiator, plus the bypass equivalent must add up to at least the sink minimum (default 1.5 fully open radiators). If not, Radiate opens heat sinks.
@@ -639,6 +649,12 @@ Code: `BoilerConfig.frost_c`, `BoilerConfig.hard_frost_c`.
 **Frost override**:
 The boiler start forced by a room below the frost threshold.
 Code: `frost`, `hard_frost` in `decide`.
+
+**Quiet hours**:
+A nightly local time window with no heating, such as 22:30 to 06:00, which may cross midnight. Inside it every room without an override is held at the damp floor (12 °C), or its setpoint if lower, and optimum start waits for the end. The store, a burn finishing its minimum burn and frost protection are not affected. Off unless set ([spec 5.10](spec.md#510-quiet-hours)).
+A room can have its own window as well, on top of the house's. A quiet room is not used as a heat sink while another room can be, and its valve is written once as its window starts and once as it ends.
+Code: `HouseConfig.quiet_hours`, `RoomConfig.quiet_hours`, `Snapshot.quiet_until_min`, `RoomInput.quiet_until_min`, `apply_quiet` in `radiate.core.quiet`, `Runtime._apply_quiet`, config keys `house.quiet_hours` and `rooms[].quiet_hours`, API `quiet` in `state` and in each room, reasons `demand.quiet_hours` and `boiler.quiet_sink`.
+_Avoid_: night mode, do not disturb, night setback (setback is a room use).
 
 **Implausible reading**:
 A room sensor reading Radiate treats as missing: below 0 °C or above 40 °C, or unchanged for 12 hours (2 below frost) while the room's TRV reading moved by 2 K and other rooms changed. The room falls back to its TRV, as for a stale sensor. Hard frost from a room sensor also needs its TRV or another room to agree.

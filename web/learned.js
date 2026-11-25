@@ -119,13 +119,24 @@ export function learnedRows(r, ctx = {}) {
   if (w && ctx.minute_of_day != null) {
     const about = w.min == null || w.min < 60 ? w.min : Math.round(w.min / 5) * 5;
     const at = clock((ctx.minute_of_day + w.in_min) % 1440);
+    // Quiet hours hold this room's warm-up until they end (spec 5.10).
+    const quiet = w.quiet_until_min ?? null;
+    const quietIn = quiet == null ? null : (quiet - ctx.minute_of_day + 1440) % 1440;
+    const asEarly = quiet == null ? "as early as it can" : `as soon as quiet hours end at ${clock(quiet)}`;
     if (w.min == null) {
-      uses += ` It can't tell yet how long this room takes to reach ${deg(w.to_c)} by ${at}, so it starts as early as it can.`;
+      uses += ` It can't tell yet how long this room takes to reach ${deg(w.to_c)} by ${at}, so it starts ${asEarly}.`;
     } else if (w.min > PREHEAT_LOOKS_AHEAD_MIN) {
-      uses += ` To get from ${deg(w.from_c)} to ${deg(w.to_c)} by ${at}, it reckons this room needs about ${span(about)}, longer than it looks ahead, so it starts as early as it can.`;
+      uses += ` To get from ${deg(w.from_c)} to ${deg(w.to_c)} by ${at}, it reckons this room needs about ${span(about)}, longer than it looks ahead, so it starts ${asEarly}.`;
     } else {
-      const start = about >= w.in_min ? "now" : `at about ${clock((ctx.minute_of_day + w.in_min - about) % 1440)}`;
-      uses += ` To get from ${deg(w.from_c)} to ${deg(w.to_c)} by ${at}, it allows about ${span(about)}, so it starts warming ${start}.`;
+      const lead = w.in_min - about; // minutes from now until it would start
+      const startAt = lead <= 0 ? "now" : `at about ${clock((ctx.minute_of_day + lead) % 1440)}`;
+      uses += ` To get from ${deg(w.from_c)} to ${deg(w.to_c)} by ${at}, it allows about ${span(about)}, so it `;
+      if (quiet != null && lead < quietIn) {
+        const late = quietIn + about > w.in_min ? `, and may get there after ${at}` : "";
+        uses += `would start ${startAt}. Quiet hours hold it until ${clock(quiet)}, so it starts then${late}.`;
+      } else {
+        uses += `starts warming ${startAt}.`;
+      }
     }
   }
   if (m.lockshield != null) {

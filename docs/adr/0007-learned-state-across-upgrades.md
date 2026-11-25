@@ -51,13 +51,13 @@ Option C. Learned state is carried forward across upgrades, and a release resets
 7. **Never silent.** Each migration, dropped parameter and reset is logged, kept as a learning note for 14 days (`learning_notes` in `GET /api/v1/state`, shown in the web UI's Learning notice), and resets go to the decision log. `POST /api/v1/learning/reset` stays as the manual escape hatch.
 8. **Downgrades.** A save from a newer version is not read. The runtime copies it, untouched, to `engine.v<N>` before this version writes its own state, starts from priors (or the tick history) and says so. An earlier copy of the same version is never replaced.
 
-The first rule, `dry_run_unmetered`: learning from a dry run without burner metering is invalid once the burner is metered. Saves from before provenance (version 1) count as unknown and are taken as dry-run learning, because every configuration starts in dry run and version 1 learned from it as if it saw the heat. The rule waits for metering because that is when the room can learn again at once; without metering the model is kept (discounted) and change detection corrects it over a few burns.
+The first rule, `dry_run_unmetered`: learning from a dry run without burner metering is invalid once the burner is metered, or once Radiate takes over the boiler (dry run off), whichever comes first. Saves from before provenance (version 1) count as unknown and are taken as dry-run learning, because every configuration starts in dry run and version 1 learned from it as if it saw the heat. Either moment is when the room can learn again at once: metering shows the heat whoever runs the boiler, and once Radiate runs it its own relay does. The takeover trigger was added by the amendment below; as first written the rule waited for metering, and without it kept the model (discounted) for change detection to correct over a few burns.
 
 ## Consequences
 
 - `persist.VERSION` is 2. Version 1 saves load, with their models discounted and their updates counted as unknown.
 - On the reference house, the first tick after the upgrade that reads the Shelly's power resets every room that had learned anything (the eight valved rooms), with a note for each. The manual reset is no longer needed there.
-- An install that never meters its burner keeps its version 1 models; they are trusted less and correct themselves through change detection.
+- An install that never meters its burner keeps its dry-run models (version 1 ones trusted less) while it stays in dry run, and starts from priors when dry run is turned off (amendment below).
 - `GET /api/v1/state` gains `learning_notes` and each room's `model.learned`. Both are additive.
 - Changing the saved shape now means: bump the version, add the migration, add a fixture written by the old code, and say in the migration what it means. Changing what learning means: bump `LEARNER_VERSION` and, if old models are wrong, add a rule with a test.
 - `bootstrap` treats an older but readable save as usable (it is migrated), and only replays history when there is no readable state.
@@ -67,4 +67,13 @@ The first rule, `dry_run_unmetered`: learning from a dry run without burner mete
 
 - Learned state grows beyond the engine blob (for example a per-house model held outside it), which may need its own version and migrations.
 - A downgrade-then-upgrade cycle happens in practice: today the copy kept aside is not read back automatically.
-- Users without metering need a dry-run rule that fires when Radiate takes over the boiler, not only when the burner is metered.
+- ~~Users without metering need a dry-run rule that fires when Radiate takes over the boiler, not only when the burner is metered.~~ Done: see the amendment below.
+
+## Amendment: reset dry-run learning on takeover (2026-11-25)
+
+The owner decided that dry-run learning without metering is reset when Radiate takes over the boiler, not only once the burner is metered. This settles the open question from the first implementation (spec 12, question 15) and the "Revisit if" above.
+
+- `dry_run_unmetered` now applies when the burner is metered **or** Radiate runs the boiler (`Conditions.live`, from `Snapshot.relay_follows_commands`, which is dry run off). What it names is unchanged: updates counted as `dry_relay` or `unknown`.
+- It fires once. The reset clears the room's provenance, and from learner version 2 the `heat_unknown` gate stops any update from being counted as `dry_relay`, so the fresh model never matches again, live or after a return to dry run. No new field is saved.
+- A save from before provenance counts as unknown, so an install that ran live under version 1 without metering also has its models reset on its first tick after the upgrade. That matches the metered case and is the same trade-off as before: every install so far started in dry run.
+- Why: a model learned in a dry run that took heat for granted can be confident and far off. Carrying it into control would let it hold back the samples that correct it (spec 4.3, "a wrong model cannot lock itself") for a day or more while it drives allocation. From priors the room learns from its own relay at once.

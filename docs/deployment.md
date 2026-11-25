@@ -475,7 +475,7 @@ The command replaces each room's model, arrival lags and lockshield cap with the
 
 Recorded dry-run ticks teach nothing unless the Shelly showed the burner firing (spec 4.1, `heat_unknown`), so a bootstrap after a dry run without metering learns from the live days only.
 
-Models learned in a dry run without metering, or saved by a version before Radiate recorded how each model was learned, are reset on their own once the Shelly shows the burner (spec 4.3, ADR-0007). To put room models back to their priors for any other reason without stopping the server, post to the learning reset. It writes no device:
+Models learned in a dry run without metering, or saved by a version before Radiate recorded how each model was learned, are reset on their own once the Shelly shows the burner or you set `house.dry_run: false`, whichever comes first (spec 4.3, ADR-0007). To put room models back to their priors for any other reason without stopping the server, post to the learning reset. It writes no device:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $RADIATE_TOKEN" -H "Content-Type: application/json" \

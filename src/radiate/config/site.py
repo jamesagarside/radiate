@@ -77,6 +77,8 @@ HA_PERSON = re.compile(r"^person\.(?!_)[a-z0-9_]{1,100}(?<!_)$")
 _ENV = re.compile(r"\$\{([A-Z0-9_]+)\}")
 _WINDOW = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-4]):([0-5]\d)$")
 _CLOCK = re.compile(r"^([01]\d|2[0-4]):([0-5]\d)$")
+# Quiet hours: HH:MM-HH:MM, which may cross midnight; the end may be 24:00.
+_QUIET = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)\s*-\s*(?:([01]\d|2[0-3]):([0-5]\d)|(24:00))$")
 
 
 class ConfigError(ValueError):
@@ -346,6 +348,61 @@ def _store_windows(raw: Any, ctx: _Ctx, path: str) -> tuple[tuple[int, int], ...
     return tuple(sorted(out))
 
 
+def parse_quiet_hours(raw: Any) -> tuple[tuple[int, int] | None, str | None]:
+    """`house.quiet_hours` (spec 5.10): "22:30-06:00" as local minutes of day, which
+    may cross midnight. Empty or null: off. Returns (window, problem)."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None, None
+    if not isinstance(raw, str):
+        return None, "expected HH:MM-HH:MM, such as 22:30-06:00"
+    m = _QUIET.match(raw.strip())
+    if not m:
+        return None, f"{raw!r} is not HH:MM-HH:MM, such as 22:30-06:00"
+    start = int(m.group(1)) * 60 + int(m.group(2))
+    end = 0 if m.group(5) else int(m.group(3)) * 60 + int(m.group(4))
+    if start == end:
+        return None, "start and end must differ"
+    return (start, end), None
+
+
+HEAT_SINK_TIMES = ("quiet_hours", "other_times")
+
+
+def _heat_sinks(
+    ctx: _Ctx, raw: Any, rooms: list[RoomConfig], devices: dict[str, RoomDevices]
+) -> dict[str, tuple[str, ...]]:
+    """`house.heat_sinks` (spec 5.4): preferred heat sinks, `quiet_hours` while the
+    house's quiet hours hold and `other_times` otherwise, each an ordered list of ids of
+    rooms with a valve Radiate drives."""
+    if raw is None:
+        raw = {}  # an absent section is checked as empty, like the others
+    if not isinstance(raw, dict):
+        ctx.err("house.heat_sinks", "expected a mapping with quiet_hours and other_times")
+        return {}
+    ctx.unknown(raw, set(HEAT_SINK_TIMES), "house.heat_sinks.")
+    valved = {
+        r.id
+        for r in rooms
+        if r.controllable and devices.get(r.id) is not None and devices[r.id].trv is not None
+    }
+    out: dict[str, tuple[str, ...]] = {}
+    for key in HEAT_SINK_TIMES:
+        value = raw.get(key)
+        path = f"house.heat_sinks.{key}"
+        if value is None:
+            continue
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            ctx.err(path, "expected a list of room ids")
+            continue
+        for rid in value:
+            if rid not in valved:
+                ctx.err(path, f"{rid!r} is not a room with a valve Radiate drives")
+        if len(set(value)) != len(value):
+            ctx.err(path, "a room is listed twice")
+        out[key] = tuple(value)
+    return out
+
+
 # --- sections --------------------------------------------------------------------------
 
 
@@ -544,6 +601,7 @@ _ROOM_KEYS = {
     "humidity",
     "trv_bias_k",
     "use",
+    "quiet_hours",
 }
 
 
@@ -661,6 +719,13 @@ def _rooms(
         # has no shower detection, so its humidity is recorded unless turned off.
         humidity = ctx.get(item, "humidity", bool, role is RoomRole.UNHEATED, p)
         bias = ctx.number(item, "trv_bias_k", DEFAULT_TRV_BIAS_K, -5, 5, p)
+        # The room's own quiet hours (spec 5.10), on top of the house's.
+        quiet, quiet_problem = parse_quiet_hours(item.get("quiet_hours"))
+        if quiet_problem:
+            ctx.err(f"{p}quiet_hours", quiet_problem)
+        if quiet is not None and role not in (RoomRole.NORMAL, RoomRole.INTERNAL_SENSOR_ONLY):
+            ctx.err(f"{p}quiet_hours", "only a room with a valve Radiate drives has quiet hours")
+            quiet = None
 
         rooms.append(
             RoomConfig(
@@ -671,6 +736,7 @@ def _rooms(
                 has_humidity=humidity,
                 trv_bias_k=bias,
                 actuation_enabled=False,
+                quiet_hours=quiet,
             )
         )
         devices[rid] = RoomDevices(trv=trv, sensor=sensor, window=window, schedule=sched)
@@ -698,6 +764,7 @@ def _rooms(
             has_humidity=r.has_humidity,
             trv_bias_k=r.trv_bias_k,
             actuation_enabled=r.id in enabled,
+            quiet_hours=r.quiet_hours,
         )
         for r in rooms
     ]
@@ -1180,6 +1247,8 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "sensor_max_silence_min",
             "history_days",
             "fire_flag_hours",
+            "quiet_hours",
+            "heat_sinks",
         },
         "house.",
     )
@@ -1212,6 +1281,10 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     )
     household = _household(ctx, raw_household, rooms) if raw_household else None
     balancing = ctx.get(data, "balancing", bool, True, "")
+    quiet_hours, quiet_problem = parse_quiet_hours(house.get("quiet_hours"))
+    if quiet_problem:
+        ctx.err("house.quiet_hours", quiet_problem)
+    sinks = _heat_sinks(ctx, house.get("heat_sinks"), rooms, devices)
     cfg = HouseConfig(
         rooms=tuple(rooms),
         boiler=_boiler(ctx, ctx.section(data, "boiler")),
@@ -1219,6 +1292,9 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         learning=_learning(ctx, ctx.section(data, "learning")),
         suggestions=_suggestions(ctx, ctx.section(data, "suggestions")),
         balancing=balancing,
+        quiet_hours=quiet_hours,
+        heat_sinks=sinks.get("other_times", ()),
+        heat_sinks_quiet=sinks.get("quiet_hours", ()),
     )
     mqtt = _mqtt(ctx, ctx.section(data, "mqtt"))
     shelly = _shelly(ctx, ctx.section(data, "shelly"))

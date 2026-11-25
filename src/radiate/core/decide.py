@@ -28,6 +28,7 @@ from .health import (
 )
 from .outdoor import DEFAULT_OUTDOOR_C
 from .provenance import Conditions, Provenance
+from .quiet import clock_text
 from .savings import MAX_TICK_S as SAVINGS_TICK_S
 from .savings import RoomSample, SavingsMeter
 from .types import (
@@ -67,6 +68,15 @@ LOCKSHIELD_MIN_WEIGHT = 30.0  # histogram weight before the lockshield cap is le
 MIN_OPENING_STEP = 3
 OPENING_WRITE_INTERVAL_S = 10 * 60
 BIG_OPENING_STEP = 15
+# Opening hold (spec 4.5): allocation re-solves every tick and steps a warming room down
+# as it nears its target, so a valve stepped down every few minutes (100, 66, 45 within
+# 34 min), each step big enough to pass the 10 minute rule. A lower opening limit now
+# waits this long after the last write while the room keeps wanting heat (or keeps not
+# wanting it). Opening further is not held, so heat is never delayed; nor are starting or
+# stopping a call, a top-up or a heat sink, and closing to 0. In simulation (seeds 1 to
+# 9, 5 days) 40 min cut opening changes by a third with no false re-learning; holding
+# rises too cut more but re-learned rooms more often (docs/simulation.md).
+OPENING_HOLD_S = 40 * 60
 CLOSE_BUMP = 10
 PREHEAT_MAX_S = 3 * 3600
 # Eco, a room with room use (spec 5.8): it may have waited down at its damp floor, so
@@ -145,6 +155,7 @@ class RoomState:
     setpoint_changed_at: float = -1e12
     written: ValveAction | None = None
     opening_written_at: float = -1e12
+    wanted_heat: bool = False  # calling or topped up when the opening was last decided
     learning_gate: str | None = "starting"
     topup_base: float | None = None  # temperature when the topup started
     target: float = 18.0  # effective target this tick (schedule, mode, optimum start)
@@ -173,6 +184,10 @@ class RoomState:
     sensor_changed_at: float | None = None
     trv_range: tuple[float, float] | None = None
     use: RoomUse | None = None  # this tick's room use, from the snapshot (spec 5.8)
+    # Quiet hours hold the room this tick (spec 5.10), and its valve settings are held
+    # as written at their start, so the valve does not move until they end.
+    quiet: bool = False
+    quiet_hold: bool = False
     # Solo latch (spec 5.8): in eco, the room passed its solo threshold while calling, so
     # it may start a burn alone and keep it running; cleared when it stops calling. A
     # room without room use has no latch: this is just "below its threshold now".
@@ -317,10 +332,33 @@ def _sensor_awaited(inp: RoomInput) -> bool:
     )
 
 
+def quiet_until(snap: Snapshot, inp: RoomInput) -> int | None:
+    """Quiet hours hold this room (spec 5.10): the minute of day they end, or None
+    outside them or with an override. The room's own figure covers the house's."""
+    if inp.override:
+        return None
+    return inp.quiet_until_min if inp.quiet_until_min is not None else snap.quiet_until_min
+
+
+def _quiet(snap: Snapshot, inp: RoomInput) -> bool:
+    return quiet_until(snap, inp) is not None
+
+
 def _target(cfg: HouseConfig, snap: Snapshot, inp: RoomInput) -> float:
     if snap.mode is Mode.AUTO:
+        if _quiet(snap, inp):
+            # Held at the damp floor (spec 5.10, decided 2026-11-25), never above the
+            # setpoint. Frost protection below it applies as always.
+            return min(inp.setpoint, cfg.boiler.damp_floor_c)
         return inp.setpoint
     return cfg.boiler.frost_c
+
+
+def _hysteresis_k(cfg: HouseConfig, rc: RoomConfig) -> float:
+    """How far below target a room falls before it starts calling."""
+    if rc.role is RoomRole.INTERNAL_SENSOR_ONLY:
+        return cfg.internal_sensor_hysteresis_k
+    return cfg.hysteresis_k
 
 
 def _sun_shaped(st: EngineState, snap: Snapshot) -> bool:
@@ -429,6 +467,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     implausible = _implausible_sensors(cfg, snap, st, alerts)
     frost_rooms: set[str] = set()
     unconfirmed: list[RoomConfig] = []  # hard frost from one sensor, not yet confirmed
+    quiet_held: set[str] = set()  # rooms quiet hours keep from heating (spec 5.10)
 
     # --- 1-4: per-room sensing, disturbances, learning, demand -------------------------
     for rc in cfg.rooms:
@@ -494,7 +533,19 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         target = _target(cfg, snap, inp)
         rs.preheating = False
         rs.deadline_s = None
-        if snap.mode is Mode.AUTO and temp is not None and not rs.dist.fire:
+        quiet = snap.mode is Mode.AUTO and _quiet(snap, inp)
+        rs.quiet = _quiet(snap, inp)  # in any mode: no heat sink, valve held
+        if quiet and temp is not None and not rs.dist.fire:
+            # Quiet hours (spec 5.10): would this room be heating now without them?
+            # Optimum start waits for their end, so it never starts during them.
+            gap = inp.setpoint - temp
+            if (
+                gap > _hysteresis_k(cfg, rc)
+                or (rs.calling and gap > 0)
+                or _preheat_due(cfg, rs, inp, temp, out, eco)
+            ):
+                quiet_held.add(rc.id)
+        if snap.mode is Mode.AUTO and not quiet and temp is not None and not rs.dist.fire:
             start = _preheat_due(cfg, rs, inp, temp, out, eco)
             if start:
                 target = inp.next_setpoint
@@ -686,11 +737,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             )
 
         # Demand latch.
-        hyst = (
-            cfg.internal_sensor_hysteresis_k
-            if rc.role is RoomRole.INTERNAL_SENSOR_ONLY
-            else cfg.hysteresis_k
-        )
+        hyst = _hysteresis_k(cfg, rc)
         if temp is not None and not rs.dist.fire:
             below[rc.id] = temp < _target(cfg, snap, inp) - bcfg.comfort_limit_k
         # Fail warm (spec 7): a room whose TRV is offline still counts on a fresh room
@@ -1015,9 +1062,17 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         if reading is None:
             reading = rs.temperature
         trv_setpoint = _trv_setpoint(rc, rs, target, heat, reading)
+        # Quiet hours (spec 5.10): the room's opening limit and setpoint are written once
+        # as they start and held until they end, unless it heats (frost, override, or
+        # the last heat sink left). Only the external temperature keeps going out.
+        hold = rs.quiet and not want_heat and not rs.dist.fire
+        if hold and rs.quiet_hold and rs.written is not None:
+            opening, trv_setpoint = rs.written.opening, rs.written.setpoint
         action = ValveAction(rc.id, trv_setpoint, opening, 100, ext)
         if rc.actuation_enabled and inp.trv_available:
-            valves[rc.id] = _discipline(rs, action, now)
+            valves[rc.id] = _discipline(rs, action, now, restart=want_heat != rs.wanted_heat)
+        rs.wanted_heat = want_heat
+        rs.quiet_hold = hold and rs.written is not None
         if rs.learning_gate in (
             "fire",
             "fire_holdoff",
@@ -1032,6 +1087,19 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                     "learning.paused",
                     f"{rc.name}: learning paused ({rs.learning_gate.replace('_', ' ')})",
                     rc.id,
+                )
+            )
+        if rc.id in quiet_held and not rs.calling and not rs.topup:
+            # Last, so it is the room's reason in the API: why it is not heating.
+            until = quiet_until(snap, inp) or 0
+            floor = min(inp.setpoint, bcfg.damp_floor_c)
+            reasons.append(
+                Reason(
+                    "demand.quiet_hours",
+                    f"{rc.name}: quiet hours until {clock_text(until)}, "
+                    f"heating only below {floor:.0f} °C",
+                    rc.id,
+                    values={"until_min": float(until), "floor_c": floor},
                 )
             )
 
@@ -1299,8 +1367,16 @@ def _topup_target(target: float, temp: float | None) -> float:
 
 
 def _topup_candidates(
-    cfg: HouseConfig, snap: Snapshot, st: EngineState, by_use: bool = False
+    cfg: HouseConfig,
+    snap: Snapshot,
+    st: EngineState,
+    by_use: bool = False,
+    quiet: bool = False,
+    prefer: tuple[str, ...] = (),
 ) -> list[RoomConfig]:
+    """Rooms that may be topped up or opened as a heat sink. A room in quiet hours is
+    left out (spec 5.10); with `quiet`, only rooms in quiet hours are given, those with
+    a quiet window of their own last. Rooms in `prefer` come first, in its order."""
     out = []
     for rc in cfg.rooms:
         if not rc.controllable:
@@ -1313,15 +1389,19 @@ def _topup_candidates(
             or rs.dist.fire
             or rs.temperature is None
             or not inp.trv_available
+            or rs.quiet is not quiet
         ):
             continue
         out.append(rc)
 
-    # Coldest relative to setpoint first; with `by_use`, rooms in use first (spec 5.8).
-    # Without room use every rank is 0, so the order is the same as without `by_use`.
-    def key(rc: RoomConfig) -> tuple[int, float]:
+    # Preferred rooms first (spec 5.4), then coldest relative to setpoint; with `by_use`,
+    # rooms in use first (spec 5.8). Without room use every rank is 0, so the order is
+    # the same as without `by_use`.
+    def key(rc: RoomConfig) -> tuple[int, int, int, float]:
         rs = st.rooms[rc.id]
-        return (_SINK_RANK[rs.use] if by_use else 0, rs.temperature - rs.target)
+        rank = prefer.index(rc.id) if rc.id in prefer else len(prefer)
+        own = 1 if quiet and rc.quiet_hours is not None else 0
+        return (rank, own, _SINK_RANK[rs.use] if by_use else 0, rs.temperature - rs.target)
 
     out.sort(key=key)
     return out
@@ -1344,7 +1424,10 @@ def _ensure_sink(
 
     if sink() >= cfg.sink_min:
         return
-    for rc in _topup_candidates(cfg, snap, st, by_use=eco):
+    # Preferred heat sinks (spec 5.4): the house's list for quiet hours while the house
+    # window holds, its other list otherwise.
+    prefer = cfg.heat_sinks_quiet if snap.quiet_until_min is not None else cfg.heat_sinks
+    for rc in _topup_candidates(cfg, snap, st, by_use=eco, prefer=prefer):
         rs = st.rooms[rc.id]
         rs.topup = True
         rs.topup_base = rs.temperature
@@ -1352,7 +1435,23 @@ def _ensure_sink(
             Reason("boiler.dump_room", f"{rc.name}: opened as a heat sink for the burner", rc.id)
         )
         if sink() >= cfg.sink_min:
-            break
+            return
+    # Rooms in quiet hours are never a heat sink while another room can be (spec 5.10).
+    # With none left, the open-path guarantee wins over quiet: the burner must not fire
+    # into shut valves, so the quiet rooms open last, in the usual order.
+    for rc in _topup_candidates(cfg, snap, st, by_use=eco, quiet=True, prefer=prefer):
+        rs = st.rooms[rc.id]
+        rs.topup = True
+        rs.topup_base = rs.temperature
+        reasons.append(
+            Reason(
+                "boiler.quiet_sink",
+                f"{rc.name}: opened in quiet hours as the last heat sink for the burner",
+                rc.id,
+            )
+        )
+        if sink() >= cfg.sink_min:
+            return
 
 
 def _allocate(
@@ -1393,15 +1492,24 @@ def _record_lockshield(rs: RoomState, opening: int) -> None:
     hist[max(0, min(100, opening))] += 1.0
 
 
-def _discipline(rs: RoomState, action: ValveAction, now: float) -> ValveAction:
-    """Write discipline (spec 4.5): small or frequent opening changes are held back."""
+def _discipline(
+    rs: RoomState, action: ValveAction, now: float, restart: bool = False
+) -> ValveAction:
+    """Write discipline (spec 4.5): small or frequent opening changes are held back.
+
+    A change under MIN_OPENING_STEP is skipped, and at most one opening write goes out
+    per OPENING_WRITE_INTERVAL_S unless the change is BIG_OPENING_STEP or more or the new
+    limit is 0. A lower limit also waits OPENING_HOLD_S after the last write, unless the
+    room has just started or stopped wanting heat (`restart`) or the new limit is 0.
+    """
     prev = rs.written
     if prev is not None:
         change = abs(action.opening - prev.opening)
-        recent = now - rs.opening_written_at < OPENING_WRITE_INTERVAL_S
-        if change < MIN_OPENING_STEP or (
-            recent and change < BIG_OPENING_STEP and action.opening != 0
-        ):
+        since = now - rs.opening_written_at
+        recent = since < OPENING_WRITE_INTERVAL_S and change < BIG_OPENING_STEP
+        lower = 0 < action.opening < prev.opening
+        held = lower and not restart and since < OPENING_HOLD_S
+        if change < MIN_OPENING_STEP or (action.opening != 0 and (recent or held)):
             action.opening = prev.opening
         elif action.opening != prev.opening:
             if action.opening <= prev.opening - CLOSE_BUMP and action.opening > 0:
