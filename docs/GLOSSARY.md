@@ -893,6 +893,18 @@ Code: `Session`, `Accounts.create_session`.
 What a signed-in person may do, highest first: admin (everything), household (day-to-day control: setpoints, modes, boosts, fire, away, room adjustments; no settings or setup) or viewer (read only, labelled "Read only" in the web UI; `readonly` is accepted as another name). The API token and ingress count as admin. Each API route's lowest role is in one table.
 Code: `ROLES`, `role_at_least`, `Identity.role`, `RoleMap`, `radiate.server.permissions.PERMISSIONS`.
 
+**Security log**:
+The record of every security event: sign-ins and refused sign-ins, sign-outs, sessions that ended, refused requests, lockouts, user changes and changes to how Radiate runs, each with who and from where and never a secret. Kept in `radiate.db` for `auth.audit_days`, written to the process log, and sent over the OpenTelemetry export as `radiate.security.*` events unless `export.otlp.security` is `false`. A username that matches no account is recorded as its keyed hash, OpenTelemetry's `user.hash`, shown as `unknown:` and 16 hex digits. With `auth.audit_controls` on (the default), day-to-day controls are recorded too. Admins read it in the Security log section of the web UI's Settings view. See ADR-0008. Avoid: audit trail, access log.
+Code: `radiate.server.security.SecurityLog`, `SecurityLog.pseudonym`, key file `<data_dir>/audit.key`, table `audit_log`, logger `radiate.security`, `telemetry.SECURITY_EVENTS`, API `GET /api/v1/audit`, `web/security.js`.
+
+**Security event**:
+One entry in the security log, such as `radiate.security.login.failed`. Carries ECS's `event.category`, `event.type` and `event.outcome`, and a reason code in `error.type` for a refusal (`bad_password`, `bad_token`, `forbidden` and so on). Refusals of one kind from one address within a minute are folded into one, with `radiate.security.count`.
+Code: `telemetry.security_record`, `SecurityLog.record`.
+
+**Lockout**:
+A username or client address that may not try a password for a while after too many wrong ones: 5 for a username, 20 for an address, in 15 minutes.
+Code: `LoginLimiter`, `AuthService.lockouts`.
+
 **Snapshot**:
 All inputs to one tick, timestamped and checked for staleness.
 Code: `Snapshot`, `RoomInput`.
@@ -932,12 +944,12 @@ Code: `SeriesIndex`, tables `data_series` and `data_hour`.
 _Avoid_: "rollup", "downsample table".
 
 **OpenTelemetry export**:
-Sending the raw data series as OTLP metrics, and the decision log as OTLP logs, to an OTLP/HTTP collector such as Elastic's managed OTLP endpoint.
+Sending the raw data series as OTLP metrics, the day's totals and each closed day's figures (`export.otlp.daily_metrics`, `daily_timestamp`), and the decision log and security events (`export.otlp.security`) as OTLP logs, to an OTLP/HTTP collector such as Elastic's managed OTLP endpoint.
 Code: `radiate.export.otlp.OtlpExporter`, `radiate.config.export`, config key `export.otlp`, API `GET /api/v1/export`.
 _Avoid_: "OTel export" in UI text; "Elastic export", which is the Bulk API exporter.
 
 **Telemetry schema**:
-The fixed list of metrics and log records the OpenTelemetry export sends: each one's name, instrument, unit, attributes and severity. Versioned MAJOR.MINOR and sent as `radiate.schema.version`; a minor version only adds.
+The fixed list of metrics and log records the OpenTelemetry export sends: each one's name, instrument, unit, attributes and severity. Versioned MAJOR.MINOR and sent as `radiate.schema.version`; a minor version only adds. The event name is in each log record's event name field, not an attribute.
 Code: `radiate.export.telemetry` (`METRICS`, `EVENTS`, `SCHEMA_VERSION`), `scripts/telemetry_docs.py`, [telemetry.md](telemetry.md).
 _Avoid_: "OTel mapping", "metrics spec".
 

@@ -91,6 +91,9 @@ from radiate.server.savings import DailyHistory, day_estimate, savings_view
 LOG = logging.getLogger(__name__)
 INDEX_CHUNK = 200  # ticks the raw data index reads at a time while it catches up
 EXPORT_ERROR_LOG_S = 3600.0
+# OpenTelemetry log records made between two ticks, at most. A flood of security
+# events past this is still in the security log, just not exported.
+OTLP_EVENTS_MAX = 2000
 
 
 class Driver(Protocol):
@@ -240,9 +243,9 @@ class Runtime:
     # OpenTelemetry log records from outside the tick (a mode or settings change), each
     # with its time, sent with the next tick (radiate.export.telemetry).
     _otlp_events: list[dict] = field(default_factory=list)
-    # API requests refused for a missing or wrong token since the last tick: a count,
-    # never the client's address.
-    auth_denied: int = 0
+    # The security audit log (radiate.server.security.SecurityLog, ADR-0008), set by
+    # the server. Each tick writes folded repeats and forwards `radiate users` events.
+    security: object | None = None
 
     def __post_init__(self) -> None:
         self.state = EngineState.new(self.cfg)
@@ -513,8 +516,12 @@ class Runtime:
     def telemetry_event(self, record: dict) -> None:
         """Queue an OpenTelemetry log record (`radiate.export.telemetry`'s builders) made
         outside the tick; it goes with the next tick, at the time it happened."""
-        if self.otlp is not None:
-            self._otlp_events.append({"t": self.wall(), **record})
+        if self.otlp is None or len(self._otlp_events) >= OTLP_EVENTS_MAX:
+            return
+        wants = getattr(self.otlp, "wants", None)
+        if callable(wants) and not wants(record):
+            return  # a security event with export.otlp.security: false
+        self._otlp_events.append({"t": self.wall(), **record})
 
     def settings(self) -> dict:
         """Settings a person can see, and `demand_mode` they can change at runtime."""
@@ -1416,6 +1423,9 @@ class Runtime:
         cleared = [k for k in self._alert_keys if (k[0], k[1]) not in holding]
         self._alert_keys = keys
         logged = [(r.code, r.message, r.room_id) for r, _ in exported]
+        security_tick = getattr(self.security, "tick", None)
+        if callable(security_tick):
+            security_tick()  # never raises
         if self.otlp is not None:
             events = self._otlp_records(exported, cleared, burn_start, snap.now)
             self._export_otlp(wall, snap, compact, observed, events)
@@ -1466,8 +1476,8 @@ class Runtime:
         now: float,
     ) -> list[dict]:
         """This tick's OpenTelemetry log records (radiate.export.telemetry): reasons and
-        alerts, cleared alerts, a burn that ended, refused requests, and what happened
-        between ticks. Never stops the tick."""
+        alerts, cleared alerts, a burn that ended, and what happened between ticks,
+        security events among them. Never stops the tick."""
         events, self._otlp_events = self._otlp_events, []
         try:
             people = (len(self.people) - len(self.away), len(self.away))
@@ -1482,9 +1492,6 @@ class Runtime:
             ledger = self.state.ledger
             if burn_start is not None and ledger.burn_start is None and ledger.relay is False:
                 events.append(telemetry.burn_record(now - burn_start, not ledger.live))
-            if self.auth_denied:
-                events.append(telemetry.auth_record(self.auth_denied))
-                self.auth_denied = 0
         except Exception as err:
             self._otlp_error(err)
         return events

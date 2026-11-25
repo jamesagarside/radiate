@@ -103,6 +103,18 @@ body[data-auth="needed"] .settings-view { display: none; }
 .badge[data-kind="restart"] { background: var(--warn-soft); color: var(--warn); }
 #s-rooms .st-room + .st-room { margin-top: 8px; }
 
+/* The security log (admins only), the last section: filters and Refresh above a table
+   of events, refusals tagged in amber. Fields and the table are the Raw data view's
+   (data.css). */
+.sl-plate { padding: 14px 18px 16px; display: grid; gap: 14px; }
+.sl-toolbar { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 10px 16px; }
+.sl-filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
+.sl-filters .rd-field { min-width: 180px; }
+.sl-table th, .sl-table td { text-align: left; vertical-align: top; }
+.sl-table .sl-detail { white-space: normal; min-width: 24ch; max-width: 60ch; overflow-wrap: anywhere; }
+.sl-table tr[data-kind="warn"] th { box-shadow: inset 4px 0 0 var(--warn); padding-left: 8px; }
+.badge[data-kind="refused"] { background: var(--warn-soft); color: var(--warn); }
+
 @media (pointer: coarse) {
   .st-control input, .st-control select { min-height: 44px; }
   .st-room > summary { min-height: 44px; }
@@ -122,6 +134,6 @@ body[data-auth="needed"] .settings-view { display: none; }
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "head" "help" "control" "file" "error";
   }
-  .st-plate, .st-room { padding-inline: 14px; }
+  .st-plate, .st-room, .sl-plate { padding-inline: 14px; }
   .st-field[data-source="app"] { padding-left: 10px; margin-left: -10px; }
 }

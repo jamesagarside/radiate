@@ -34,6 +34,7 @@ STATIC_FILES = (
     "app.css",
     "pending.js",
     "learned.js",
+    "security.js",
     "week.js",
     "household.js",
     "setup.js",

@@ -126,14 +126,11 @@ def test_logs_json_and_protobuf():
     assert recs[0].severity_number == 9 and recs[0].severity_text == "INFO"
     assert recs[0].time_unix_nano == int(T0 * 1e9) == recs[0].observed_time_unix_nano
     assert recs[0].event_name == "radiate.decision"
-    assert _attrs(recs[0].attributes) == {
-        "event.name": "radiate.decision",
-        "event.action": "boiler.lead",
-    }
+    # The event name is in the record's event name field only.
+    assert _attrs(recs[0].attributes) == {"event.action": "boiler.lead"}
     # Queued without an event name (before the schema): sent by its code, and the room
     # name is added only when the exporter knows the rooms.
     assert _attrs(recs[1].attributes) == {
-        "event.name": "radiate.decision",
         "event.action": "room.fire",
         "radiate.room.id": "lounge",
     }

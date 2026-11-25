@@ -8,9 +8,13 @@ tables are generated from it by `scripts/telemetry_docs.py`, with a test that fa
 when the doc and this module drift apart.
 
 Pure: no I/O, no clock. Names follow OpenTelemetry semantic conventions where one
-exists (`service.*`, `event.name`, `error.type`), ECS where Elastic maps it
-(`event.action`, `data_stream.dataset`), and `radiate.*` otherwise. Units are UCUM,
-as OpenTelemetry expects.
+exists (`service.*`, `error.type`, `client.address`, `http.request.method`,
+`url.path`, `user_agent.original`, `user.name`, `user.roles`, `user.hash`), ECS
+where OpenTelemetry has none and Elastic maps it (`event.action`, `event.category`,
+`event.type`, `event.outcome`, `event.reason`, `user.target.*`,
+`data_stream.dataset`), and `radiate.*` otherwise. Units
+are UCUM, as OpenTelemetry expects. The event name goes only in the log record's
+event name field (OpenTelemetry's `event_name`), never in an attribute.
 
 Versioning (`SCHEMA_VERSION`, sent as the `radiate.schema.version` resource
 attribute) is MAJOR.MINOR. Within a major, changes are additive only: a new metric,
@@ -21,7 +25,11 @@ keeps a snapshot of every published version, and the tests check that each is a
 subset of every later one with the same major.
 
 No personal data: never the name of a person or a place. Rooms are named, people
-only counted, and the house is a random ID.
+only counted, and the house is a random ID. The one exception is the security audit
+events (`radiate.security.*`, ADR-0008): a security record is no use without who did
+it and from where, so they carry `user.name` (a Radiate username or a single sign-on
+user), `user.hash` and `client.address`. Nothing else does, and no event carries a
+secret.
 """
 
 from __future__ import annotations
@@ -164,14 +172,6 @@ SAVINGS_ELIGIBLE = Attribute(
     required=True,
 )
 
-EVENT_NAME = Attribute(
-    "event.name",
-    STRING,
-    "The event name, repeated from the log record's event name field for backends "
-    "that do not read it.",
-    required=True,
-    convention="OpenTelemetry",
-)
 EVENT_ACTION = Attribute(
     "event.action",
     STRING,
@@ -227,14 +227,6 @@ SETTINGS_RESTART = Attribute(
     "Some of the changes take effect at the next start.",
     required=True,
 )
-AUTH_FAILURES = Attribute(
-    "radiate.auth.failures",
-    INT,
-    "Requests refused since the last record: a missing or wrong token or session, or a "
-    "wrong username or password. Never the client's address or the username.",
-    "{request}",
-    required=True,
-)
 EXPORT_SIGNAL = Attribute(
     "radiate.export.signal",
     STRING,
@@ -260,9 +252,256 @@ ERROR_TYPE = Attribute(
     convention="OpenTelemetry",
 )
 
+# Security audit attributes (ADR-0008). ECS and OpenTelemetry names, so a SIEM reads
+# them without mapping. Only `radiate.security.*` events carry them.
+EVENT_CATEGORY = Attribute(
+    "event.category",
+    STRING,
+    "ECS category: `authentication` for signing in and credentials, `web` for a "
+    "request refused after it was authenticated, `iam` for user management, "
+    "`configuration` for changes to how Radiate runs.",
+    required=True,
+    values=("authentication", "web", "iam", "configuration"),
+    convention="ECS",
+)
+EVENT_TYPE = Attribute(
+    "event.type",
+    STRING,
+    "ECS type within the category.",
+    required=True,
+    values=("start", "end", "info", "access", "change", "creation", "deletion"),
+    convention="ECS",
+)
+EVENT_OUTCOME = Attribute(
+    "event.outcome",
+    STRING,
+    "Whether what was tried succeeded.",
+    required=True,
+    values=("success", "failure"),
+    convention="ECS",
+)
+USER_NAME = Attribute(
+    "user.name",
+    STRING,
+    "Who: the Radiate username, or the user the single sign-on provider named. For a "
+    "refused password sign-in or a lockout, the account tried; a name that matches no "
+    "account is never recorded, `user.hash` stands for it. Left out when no one is "
+    "known, and for the API token, ingress and the command line.",
+    convention="OpenTelemetry",
+)
+USER_HASH = Attribute(
+    "user.hash",
+    STRING,
+    "For a refused password sign-in or a lockout whose name matches no account: 16 hex "
+    "digits of HMAC-SHA256 of the name under a per-install key, instead of `user.name`, "
+    "as such a name is often a password typed in the wrong box. The same name always "
+    "gives the same hash on one install.",
+    convention="OpenTelemetry",
+)
+USER_ROLES = Attribute(
+    "user.roles",
+    STRINGS,
+    "Their Radiate role: `admin`, `household` or `viewer`.",
+    convention="OpenTelemetry",
+)
+CLIENT_ADDRESS = Attribute(
+    "client.address",
+    STRING,
+    "The client's IP address, behind any trusted proxies: the connection's, or from "
+    "X-Forwarded-For only when the request came through one of `auth.trusted_proxies`. "
+    "Left out for the command line.",
+    convention="OpenTelemetry",
+)
+USER_AGENT = Attribute(
+    "user_agent.original",
+    STRING,
+    "The request's User-Agent header, cut to 256 characters.",
+    convention="OpenTelemetry",
+)
+HTTP_METHOD = Attribute(
+    "http.request.method", STRING, "The request's HTTP method.", convention="OpenTelemetry"
+)
+URL_PATH = Attribute(
+    "url.path",
+    STRING,
+    "The request's path, never its query string.",
+    convention="OpenTelemetry",
+)
+AUTH_METHOD = Attribute(
+    "radiate.auth.method",
+    STRING,
+    "How the person signed in, or how the request was authenticated.",
+    values=("password", "oidc", "saml", "session", "token", "ingress", "open", "cli"),
+)
+NEEDED_ROLE = Attribute(
+    "radiate.auth.needed_role",
+    STRING,
+    "The lowest role that may make the request.",
+    values=("viewer", "household", "admin"),
+)
+SECURITY_COUNT = Attribute(
+    "radiate.security.count",
+    INT,
+    "How many identical events this record stands for, when repeats within a minute "
+    "were folded into one. Left out for one.",
+    "{event}",
+)
+LOGIN_ERRORS = (
+    "bad_request",
+    "bad_password",
+    "unknown_user",
+    "rate_limited",
+    "bad_state",
+    "provider_error",
+    "bad_signature",
+    "wrong_issuer",
+    "wrong_audience",
+    "expired",
+    "bad_nonce",
+    "bad_claims",
+    "replayed",
+    "no_user",
+    "not_permitted",
+)
+LOGIN_ERROR = Attribute(
+    "error.type",
+    STRING,
+    "Why the sign-in was refused.",
+    required=True,
+    values=LOGIN_ERRORS,
+    convention="OpenTelemetry",
+)
+REQUEST_ERROR = Attribute(
+    "error.type",
+    STRING,
+    "What was wrong: no credentials, a wrong API token, or a session cookie that is "
+    "unknown, expired or signed out.",
+    required=True,
+    values=("no_credentials", "bad_token", "bad_session"),
+    convention="OpenTelemetry",
+)
+ACCESS_ERROR = Attribute(
+    "error.type",
+    STRING,
+    "Why: the role may not make the request, the CSRF token was missing or wrong, or "
+    "the browser's Origin was another site's.",
+    required=True,
+    values=("forbidden", "csrf", "origin"),
+    convention="OpenTelemetry",
+)
+SESSION_REASONS = ("expired", "idle", "password_reset", "role_changed", "user_removed")
+SESSION_REASON = Attribute(
+    "event.reason",
+    STRING,
+    "Why the session ended: it reached `auth.session_days`, it was idle for "
+    "`auth.idle_days`, or the user's password, role or account changed.",
+    required=True,
+    values=SESSION_REASONS,
+    convention="ECS",
+)
+SESSIONS_ENDED = Attribute(
+    "radiate.sessions.ended", INT, "How many sessions ended.", "{session}", required=True
+)
+LOCKOUT_SCOPE = Attribute(
+    "radiate.lockout.scope",
+    STRING,
+    "What is locked: a username, after 5 failures in 15 minutes, or a client address, after 20.",
+    required=True,
+    values=("username", "address"),
+)
+LOCKOUT_DURATION = Attribute(
+    "radiate.lockout.duration", DOUBLE, "How long the lockout lasts.", "s", required=True
+)
+USER_TARGET_NAME = Attribute(
+    "user.target.name",
+    STRING,
+    "The user who was added, changed or removed.",
+    required=True,
+    convention="ECS",
+)
+USER_TARGET_ROLES = Attribute(
+    "user.target.roles", STRINGS, "Their role after the change.", convention="ECS"
+)
+CONFIG_AREA = Attribute(
+    "radiate.config.area",
+    STRING,
+    "What changed: the settings saved from the web UI, the household setup, the "
+    "layout, learned models, or the heating or demand mode.",
+    required=True,
+    values=("settings", "household", "layout", "learning", "mode"),
+)
+CONFIG_PATHS = Attribute(
+    "radiate.settings.paths",
+    STRINGS,
+    "For settings and the household, which changed, as house-file paths. Settings "
+    "never carry their values, as a value can be a secret.",
+)
+CONTROL_KIND = Attribute(
+    "radiate.control.kind",
+    STRING,
+    "Which day-to-day control was used.",
+    required=True,
+    values=("setpoint", "fire", "boost", "away", "home"),
+)
+CONTROL_VALUE = Attribute(
+    "radiate.control.value",
+    STRING,
+    "What it was set to: the setpoint in °C or `cleared`, `lit` or `out`, the boost's "
+    "minutes (0 stops it), the local time someone counts as away until or `cleared`, or "
+    "`home`. Never where anyone is.",
+)
+PERSON_ID = Attribute(
+    "radiate.person.id",
+    STRING,
+    "For Away and Home, the household member's ID from the house file.",
+)
+CONFIG_KEY = Attribute(
+    "radiate.config.key",
+    STRING,
+    "For a mode or one household setting, the one that changed: `mode` (the heating "
+    "mode), `demand_mode`, or a house-file path such as `household.rooms.lounge.adjust`.",
+)
+CONFIG_BEFORE = Attribute(
+    "radiate.config.before",
+    STRING,
+    "With `radiate.config.key`, its value before the change, as text (JSON for a list "
+    "or mapping), cut to 256 characters. Left out for the people in the household.",
+)
+CONFIG_AFTER = Attribute(
+    "radiate.config.after",
+    STRING,
+    "With `radiate.config.key`, its value after the change, as `radiate.config.before`.",
+)
+ROOM_IDS = Attribute("radiate.room.ids", STRINGS, "For learning, the rooms that were reset.")
+LOGIN_ON = Attribute(
+    "radiate.auth.login", BOOL, "User login is on (`auth.enabled`).", required=True
+)
+LOGIN_METHODS = Attribute(
+    "radiate.auth.methods",
+    STRINGS,
+    "The sign-in methods that are on: `password`, `oidc`, `saml`. Empty with login off.",
+    required=True,
+)
+TOKEN_SET = Attribute(
+    "radiate.auth.token", BOOL, "An API token (RADIATE_TOKEN) is set.", required=True
+)
+INGRESS_SET = Attribute(
+    "radiate.auth.ingress",
+    BOOL,
+    "Requests through Home Assistant ingress are trusted.",
+    required=True,
+)
+PROXY_COUNT = Attribute(
+    "radiate.auth.trusted_proxies",
+    INT,
+    "How many addresses or networks are trusted proxies.",
+    "{network}",
+    required=True,
+)
+
 _ROOM = (ROOM_ID, ROOM_NAME)
 _ROOM_OPTIONAL = (ROOM_ID.optional(), ROOM_NAME)
-_COMMON_EVENT = (EVENT_NAME, EVENT_ACTION)
+_COMMON_EVENT = (EVENT_ACTION,)
 
 
 # --- metrics -----------------------------------------------------------------------------
@@ -550,8 +789,20 @@ MODE_CHANGED = "radiate.mode.changed"
 PRESENCE_CHANGED = "radiate.presence.changed"
 LEARNING_INVALIDATED = "radiate.learning.invalidated"
 SETTINGS_CHANGED = "radiate.settings.changed"
-AUTH_DENIED = "radiate.auth.denied"
 EXPORT_DROPPED = "radiate.export.dropped"
+SECURITY_PREFIX = "radiate.security."
+SECURITY_LOGIN = "radiate.security.login"
+SECURITY_LOGIN_FAILED = "radiate.security.login.failed"
+SECURITY_LOGOUT = "radiate.security.logout"
+SECURITY_SESSION_ENDED = "radiate.security.session.ended"
+SECURITY_REQUEST_REFUSED = "radiate.security.request.refused"
+SECURITY_ACCESS_DENIED = "radiate.security.access.denied"
+SECURITY_LOCKOUT_STARTED = "radiate.security.lockout.started"
+SECURITY_LOCKOUT_ENDED = "radiate.security.lockout.ended"
+SECURITY_USER_CHANGED = "radiate.security.user.changed"
+SECURITY_CONFIG_CHANGED = "radiate.security.config.changed"
+SECURITY_CONTROL_USED = "radiate.security.control.used"
+SECURITY_LOGIN_CONFIG = "radiate.security.login.config"
 
 _DECISION_VALUES = (ROOM_TEMPERATURE, ROOM_TARGET, PREDICTED_BURN, POOLED_DEMAND)
 
@@ -622,15 +873,6 @@ EVENTS: tuple[EventDef, ...] = (
         "`settings.saved`, `settings.reverted`, `household.setup`.",
     ),
     EventDef(
-        AUTH_DENIED,
-        "WARN",
-        "API requests, stream connections or sign-ins were refused. At most one record "
-        "a tick, with the count.",
-        "`<n> requests refused: not signed in or wrong credentials`.",
-        (*_COMMON_EVENT, AUTH_FAILURES),
-        "`auth.denied`.",
-    ),
-    EventDef(
         EXPORT_DROPPED,
         "WARN",
         "The OpenTelemetry export lost data: a full queue dropped its oldest records, or "
@@ -641,6 +883,180 @@ EVENTS: tuple[EventDef, ...] = (
         "`export.dropped`.",
     ),
 )
+
+
+# Security audit events (ADR-0008). Every one also goes to Radiate's own audit log
+# and process log, whether or not the export is on (`radiate.server.security`).
+_SEC = (EVENT_ACTION, EVENT_CATEGORY, EVENT_TYPE, EVENT_OUTCOME)
+_WHO = (USER_NAME, USER_ROLES, CLIENT_ADDRESS, AUTH_METHOD, USER_AGENT)
+_REQUEST = (HTTP_METHOD, URL_PATH, SECURITY_COUNT)
+
+SECURITY_EVENTS: tuple[EventDef, ...] = (
+    EventDef(
+        SECURITY_LOGIN,
+        "INFO",
+        "Someone signed in: with a password, OIDC or SAML. Security audit.",
+        "`Signed in: alice (admin, password)`.",
+        (
+            *_SEC,
+            USER_NAME.needed(),
+            USER_ROLES.needed(),
+            CLIENT_ADDRESS,
+            AUTH_METHOD.needed(),
+            USER_AGENT,
+        ),
+        "`login`.",
+    ),
+    EventDef(
+        SECURITY_LOGIN_FAILED,
+        "WARN",
+        "A sign-in was refused, with why. Security audit.",
+        "`Sign-in refused for alice: wrong password`.",
+        (
+            *_SEC,
+            USER_NAME,
+            USER_HASH,
+            CLIENT_ADDRESS,
+            AUTH_METHOD.needed(),
+            USER_AGENT,
+            LOGIN_ERROR,
+            SECURITY_COUNT,
+        ),
+        "`login`.",
+    ),
+    EventDef(
+        SECURITY_LOGOUT,
+        "INFO",
+        "Someone signed out. Security audit.",
+        "`Signed out: alice`.",
+        (*_SEC, USER_NAME.needed(), USER_ROLES, CLIENT_ADDRESS, AUTH_METHOD, USER_AGENT),
+        "`logout`.",
+    ),
+    EventDef(
+        SECURITY_SESSION_ENDED,
+        "INFO",
+        "Sessions ended without signing out: they expired, or a password, role or account "
+        "changed. Security audit.",
+        "`Session expired: alice`, or `2 sessions ended for alice: password reset`.",
+        (*_SEC, USER_NAME.needed(), USER_ROLES, AUTH_METHOD, SESSION_REASON, SESSIONS_ENDED),
+        "`session.expired`, `session.idle`, `session.revoked`.",
+    ),
+    EventDef(
+        SECURITY_REQUEST_REFUSED,
+        "WARN",
+        "An API request or a stream connection was refused for missing or wrong "
+        "credentials (401, or the stream closed with 4401). Security audit.",
+        "`Request refused: wrong API token`.",
+        (*_SEC, CLIENT_ADDRESS, USER_AGENT, REQUEST_ERROR, *_REQUEST),
+        "`request.refused`, `stream.refused`.",
+    ),
+    EventDef(
+        SECURITY_ACCESS_DENIED,
+        "WARN",
+        "An authenticated request was refused (403): the role may not make it, the CSRF "
+        "token was wrong, or the stream's Origin was another site. Security audit.",
+        "`Refused: alice (viewer) needs admin for PUT /api/v1/layout`.",
+        (*_SEC, *_WHO, ACCESS_ERROR, NEEDED_ROLE, *_REQUEST),
+        "`access.denied`.",
+    ),
+    EventDef(
+        SECURITY_LOCKOUT_STARTED,
+        "WARN",
+        "Too many failed password sign-ins locked a username or a client address. Security audit.",
+        "`Sign-in locked for 900 s: username alice`.",
+        (*_SEC, USER_NAME, USER_HASH, CLIENT_ADDRESS, LOCKOUT_SCOPE, LOCKOUT_DURATION),
+        "`lockout.started`.",
+    ),
+    EventDef(
+        SECURITY_LOCKOUT_ENDED,
+        "INFO",
+        "A sign-in lockout ended. Security audit.",
+        "`Sign-in lockout ended: username alice`.",
+        (*_SEC, USER_NAME, USER_HASH, CLIENT_ADDRESS, LOCKOUT_SCOPE),
+        "`lockout.ended`.",
+    ),
+    EventDef(
+        SECURITY_USER_CHANGED,
+        "INFO",
+        "A user was added, removed, given a new password or a new role, with `radiate "
+        "users`. Security audit.",
+        "`User added: alice (admin)`.",
+        (*_SEC, USER_TARGET_NAME, USER_TARGET_ROLES, AUTH_METHOD),
+        "`user.added`, `user.removed`, `user.password_reset`, `user.role_changed`.",
+    ),
+    EventDef(
+        SECURITY_CONFIG_CHANGED,
+        "INFO",
+        "Someone changed how Radiate runs: settings, the household setup, the layout, "
+        "learned models, or the heating or demand mode. Who and what. Old and new values "
+        "only for a mode and the household, which hold no secret; one record for each "
+        "household setting changed, or one naming them all past 20. Security audit.",
+        "`Settings saved by alice (admin): boiler.min_burn_min`, or `Demand mode changed "
+        "from eco to comfort by sam (household)`.",
+        (
+            *_SEC,
+            *_WHO,
+            CONFIG_AREA,
+            CONFIG_PATHS,
+            CONFIG_KEY,
+            CONFIG_BEFORE,
+            CONFIG_AFTER,
+            ROOM_IDS,
+            HTTP_METHOD,
+            URL_PATH,
+        ),
+        "`settings.saved`, `settings.reverted`, `household.saved`, `household.reverted`, "
+        "`layout.saved`, `learning.reset`, `mode.changed`.",
+    ),
+    EventDef(
+        SECURITY_CONTROL_USED,
+        "INFO",
+        "Someone used a day-to-day control: held a room's setpoint or cleared it, said "
+        "a fire was lit or out, boosted the hot water, or said someone was away or home. "
+        "Who and what, never where anyone is. Only with `auth.audit_controls` on, the "
+        "default. Security audit.",
+        "`Lounge held at 21.5° by sam (household)`.",
+        (
+            *_SEC,
+            *_WHO,
+            CONTROL_KIND,
+            CONTROL_VALUE,
+            ROOM_ID.optional(),
+            PERSON_ID,
+            HTTP_METHOD,
+            URL_PATH,
+        ),
+        "`setpoint.held`, `setpoint.cleared`, `fire.lit`, `fire.out`, `store.boosted`, "
+        "`away.set`, `away.cleared`, `home.said`.",
+    ),
+    EventDef(
+        SECURITY_LOGIN_CONFIG,
+        "INFO",
+        "How Radiate lets people in, at every start. Security audit.",
+        "`Login on: password, oidc; API token set`.",
+        (*_SEC, LOGIN_ON, LOGIN_METHODS, TOKEN_SET, INGRESS_SET, PROXY_COUNT),
+        "`login.config`.",
+    ),
+)
+
+# ECS categorisation of each security event: (event.category, event.type, outcome).
+# A builder may give another event.type within the category (user.changed does).
+SECURITY_KINDS: dict[str, tuple[str, str, str]] = {
+    SECURITY_LOGIN: ("authentication", "start", "success"),
+    SECURITY_LOGIN_FAILED: ("authentication", "start", "failure"),
+    SECURITY_LOGOUT: ("authentication", "end", "success"),
+    SECURITY_SESSION_ENDED: ("authentication", "end", "success"),
+    SECURITY_REQUEST_REFUSED: ("authentication", "start", "failure"),
+    SECURITY_ACCESS_DENIED: ("web", "access", "failure"),
+    SECURITY_LOCKOUT_STARTED: ("authentication", "info", "failure"),
+    SECURITY_LOCKOUT_ENDED: ("authentication", "info", "success"),
+    SECURITY_USER_CHANGED: ("iam", "change", "success"),
+    SECURITY_CONFIG_CHANGED: ("configuration", "change", "success"),
+    SECURITY_CONTROL_USED: ("configuration", "change", "success"),
+    SECURITY_LOGIN_CONFIG: ("configuration", "info", "success"),
+}
+
+EVENTS = (*EVENTS, *SECURITY_EVENTS)
 
 EVENT_BY_NAME: dict[str, EventDef] = {e.name: e for e in EVENTS}
 
@@ -748,17 +1164,6 @@ def settings_record(action: str, paths: Iterable[str], restart_required: bool) -
     }
 
 
-def auth_record(failures: int) -> dict:
-    noun = "request" if failures == 1 else "requests"
-    return {
-        "e": AUTH_DENIED,
-        "c": "auth.denied",
-        "m": f"{failures} {noun} refused: not signed in or wrong credentials",
-        "r": None,
-        "a": {AUTH_FAILURES.key: int(failures)},
-    }
-
-
 def dropped_record(signal: str, count: int, why: str) -> dict:
     what = "queued metric record" if signal == "metrics" else "log record"
     what += "" if count == 1 else "s"
@@ -773,6 +1178,28 @@ def dropped_record(signal: str, count: int, why: str) -> dict:
         "r": None,
         "a": {EXPORT_SIGNAL.key: signal, DROPPED_COUNT.key: int(count), ERROR_TYPE.key: why},
     }
+
+
+def security_record(name: str, action: str, message: str, attrs: Mapping[str, Any]) -> dict:
+    """A security audit record (`radiate.security.*`, ADR-0008).
+
+    `event.category`, `event.type` and `event.outcome` come from `SECURITY_KINDS`
+    (`attrs` may give another `event.type`). Only the event's own attributes are kept,
+    and None values are left out, so nothing outside the schema, a secret included,
+    can ride along.
+    """
+    d = EVENT_BY_NAME[name]
+    category, kind, outcome = SECURITY_KINDS[name]
+    allowed = {a.key for a in d.attributes}
+    out: dict[str, Any] = {
+        EVENT_CATEGORY.key: category,
+        EVENT_TYPE.key: kind,
+        EVENT_OUTCOME.key: outcome,
+    }
+    for key, value in attrs.items():
+        if key in allowed and key != EVENT_ACTION.key and value is not None:
+            out[key] = list(value) if isinstance(value, (list, tuple)) else value
+    return {"e": name, "c": action, "m": message, "r": None, "a": out}
 
 
 # --- validation --------------------------------------------------------------------------
@@ -876,11 +1303,7 @@ def check_logs(request: Mapping[str, Any]) -> list[str]:
                 body = (rec.get("body") or {}).get("stringValue")
                 if not isinstance(body, str) or not body:
                     problems.append(f"{name}: the body should be text")
-                attrs = rec.get("attributes", [])
-                _check_attrs(name, attrs, d.attributes, problems)
-                for kv in attrs:
-                    if kv.get("key") == EVENT_NAME.key and kv["value"].get("stringValue") != name:
-                        problems.append(f"{name}: event.name attribute differs")
+                _check_attrs(name, rec.get("attributes", []), d.attributes, problems)
     return problems
 
 

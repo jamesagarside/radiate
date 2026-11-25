@@ -115,6 +115,36 @@ def test_resolve_api_key_order():
     assert resolve_api_key(cfg.otlp, env={"RADIATE_OTLP_API_KEY": "k1"}) == "k0"
 
 
+def test_daily_figures_can_be_timed_and_turned_off():
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x"}})
+    assert problems == []
+    assert cfg.otlp.daily_metrics is True and cfg.otlp.daily_timestamp == "end_of_day"
+    cfg, problems = parse_export(
+        {"otlp": {"endpoint": "https://x", "daily_metrics": False, "daily_timestamp": "day_close"}}
+    )
+    assert problems == []
+    assert cfg.otlp.daily_metrics is False and cfg.otlp.daily_timestamp == "day_close"
+    _, problems = parse_export(
+        {"otlp": {"endpoint": "https://x", "daily_metrics": "yes", "daily_timestamp": "noon"}}
+    )
+    assert problems == [
+        "export.otlp.daily_metrics: expected true or false",
+        "export.otlp.daily_timestamp: must be one of end_of_day, day_close",
+    ]
+
+
+def test_security_events_have_their_own_export_switch():
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x"}})
+    assert problems == [] and cfg.otlp.security is True
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x", "security": False}})
+    assert problems == [] and cfg.otlp.security is False
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x", "security": "false"}})
+    assert problems == [] and cfg.otlp.security is False  # from the environment
+    cfg, problems = parse_export({"otlp": {"endpoint": "https://x", "security": "no"}})
+    assert problems == ["export.otlp.security: expected true or false"]
+    assert cfg.otlp.security is True
+
+
 def test_settings_schema_covers_every_key():
     keys = {item["key"] for item in OTLP_SETTINGS}
     cfg, problems = parse_export({"otlp": {"endpoint": "https://x"}})
@@ -131,6 +161,9 @@ def test_settings_schema_covers_every_key():
         "compression",
         "signals",
         "dataset",
+        "daily_metrics",
+        "daily_timestamp",
+        "security",
     }
     for item in OTLP_SETTINGS:
         assert item["help"] and "—" not in item["help"]

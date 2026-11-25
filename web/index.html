@@ -336,6 +336,35 @@
       <div class="settings-sections">
         <div class="st-all" id="settings-all" hidden></div>
         <div class="settings-list" id="settings-sections"></div>
+        <section class="st-sec sl-sec" id="s-security-log" aria-labelledby="s-security-log-h" hidden>
+          <h3 class="section-h" id="s-security-log-h" tabindex="-1">Security log</h3>
+          <p class="help-line st-help">Who signed in, from where, what was refused and who changed what. Only admins see this. <a class="help-link" href="#guide/security-log">About the security log</a></p>
+          <div class="card st-plate sl-plate" id="security">
+            <div class="sl-toolbar">
+              <div class="sl-filters">
+                <div class="rd-field">
+                  <span class="rd-label" id="security-outcome-l">Show</span>
+                  <div class="seg" role="radiogroup" aria-labelledby="security-outcome-l" id="security-outcome">
+                    <button type="button" role="radio" data-outcome="" aria-checked="true">Everything</button>
+                    <button type="button" role="radio" data-outcome="failure" aria-checked="false">Refused</button>
+                    <button type="button" role="radio" data-outcome="success" aria-checked="false">Allowed</button>
+                  </div>
+                </div>
+                <div class="rd-field"><label for="security-user">User</label><select id="security-user"><option value="">Everyone</option></select></div>
+              </div>
+              <button type="button" class="btn" id="security-refresh">Refresh</button>
+            </div>
+            <p class="rd-meta" id="security-summary" aria-live="polite"></p>
+            <p class="rd-note" id="security-error" data-kind="warn" role="status" hidden>Couldn't load the security log. Try Refresh.</p>
+            <div class="rd-table-wrap sl-wrap" id="security-table" hidden>
+              <table class="rd-table sl-table">
+                <thead><tr><th scope="col">Time</th><th scope="col">What</th><th scope="col">Who</th><th scope="col">From</th><th scope="col">Detail</th></tr></thead>
+                <tbody id="security-body"></tbody>
+              </table>
+            </div>
+            <div><button type="button" class="btn" id="security-more" hidden>Show older</button></div>
+          </div>
+        </section>
       </div>
     </div>
   </section>
@@ -450,6 +479,7 @@
           <li><a href="#guide/suggestions">Suggestions</a></li>
           <li><a href="#guide/savings">Savings</a></li>
           <li><a href="#guide/settings">Settings</a></li>
+          <li><a href="#guide/security-log">The security log</a></li>
           <li><a href="#guide/raw-data">Raw data and exporting it</a></li>
           <li><a href="#guide/alerts">Alerts</a></li>
           <li><a href="#guide/problems">When something goes wrong</a></li>
@@ -719,6 +749,15 @@
           </dl>
           <p>A change that lets Radiate write to the boiler or the valves, such as turning dry run off, giving the relay's address or actuating a room's valve, asks you to confirm first.</p>
           <p>Passwords are never shown, only whether one is set. Type a new one to replace it. The household and the weekly times have their own places: the household setup and the Schedules section of the House view.</p>
+        </section>
+
+        <section class="g-sec" id="g-security-log" aria-labelledby="g-security-log-h">
+          <h3 class="section-h" id="g-security-log-h" tabindex="-1">The security log</h3>
+          <p>Admins see the Security log at the end of the Settings tab: every sign-in and sign-out, every refused sign-in or request with the reason, lockouts after too many wrong passwords, users added or changed with <code>radiate users</code>, and who changed the settings, the household, the layout, learning, the heating mode or Eco and Comfort. Each entry says who and from which address, and never holds a password, token or other secret.</p>
+          <p>It also records who used the everyday controls: a room held at a temperature, Fire lit, a hot-water boost, and Away or Home. It says what was set, never where anyone is. To leave these out, turn off Log day-to-day controls in the Login section of the Settings tab; it applies at once.</p>
+          <p>A change to the heating mode, Eco and Comfort, or a setting in the household, such as a room adjustment from the week view, says what it was before and what it became. A change to the people in the household names no one. Settings saved on this tab say which ones changed, but not their values, as a value can be a password.</p>
+          <p>When someone signs in with a username that isn't an account, the log shows <code>unknown:</code> and a code instead of what they typed, as that is often a password typed in the wrong box. The same mistyped name always gets the same code, so you can still see it tried again and again.</p>
+          <p>Radiate keeps it for 90 days (<code>auth.audit_days</code>), whether or not login is on. When the OpenTelemetry export is on, it sends these events too, unless <code>export.otlp.security</code> is off.</p>
         </section>
 
         <section class="g-sec" id="g-alerts" aria-labelledby="g-alerts-h">

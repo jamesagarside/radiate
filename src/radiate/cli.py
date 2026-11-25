@@ -60,15 +60,22 @@ def _serve(args: argparse.Namespace) -> None:
             )
             runtime.exporter.start(session)
         _start_otlp(runtime, site, session)
-        login = await _start_login(auth_cfg, runtime, args, session)
+        store = _state_store(runtime, args)
+        security = _start_security(runtime, store, auth_cfg)
+        login = await _start_login(auth_cfg, store, security, session)
         if login is not None:
             cleanup.append(login.close)
+        token = os.environ.get("RADIATE_TOKEN", "")
+        ingress_ip = os.environ.get("RADIATE_INGRESS_IP", "")
+        _record_login_config(security, auth_cfg, login, token, ingress_ip)
         runtime.start(interval_s=interval)
         app = create_app(
             runtime,
-            token=os.environ.get("RADIATE_TOKEN", ""),
-            ingress_ip=os.environ.get("RADIATE_INGRESS_IP", ""),
+            token=token,
+            ingress_ip=ingress_ip,
             login=login,
+            security=security,
+            trusted_proxies=auth_cfg.trusted_proxies,
         )
         runner = web.AppRunner(app)
         await runner.setup()
@@ -106,22 +113,65 @@ def _auth_config(args: argparse.Namespace, site):
     return site.auth if site is not None else AuthConfig()
 
 
-async def _start_login(auth_cfg, runtime, args, session):
+def _state_store(runtime, args):
+    """The state database: the runtime's, else one in --data-dir, else one in memory
+    (the demo). Login and the security log keep their tables in it."""
+    from pathlib import Path
+
+    from radiate.server.store import Store
+
+    if runtime.store is not None:
+        return runtime.store
+    return Store(Path(args.data_dir) / "radiate.db" if args.data_dir else ":memory:")
+
+
+def _start_security(runtime, store, auth_cfg):
+    """The security audit log (ADR-0008), whether or not login is on."""
+    from radiate.server.security import SecurityLog, load_key
+
+    # The key for hashing usernames that match no account lives beside radiate.db.
+    data_dir = None if str(store.path) == ":memory:" else store.path.parent
+    security = SecurityLog(store.db, auth_cfg.audit_days, key=load_key(data_dir))
+    security.audit_controls = auth_cfg.audit_controls
+    runtime.security = security
+    return security
+
+
+def _record_login_config(security, auth_cfg, login, token: str, ingress_ip: str) -> None:
+    """Say at every start how Radiate lets people in, in the security log."""
+    from radiate.export import telemetry
+
+    names = {"local": "password", "oidc": "oidc", "saml": "saml"}
+    methods = [names[m["id"]] for m in login.methods()] if login is not None else []
+    text = f"Login on: {', '.join(methods) or 'no method'}" if login is not None else "Login off"
+    text += "; API token set" if token else "; no API token"
+    if not token and login is None:
+        text += ": the API is open to anyone who can reach it"
+    security.record(
+        telemetry.SECURITY_LOGIN_CONFIG,
+        "login.config",
+        text,
+        {
+            "radiate.auth.login": login is not None,
+            "radiate.auth.methods": methods,
+            "radiate.auth.token": bool(token),
+            "radiate.auth.ingress": bool(ingress_ip),
+            "radiate.auth.trusted_proxies": len(auth_cfg.trusted_proxies),
+        },
+    )
+
+
+async def _start_login(auth_cfg, store, security, session):
     """Login (ADR-0006), if the configuration turns it on. Users and sessions live in
     the state database; the demo keeps them in memory unless --data-dir is given."""
     import logging
-    from pathlib import Path
 
     from radiate.server.auth import Accounts, AuthSetupError, create_auth
-    from radiate.server.store import Store
 
     if not auth_cfg.enabled:
         return None
-    store = runtime.store
-    if store is None:
-        store = Store(Path(args.data_dir) / "radiate.db" if args.data_dir else ":memory:")
     try:
-        login = await create_auth(auth_cfg, Accounts(store.db), session)
+        login = await create_auth(auth_cfg, Accounts(store.db), session, security)
     except AuthSetupError as err:
         sys.exit(f"cannot start login: {err}")
     methods = ", ".join(m["id"] for m in login.methods())
@@ -689,20 +739,42 @@ def _bootstrap(args: argparse.Namespace) -> None:
 
 def _users(args: argparse.Namespace) -> None:
     import getpass
+    from functools import partial
     from pathlib import Path
 
     from radiate.config.auth import normalise_role
+    from radiate.export import telemetry
     from radiate.server.auth import AccountError, Accounts
     from radiate.server.auth.passwords import password_problem
+    from radiate.server.auth.service import record_session_end
+    from radiate.server.security import ORIGIN_CLI, SecurityLog
     from radiate.server.store import Store
 
     if not args.config and not args.data_dir:
         sys.exit(
             "Use --config <house file> or --data-dir <folder>, where Radiate keeps radiate.db."
         )
-    data_dir = args.data_dir or _load(args.config).data_dir
+    site = _load(args.config) if args.config else None
+    data_dir = args.data_dir or site.data_dir
     store = Store(Path(data_dir) / "radiate.db")
-    accounts = Accounts(store.db)
+    # Every change goes to the security log (ADR-0008); a running server forwards it
+    # to the OpenTelemetry export at its next tick.
+    audit_days = site.auth.audit_days if site is not None else 90.0
+    security = SecurityLog(store.db, audit_days, origin=ORIGIN_CLI)
+    accounts = Accounts(store.db, partial(record_session_end, security))
+
+    def changed(action: str, kind: str, message: str, name: str, role: str | None) -> None:
+        security.record(
+            telemetry.SECURITY_USER_CHANGED,
+            action,
+            message,
+            {
+                "event.type": kind,
+                "user.target.name": name,
+                "user.target.roles": [role] if role else None,
+                "radiate.auth.method": "cli",
+            },
+        )
 
     def new_password() -> str:
         if args.password_stdin:
@@ -728,19 +800,34 @@ def _users(args: argparse.Namespace) -> None:
             sys.exit(f"radiate users {args.action} needs a username")
         if args.action == "add":
             user = accounts.add_user(args.name, new_password(), args.role or "viewer")
+            changed(
+                "user.added",
+                "creation",
+                f"User added: {user.username} ({user.role})",
+                user.username,
+                user.role,
+            )
             print(f"Added {user.username} as {user.role}.")
         elif args.action == "reset-password":
+            name = args.name.strip().lower()
             accounts.set_password(args.name, new_password())
-            print(f"Password changed for {args.name.lower()}. Their sessions have ended.")
+            changed("user.password_reset", "change", f"Password reset: {name}", name, None)
+            print(f"Password changed for {name}. Their sessions have ended.")
         elif args.action == "set-role":
             if not args.role:
                 sys.exit("set-role needs --role admin, household or viewer")
+            name = args.name.strip().lower()
             accounts.set_role(args.name, args.role)
             role = normalise_role(args.role)
-            print(f"{args.name.lower()} is now {role}. Their sessions have ended.")
+            changed(
+                "user.role_changed", "change", f"Role changed: {name} is now {role}", name, role
+            )
+            print(f"{name} is now {role}. Their sessions have ended.")
         elif args.action == "remove":
+            name = args.name.strip().lower()
             accounts.remove_user(args.name)
-            print(f"Removed {args.name.lower()}. Their sessions have ended.")
+            changed("user.removed", "deletion", f"User removed: {name}", name, None)
+            print(f"Removed {name}. Their sessions have ended.")
     except AccountError as err:
         sys.exit(str(err))
     finally:

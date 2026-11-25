@@ -166,6 +166,13 @@ def refused(r) -> bool:
     return r.status == 302 and r.headers["Location"] == f"{PUBLIC}/login?error=sso"
 
 
+def why(c) -> tuple[str, str | None]:
+    """The last refused sign-in in the security log: (error.type, user.name)."""
+    events = c.login.security.query(outcome="failure")["events"]
+    last = next(e for e in events if e["event"] == "radiate.security.login.failed")
+    return last["attributes"]["error.type"], last["attributes"].get("user.name")
+
+
 async def test_metadata(radiate):
     r = await radiate.get("/auth/saml/metadata")
     body = await r.text()
@@ -187,11 +194,13 @@ async def test_viewer_and_unmapped(radiate):
     relay, rid = await start(radiate)
     xml = response_xml(rid, "guest", ("other",), assertion_id="_a2")
     assert refused(await post(radiate, relay, xml))
+    assert why(radiate) == ("not_permitted", "guest")
 
 
 async def test_unsigned_assertion_is_refused(radiate):
     relay, rid = await start(radiate)
     assert refused(await post(radiate, relay, response_xml(rid, sign=False)))
+    assert why(radiate) == ("bad_signature", None)
 
 
 async def test_tampered_assertion_is_refused(radiate):
@@ -199,30 +208,35 @@ async def test_tampered_assertion_is_refused(radiate):
     xml = response_xml(rid, "sam", ("family",))
     xml = xml.replace(">sam<", ">alex<").replace(">family<", ">heating-admins<")
     assert refused(await post(radiate, relay, xml))
+    assert why(radiate) == ("bad_signature", None)
 
 
 async def test_signed_by_another_key_is_refused(radiate):
     relay, rid = await start(radiate)
     xml = response_xml(rid, key=OTHER_KEY, cert=OTHER_CERT)
     assert refused(await post(radiate, relay, xml))
+    assert why(radiate) == ("bad_signature", None)
 
 
 async def test_sha1_signature_is_refused(radiate):
     relay, rid = await start(radiate)
     xml = response_xml(rid, alg=RSA_SHA1, digest=SHA1)
     assert refused(await post(radiate, relay, xml))
+    assert why(radiate) == ("bad_signature", None)
 
 
 async def test_wrong_audience_is_refused(radiate):
     relay, rid = await start(radiate)
     xml = response_xml(rid, audience="https://other.example/sp")
     assert refused(await post(radiate, relay, xml))
+    assert why(radiate) == ("wrong_audience", None)
 
 
 async def test_expired_assertion_is_refused(radiate):
     relay, rid = await start(radiate)
     xml = response_xml(rid, not_after_s=-600)
     assert refused(await post(radiate, relay, xml))
+    assert why(radiate) == ("expired", None)
 
 
 async def test_replayed_response_is_refused(radiate):
@@ -233,17 +247,20 @@ async def test_replayed_response_is_refused(radiate):
     # Nor with a fresh RelayState: the request ID and the assertion ID were both used.
     relay2, _ = await start(radiate)
     assert refused(await post(radiate, relay2, xml))
+    assert why(radiate) == ("bad_state", None)
 
 
 async def test_unsolicited_response_is_refused(radiate):
     xml = response_xml("_never_sent")
     assert refused(await post(radiate, "made-up", xml))
+    assert why(radiate) == ("bad_state", None)
 
 
 async def test_response_to_another_request_is_refused(radiate):
     relay, _ = await start(radiate)
     xml = response_xml("_some_other_request")
     assert refused(await post(radiate, relay, xml))
+    assert why(radiate) == ("bad_state", None)
 
 
 async def test_bad_metadata_fails_at_start(tmp_path):
