@@ -13,7 +13,11 @@ house:
   # the entity in the Radiate integration's options. "both" prefers the Zigbee sensor.
   # outdoor_source: home_assistant         # zigbee (default), home_assistant or both
   # outdoor_stale_after_min: 180           # older Home Assistant readings count as missing
-  data_dir: ./data                        # SQLite state and the export queue
+  # Quiet hours: no heating in this local time, which may cross midnight, except
+  # frost protection and a setpoint someone sets by hand. Morning warm-up starts when
+  # it ends. Hot water follows its own windows. Leave it out to heat through the night.
+  # quiet_hours: "22:30-06:00"
+  data_dir: ./data                       # SQLite state and the export queue
 
 mqtt:
   host: localhost

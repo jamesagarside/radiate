@@ -28,6 +28,7 @@ from .health import (
 )
 from .outdoor import DEFAULT_OUTDOOR_C
 from .provenance import Conditions, Provenance
+from .quiet import clock_text
 from .savings import MAX_TICK_S as SAVINGS_TICK_S
 from .savings import RoomSample, SavingsMeter
 from .types import (
@@ -310,10 +311,25 @@ def _sensor_awaited(inp: RoomInput) -> bool:
     )
 
 
+def _quiet(snap: Snapshot, inp: RoomInput) -> bool:
+    """Quiet hours hold this room (spec 5.10): inside them, and no override."""
+    return snap.quiet_until_min is not None and not inp.override
+
+
 def _target(cfg: HouseConfig, snap: Snapshot, inp: RoomInput) -> float:
     if snap.mode is Mode.AUTO:
+        if _quiet(snap, inp):
+            # Frost protection only, as in the `frost` mode; never above the setpoint.
+            return min(inp.setpoint, cfg.boiler.frost_c)
         return inp.setpoint
     return cfg.boiler.frost_c
+
+
+def _hysteresis_k(cfg: HouseConfig, rc: RoomConfig) -> float:
+    """How far below target a room falls before it starts calling."""
+    if rc.role is RoomRole.INTERNAL_SENSOR_ONLY:
+        return cfg.internal_sensor_hysteresis_k
+    return cfg.hysteresis_k
 
 
 def _sun_shaped(st: EngineState, snap: Snapshot) -> bool:
@@ -422,6 +438,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
     implausible = _implausible_sensors(cfg, snap, st, alerts)
     frost_rooms: set[str] = set()
     unconfirmed: list[RoomConfig] = []  # hard frost from one sensor, not yet confirmed
+    quiet_held: set[str] = set()  # rooms quiet hours keep from heating (spec 5.10)
 
     # --- 1-4: per-room sensing, disturbances, learning, demand -------------------------
     for rc in cfg.rooms:
@@ -487,7 +504,18 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
         target = _target(cfg, snap, inp)
         rs.preheating = False
         rs.deadline_s = None
-        if snap.mode is Mode.AUTO and temp is not None and not rs.dist.fire:
+        quiet = snap.mode is Mode.AUTO and _quiet(snap, inp)
+        if quiet and temp is not None and not rs.dist.fire:
+            # Quiet hours (spec 5.10): would this room be heating now without them?
+            # Optimum start waits for their end, so it never starts during them.
+            gap = inp.setpoint - temp
+            if (
+                gap > _hysteresis_k(cfg, rc)
+                or (rs.calling and gap > 0)
+                or _preheat_due(cfg, rs, inp, temp, out, eco)
+            ):
+                quiet_held.add(rc.id)
+        if snap.mode is Mode.AUTO and not quiet and temp is not None and not rs.dist.fire:
             start = _preheat_due(cfg, rs, inp, temp, out, eco)
             if start:
                 target = inp.next_setpoint
@@ -679,11 +707,7 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             )
 
         # Demand latch.
-        hyst = (
-            cfg.internal_sensor_hysteresis_k
-            if rc.role is RoomRole.INTERNAL_SENSOR_ONLY
-            else cfg.hysteresis_k
-        )
+        hyst = _hysteresis_k(cfg, rc)
         if temp is not None and not rs.dist.fire:
             below[rc.id] = temp < _target(cfg, snap, inp) - bcfg.comfort_limit_k
         # Fail warm (spec 7): a room whose TRV is offline still counts on a fresh room
@@ -1025,6 +1049,18 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                     "learning.paused",
                     f"{rc.name}: learning paused ({rs.learning_gate.replace('_', ' ')})",
                     rc.id,
+                )
+            )
+        if rc.id in quiet_held and not rs.calling and not rs.topup:
+            # Last, so it is the room's reason in the API: why it is not heating.
+            until = snap.quiet_until_min or 0
+            reasons.append(
+                Reason(
+                    "demand.quiet_hours",
+                    f"{rc.name}: quiet hours, no heating until {clock_text(until)} "
+                    "(frost protection stays on)",
+                    rc.id,
+                    values={"until_min": float(until)},
                 )
             )
 

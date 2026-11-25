@@ -448,7 +448,7 @@ Code: `HouseConfig.comfort_horizon_s`.
 _Avoid_: comfort limit (that is the boiler's pooling threshold in K).
 
 **Optimum start**:
-Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag. It looks up to three hours ahead (3.25 hours in `eco` for a room with room use, which may have waited down at its damp floor), or as far as the return warm-up for a return.
+Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag. It looks up to three hours ahead (3.25 hours in `eco` for a room with room use, which may have waited down at its damp floor), or as far as the return warm-up for a return. It never starts during quiet hours.
 Code: `_preheat_due`, `PREHEAT_MAX_S`, `PREHEAT_USE_MAX_S`, `RoomInput.preheat_max_s`, `RoomState.preheating`, UI badge "Preheating".
 _Avoid_: preheat as a noun for the feature; use "preheating" for the room state.
 
@@ -468,12 +468,13 @@ The temperature a room's schedule, or an override, asks for now.
 Symbol `T_set`, °C. Code: `RoomInput.setpoint`.
 
 **Target**:
-The temperature Radiate is heating a room towards this tick: the setpoint, the next setpoint while preheating, or the frost threshold in `off` and `frost` modes.
+The temperature Radiate is heating a room towards this tick: the setpoint, the next setpoint while preheating, or the frost threshold in `off` and `frost` modes and during quiet hours.
 Code: `RoomState.target`, API `rooms[].target`.
 
 **Override**:
 A setpoint set through the API, the web UI's setpoint control or the Home Assistant climate entity that replaces the schedule until the next scheduled change, for a set time, or until cleared. Saved across restarts. The UI calls it a hold ("Held until 22:30") and clearing it "Resume schedule".
-Code: `Runtime.overrides`, API `POST /api/v1/rooms/{id}/setpoint`, `rooms[].override` in `state`.
+An override wins over quiet hours.
+Code: `Runtime.overrides`, `RoomInput.override`, API `POST /api/v1/rooms/{id}/setpoint`, `rooms[].override` in `state`.
 
 **Calling**:
 A room Radiate wants heated: it started calling when its gap passed the hysteresis and stops when it reaches its target.
@@ -638,6 +639,11 @@ Code: `BoilerConfig.frost_c`, `BoilerConfig.hard_frost_c`.
 **Frost override**:
 The boiler start forced by a room below the frost threshold.
 Code: `frost`, `hard_frost` in `decide`.
+
+**Quiet hours**:
+A nightly local time window with no heating, such as 22:30 to 06:00, which may cross midnight. Inside it every room without an override is held at the frost threshold, and optimum start waits for the end. The store, a burn finishing its minimum burn and frost protection are not affected. Off unless set ([spec 5.10](spec.md#510-quiet-hours)).
+Code: `HouseConfig.quiet_hours`, `Snapshot.quiet_until_min`, `quiet_until` in `radiate.core.quiet`, `Runtime._apply_quiet`, config key `house.quiet_hours`, API `quiet` in `state`, reason `demand.quiet_hours`.
+_Avoid_: night mode, do not disturb, night setback (setback is a room use).
 
 **Implausible reading**:
 A room sensor reading Radiate treats as missing: below 0 °C or above 40 °C, or unchanged for 12 hours (2 below frost) while the room's TRV reading moved by 2 K and other rooms changed. The room falls back to its TRV, as for a stale sensor. Hard frost from a room sensor also needs its TRV or another room to agree.

@@ -77,6 +77,8 @@ HA_PERSON = re.compile(r"^person\.(?!_)[a-z0-9_]{1,100}(?<!_)$")
 _ENV = re.compile(r"\$\{([A-Z0-9_]+)\}")
 _WINDOW = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-4]):([0-5]\d)$")
 _CLOCK = re.compile(r"^([01]\d|2[0-4]):([0-5]\d)$")
+# Quiet hours: HH:MM-HH:MM, which may cross midnight; the end may be 24:00.
+_QUIET = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)\s*-\s*(?:([01]\d|2[0-3]):([0-5]\d)|(24:00))$")
 
 
 class ConfigError(ValueError):
@@ -344,6 +346,23 @@ def _store_windows(raw: Any, ctx: _Ctx, path: str) -> tuple[tuple[int, int], ...
     if len(out) > 4:
         ctx.err(path, "at most 4 windows a day (spec 5.5)")
     return tuple(sorted(out))
+
+
+def parse_quiet_hours(raw: Any) -> tuple[tuple[int, int] | None, str | None]:
+    """`house.quiet_hours` (spec 5.10): "22:30-06:00" as local minutes of day, which
+    may cross midnight. Empty or null: off. Returns (window, problem)."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None, None
+    if not isinstance(raw, str):
+        return None, "expected HH:MM-HH:MM, such as 22:30-06:00"
+    m = _QUIET.match(raw.strip())
+    if not m:
+        return None, f"{raw!r} is not HH:MM-HH:MM, such as 22:30-06:00"
+    start = int(m.group(1)) * 60 + int(m.group(2))
+    end = 0 if m.group(5) else int(m.group(3)) * 60 + int(m.group(4))
+    if start == end:
+        return None, "start and end must differ"
+    return (start, end), None
 
 
 # --- sections --------------------------------------------------------------------------
@@ -1180,6 +1199,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
             "sensor_max_silence_min",
             "history_days",
             "fire_flag_hours",
+            "quiet_hours",
         },
         "house.",
     )
@@ -1212,6 +1232,9 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
     )
     household = _household(ctx, raw_household, rooms) if raw_household else None
     balancing = ctx.get(data, "balancing", bool, True, "")
+    quiet_hours, quiet_problem = parse_quiet_hours(house.get("quiet_hours"))
+    if quiet_problem:
+        ctx.err("house.quiet_hours", quiet_problem)
     cfg = HouseConfig(
         rooms=tuple(rooms),
         boiler=_boiler(ctx, ctx.section(data, "boiler")),
@@ -1219,6 +1242,7 @@ def parse_site(data: Any, env: dict[str, str] | None = None) -> SiteConfig:
         learning=_learning(ctx, ctx.section(data, "learning")),
         suggestions=_suggestions(ctx, ctx.section(data, "suggestions")),
         balancing=balancing,
+        quiet_hours=quiet_hours,
     )
     mqtt = _mqtt(ctx, ctx.section(data, "mqtt"))
     shelly = _shelly(ctx, ctx.section(data, "shelly"))

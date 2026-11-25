@@ -123,6 +123,7 @@ def apply_live(rt: Runtime, site: SiteConfig) -> None:
         store=new.store,
         suggestions=new.suggestions,
         balancing=new.balancing,
+        quiet_hours=new.quiet_hours,
         learning=dataclasses.replace(
             cfg.learning, learn_on_trv_fallback=new.learning.learn_on_trv_fallback
         ),

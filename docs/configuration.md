@@ -181,6 +181,7 @@ Changes are checked with the same rules as this file and refused if the house wo
 | `sensor_max_silence_min` | 60 | How long a battery sensor's last reading stands between reports before it counts as stale. Room sensor readings are saved with the time they were taken, so after a restart a reading stands until this long after the sensor last reported, not after Radiate started |
 | `history_days` | 14 | Days of tick history kept in `radiate.db`, 0 to 90. Set 0 to turn recording off |
 | `fire_flag_hours` | 6 | How long the manual "fire lit" flag lasts, 0.5 to 24. It also ends at local midnight, so a flag forgotten in the evening doesn't keep the room unheated the next day |
+| `quiet_hours` | none | Quiet hours: a local time with no heating, such as `"22:30-06:00"`, which may cross midnight (the end may be `24:00`; start and end must differ). Inside it, rooms heat only for frost protection (`boiler.frost_c`) and morning warm-up starts when it ends. A room with a setpoint override still heats, and the hot-water store keeps its own windows. Leave it out, or empty, to heat through the night. Applies without a restart when changed in the web UI ([spec 5.10](spec.md#510-quiet-hours)) |
 
 ### mqtt
 

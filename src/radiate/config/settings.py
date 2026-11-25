@@ -199,6 +199,16 @@ SECTIONS: list[Section] = [
                 restart=False,
             ),
             _text(
+                "house.quiet_hours",
+                "Quiet hours",
+                "A nightly time with no heating, such as 22:30-06:00. Rooms heat only "
+                "to keep above frost protection, and morning warm-up starts when it "
+                "ends. A setpoint you set yourself still heats, and hot water is not "
+                "affected. Leave it empty to heat through the night.",
+                optional=True,
+                restart=False,
+            ),
+            _text(
                 "house.data_dir",
                 "Data directory",
                 "Where Radiate keeps its state, the saved household and these settings. "
