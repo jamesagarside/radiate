@@ -282,7 +282,7 @@ Code: `TrvOptions.schedule_mirror`, `WeekSchedule.trvzb_payload`, config key `tr
 
 **Room model**:
 The first-order model Radiate learns for each controllable room: `dT/dt = a * drive - b * (T - T_out) + d`.
-The web UI explains it per room under "What Radiate has learned" on the room card (`web/learned.js`), and for the house in the Guide's "What the room model is".
+The web UI explains it per room under "What Radiate has learned" in the room's row of the room table (`web/learned.js`), and for the house in the Guide's "What the room model is".
 Code: `RoomEstimator` in `radiate.core.estimator`.
 
 **Heating gain**:
@@ -454,7 +454,7 @@ _Avoid_: comfort limit (that is the boiler's pooling threshold in K).
 
 **Optimum start**:
 Heating a room early so it reaches its next scheduled setpoint on time, based on its learned heating gain and arrival lag. It looks up to three hours ahead (3.25 hours in `eco` for a room with room use, which may have waited down at its damp floor), or as far as the return warm-up for a return. It never starts during quiet hours.
-Code: `_preheat_due`, `PREHEAT_MAX_S`, `PREHEAT_USE_MAX_S`, `RoomInput.preheat_max_s`, `RoomState.preheating`, UI badge "Preheating".
+Code: `_preheat_due`, `PREHEAT_MAX_S`, `PREHEAT_USE_MAX_S`, `RoomInput.preheat_max_s`, `RoomState.preheating`, UI state "Warming early".
 _Avoid_: preheat as a noun for the feature; use "preheating" for the room state.
 
 **Deadline**:
@@ -554,12 +554,12 @@ Code: `RoomState.topup`, `_topup_target`, `TOPUP_K`, Elastic `demand.topup`.
 
 **Burn extension**:
 A top-up for a room predicted to call soon after the burner stops, so one longer burn replaces two short ones. Only burn extensions may keep the burner running.
-Code: `RoomState.extend`, reason `boiler.topup`, API `rooms[].extend`, UI badge "Topping up".
-_Avoid_: heat sink for this case; the UI status line says "topping up Bedroom 2 to save a second burn soon".
+Code: `RoomState.extend`, reason `boiler.topup`, API `rooms[].extend`, UI state "Warming ahead".
+_Avoid_: heat sink for this case; the UI status line says "warming Bedroom 2 ahead to save a second burn soon".
 
 **Heat sink**:
 A room opened as somewhere for the burner's heat to go, because too few radiators are open. Older text called it a dump room, and the reason code keeps that name.
-Code: `_ensure_sink`, reason `boiler.dump_room`, API `rooms[].topup` with `extend` false, UI badge "Heat sink".
+Code: `_ensure_sink`, reason `boiler.dump_room`, API `rooms[].topup` with `extend` false, UI state "Taking spare heat".
 _Avoid_: dump room.
 
 **Preferred heat sinks**:
@@ -573,7 +573,7 @@ Code: `HouseConfig.sink_min`, `_ensure_sink`.
 
 **Stuck valve**:
 A radiator that stays cold for three burns in a row while its valve should be open and other radiators warm. Radiate alerts and stops trusting that valve until it warms again.
-Code: `ValveCheck` in `radiate.core.health`, reason `valve.stuck`, API `rooms[].valve` (`untrusted`, `misses`), HA binary sensor "Stuck valve", UI line "Valve may be stuck".
+Code: `ValveCheck` in `radiate.core.health`, reason `valve.stuck`, API `rooms[].valve` (`untrusted`, `misses`), HA binary sensor "Stuck valve", UI line "The valve may be stuck".
 
 **TRV disagrees**:
 A calling room whose TRV reports `idle` for 20 minutes while the burner fires and its valve is open for it. Usually the TRV is comparing with its own sensor beside the radiator (no external input, or one that lapsed). Radiate steps the TRV setpoint up 0.5 K every 10 minutes, to at most target + 3 K, until the room stops calling, and alerts.
@@ -620,7 +620,7 @@ Code: `EngineState.short_cycle`, API `boiler.short_cycle` (`extra_off_min`, `end
 **Balance score**:
 How evenly rooms that call together reach setpoint, scored per day from 0 to 100: 100 × (1 − median arrival spread / 120 min). The arrival spread is the time between the first and last room reaching setpoint after a start with two or more calling rooms.
 A partial day has no balance score.
-Code: `balance_score` in `radiate.core.accounting`, API `accounting.{today,yesterday}.balance`, UI "Balance, yesterday".
+Code: `balance_score` in `radiate.core.accounting`, API `accounting.{today,yesterday}.balance`, UI "Even heating, yesterday".
 
 **Partial day**:
 A local day Radiate did not see in full: it started after midnight (a first install, or a restart without saved state), or more than 30 minutes of the day went unseen between ticks, including time down across a restart. Its totals cover what Radiate saw, and its balance score is null. The UI shows "Not a full day of data" in place of yesterday's balance score.
@@ -838,8 +838,8 @@ Code: `loss_confidence` in `radiate.core.suggestions`.
 ## House model
 
 **House model**:
-The drawing of the house at the top of the web UI's House page: each floor's rooms as blocks, floors stacked, each room coloured by its temperature. It shows the house; it never feeds the core.
-Code: `createHouse` and `isoMarkup` in `web/house.js`, UI "Your house".
+The drawing of the house on the web UI's House page, beside the room table: each floor's rooms as blocks, floors stacked, each room coloured by its temperature, with a floor picker to draw one floor on its own. It shows the house and groups the table by floor; it never feeds the core.
+Code: `createHouse` and `isoMarkup` in `web/house.js`, UI "House".
 _Avoid_: "house model" for `HouseConfig`, the house as the configuration describes it, or for a room model. Section 2 of the spec is headed "House model" in that older sense (see Ambiguities).
 
 **House layout**:
