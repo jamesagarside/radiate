@@ -8,7 +8,7 @@ body[data-auth="needed"] .guide-view { display: none; }
 .guide-body { display: grid; grid-template-columns: 250px minmax(0, 40rem); gap: 20px 36px; align-items: start; }
 
 /* Contents: a plate that stays in view on wide screens, under the sticky header. */
-.guide-toc { padding: 12px 16px; position: sticky; top: 100px; max-height: calc(100vh - 116px); overflow: auto; }
+.guide-toc { padding: 12px 16px; position: sticky; top: 128px; max-height: calc(100vh - 144px); overflow: auto; }
 .guide-toc ul { list-style: none; margin: 0; padding: 0; display: grid; }
 .guide-toc li + li { border-top: 1px solid var(--line); }
 .guide-toc a {
@@ -18,9 +18,9 @@ body[data-auth="needed"] .guide-view { display: none; }
 
 .guide-text { display: grid; gap: 28px; min-width: 0; }
 .g-sec { display: grid; gap: 10px; justify-items: start; }
-.g-sec .section-h { margin: 0 0 2px; justify-self: stretch; scroll-margin-top: 100px; }
+.g-sec .section-h { margin: 0 0 2px; justify-self: stretch; scroll-margin-top: 136px; }
 .g-sec .section-h:focus { outline: none; }
-.g-sec .section-h:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
+.g-sec .section-h:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* A term and what it means: the badge or word as it appears in the app, then the words. */
 .g-terms { margin: 0; display: grid; gap: 0; justify-self: stretch; border-top: 1px solid var(--line); }
@@ -40,7 +40,7 @@ body[data-auth="needed"] .guide-view { display: none; }
   display: block; height: 14px;
   background: linear-gradient(90deg, var(--t12) 0%, var(--t15) 30%, var(--t17) 50%, var(--t19) 70%, var(--t22) 100%);
 }
-.g-ticks { position: relative; height: 1.2em; font-family: var(--readout); font-weight: 700; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.g-ticks { position: relative; height: 1.2em; font-weight: 800; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .g-ticks span { position: absolute; top: 0; transform: translateX(-50%); }
 .g-ticks span:nth-child(1) { left: 0; transform: none; }
 .g-ticks span:nth-child(2) { left: 30%; }
@@ -75,7 +75,7 @@ body[data-auth="needed"] .guide-view { display: none; }
 /* First visit on the House view: a flat band with a cool rule, like the other notes. */
 .guide-note {
   display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 20px;
-  padding: 10px 16px; background: var(--surface); border-left: 4px solid var(--cool); font-size: 0.9rem;
+  padding: 10px 16px; background: var(--surface); border: 1px solid var(--line); font-size: 0.9rem;
 }
 .guide-note p { flex: 1 1 32ch; max-width: 80ch; }
 .guide-note-actions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
@@ -93,7 +93,7 @@ body[data-auth="needed"] .guide-view { display: none; }
   .help-link:active { transform: none; }
 }
 @media (prefers-color-scheme: dark) {
-  .g-model { --g-ink: var(--bg); }
+  .g-model { --g-ink: var(--house-ink); }
 }
 
 @media (max-width: 980px) {

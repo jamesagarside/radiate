@@ -10,7 +10,7 @@ body[data-link="stale"] .savings-view { opacity: 0.55; }
 
 /* The headline carries the number for people who skip the chart. */
 .sv-headline {
-  font-family: var(--display); font-weight: 600; font-size: 1.2rem; line-height: 1.3; letter-spacing: -0.01em;
+  font-weight: 600; font-size: var(--step-1); line-height: 1.3; letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums; max-width: 60ch;
 }
 .savings-view[data-state="learning"] .sv-headline { color: var(--cool); }
@@ -52,7 +52,7 @@ body[data-link="stale"] .savings-view { opacity: 0.55; }
 .sv-hatch-line { stroke: var(--line); stroke-width: 2; }
 .sv-zero { stroke: var(--text); stroke-width: 1.5; }
 .sv-grid { stroke: var(--line); stroke-width: 1; }
-.sv-ytick, .sv-xtick { fill: var(--muted); font-family: var(--readout); font-weight: 700; font-size: 11px; font-variant-numeric: tabular-nums; }
+.sv-ytick, .sv-xtick { fill: var(--muted); font-weight: 800; font-size: 11px; font-variant-numeric: tabular-nums; }
 .sv-hit { fill: transparent; }
 .sv-ring { fill: none; stroke: transparent; stroke-width: 2; }
 .sv-slot { cursor: pointer; outline: none; }
@@ -72,7 +72,7 @@ body[data-link="stale"] .savings-view { opacity: 0.55; }
 .sv-table { border-collapse: collapse; width: 100%; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
 .sv-table caption { caption-side: top; text-align: left; padding-bottom: 6px; color: var(--muted); font-size: 0.8rem; }
 .sv-table th, .sv-table td { padding: 5px 10px 5px 0; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
-.sv-table thead th { font-weight: 600; color: var(--muted); border-bottom: 1.5px solid var(--text); vertical-align: bottom; }
+.sv-table thead th { font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line-strong); vertical-align: bottom; }
 .sv-table th:first-child, .sv-table td:nth-child(2) { text-align: left; }
 .sv-table tbody th { font-weight: 500; }
 .sv-table td:nth-child(2) { white-space: normal; min-width: 12ch; }
@@ -92,7 +92,7 @@ body[data-link="stale"] .savings-view { opacity: 0.55; }
 .sv-rooms[data-negative="true"] .sv-room-fill { left: 50%; width: 50%; }
 .sv-rooms[data-negative="true"] .sv-room-fill[data-sign="minus"] { left: 0; transform-origin: right; }
 .sv-rooms[data-negative="true"] .sv-room-track::after { content: ""; position: absolute; left: calc(50% - 0.75px); top: -3px; bottom: -3px; width: 1.5px; background: var(--text); }
-.sv-room-value { text-align: right; font-family: var(--readout); font-weight: 700; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+.sv-room-value { text-align: right; font-weight: 800; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
 .sv-room-sub { grid-column: 1 / -1; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* The House view's one line, once there are figures. */

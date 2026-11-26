@@ -5,31 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Radiate</title>
-  <link rel="preload" href="static/fonts/funnel-display-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="static/fonts/overpass-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="static/fonts/overpass-800.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="static/app.css">
   <link rel="stylesheet" href="static/house.css">
   <link rel="stylesheet" href="static/guide.css">
   <link rel="stylesheet" href="static/savings.css">
-<link rel="stylesheet" href="static/settings.css">
+  <link rel="stylesheet" href="static/settings.css">
   <link rel="stylesheet" href="static/data.css">
 </head>
 <body>
   <header class="top">
+    <div class="top-in">
     <div class="brand">
-      <svg class="brand-mark" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="4" width="4" height="17" fill="var(--t12)"/><rect x="7" y="4" width="4" height="17" fill="var(--t17)"/><rect x="13" y="4" width="4" height="17" fill="var(--t19)"/><rect x="19" y="4" width="2" height="17" fill="var(--t22)"/><rect x="0" y="1" width="22" height="2" fill="var(--text)"/></svg>
-      <span>radiate</span>
+      <svg class="brand-mark" width="20" height="20" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="4" width="4" height="17" fill="var(--t12)"/><rect x="7" y="4" width="4" height="17" fill="var(--t15)"/><rect x="13" y="4" width="4" height="17" fill="var(--t19)"/><rect x="19" y="4" width="2" height="17" fill="var(--t22)"/></svg>
+      <span>Radiate</span>
     </div>
     <p class="status" id="status" aria-live="polite">Connecting…</p>
     <div class="right">
-      <span class="outdoor" id="outdoor" title="Outdoor temperature"></span>
-      <div class="seg" role="radiogroup" aria-label="Heating mode" aria-describedby="controls-lock" id="mode">
-        <button role="radio" data-mode="auto">Auto</button>
-        <button role="radio" data-mode="frost">Frost</button>
-        <button role="radio" data-mode="off">Off</button>
+      <div class="ctl">
+        <span class="ctl-l" id="mode-l">Heating</span>
+        <div class="seg" role="radiogroup" aria-labelledby="mode-l" aria-describedby="controls-lock" id="mode">
+          <button role="radio" data-mode="auto">Auto</button>
+          <button role="radio" data-mode="frost">Frost</button>
+          <button role="radio" data-mode="off">Off</button>
+        </div>
       </div>
-      <div class="seg" role="radiogroup" aria-label="Demand mode" aria-describedby="demand-note controls-lock" id="demand" hidden>
-        <button role="radio" data-demand="eco">Eco</button>
-        <button role="radio" data-demand="comfort">Comfort</button>
+      <div class="ctl" id="demand-ctl" hidden>
+        <span class="ctl-l" id="demand-l">Burns</span>
+        <div class="seg" role="radiogroup" aria-labelledby="demand-l" aria-describedby="demand-note controls-lock" id="demand">
+          <button role="radio" data-demand="eco">Fewer, longer</button>
+          <button role="radio" data-demand="comfort">Sooner</button>
+        </div>
       </div>
       <span class="lock-tag" id="controls-lock" hidden></span>
       <div class="account" id="account" hidden>
@@ -44,6 +51,7 @@
     </div>
     <p class="demand-note" id="demand-note" hidden></p>
     <p class="demand-note" id="mode-error" data-error="true" role="alert" hidden></p>
+    </div>
   </header>
 
   <nav class="views" id="views" aria-label="Views" hidden>
@@ -101,11 +109,30 @@
       </div>
     </aside>
 
+    <h1 class="sr-only">House</h1>
+    <dl class="readings" id="readings" aria-label="The house now"></dl>
+
+    <section class="alerts" id="alerts" aria-labelledby="alerts-h" hidden>
+      <h2 id="alerts-h">Needs attention</h2>
+      <ul id="alerts-list"></ul>
+      <div class="alerts-actions">
+        <button class="btn alerts-more" id="alerts-more" type="button" aria-expanded="false" aria-controls="alerts-list" hidden></button>
+        <a class="alerts-devices" id="alerts-devices" href="#devices" hidden>See devices</a>
+        <a class="attention-link" href="#guide/alerts">What these alerts mean</a>
+      </div>
+    </section>
+
     <div class="hm-wrap">
-      <section class="card hm-model" id="hm-model" aria-label="House model"></section>
-      <section class="card hm-status" id="hm-status" aria-label="The house now"></section>
+      <section class="hm-model" id="hm-model" aria-labelledby="hm-model-h"></section>
+      <section class="rooms-section" id="rooms-section" aria-labelledby="rooms-h">
+        <div class="rooms-head"><h2 id="rooms-h" class="section-h">Rooms</h2><p>Select a room to change it.</p></div>
+        <table class="room-table" id="rooms-table">
+          <thead><tr><th scope="col">Room</th><th scope="col" class="r">Now</th><th scope="col" class="r">Set</th><th scope="col" class="col-valve">Valve</th><th scope="col" class="col-state">State</th></tr></thead>
+        </table>
+      </section>
+      <section class="hm-preview-plate" id="hm-preview" aria-label="How the house will look" hidden></section>
     </div>
-    <section class="card hm-plan" id="hm-plan" aria-label="Today's plan" hidden></section>
+    <section class="hm-plan" id="hm-plan" aria-label="Today" hidden></section>
     <p class="sv-house-line" id="savings-line" hidden><a class="help-link" href="#savings" id="savings-line-link"></a></p>
 
     <section class="card boiler" aria-labelledby="boiler-h">
@@ -122,14 +149,14 @@
       <div class="timeline" id="timeline" aria-label="Last 24 hours of burns and hot-water windows">
         <div class="lane burns"></div>
         <div class="lane store"></div>
-        <div class="ticks"><span>−24 h</span><span>−18 h</span><span>−12 h</span><span>−6 h</span><span>now</span></div>
+        <div class="ticks"><span>24 h ago</span><span>18 h</span><span>12 h</span><span>6 h</span><span>Now</span></div>
       </div>
       <dl class="stats">
         <div><dt id="s-today-label">Burner today</dt><dd><span id="s-today">–</span><span class="sub" id="s-today-sub"></span></dd></div>
-        <div><dt>Starts, last hour</dt><dd id="s-starts">–</dd></div>
-        <div><dt>Predicted burn</dt><dd id="s-pred">–</dd></div>
-        <div><dt>Balance, yesterday</dt><dd><span id="s-balance">–</span><span class="sub" id="s-balance-sub"></span></dd></div>
-        <div><dt>Supply factor</dt><dd id="s-supply">–</dd></div>
+        <div><dt>Starts in the last hour</dt><dd id="s-starts">–</dd></div>
+        <div><dt>Burn needed now</dt><dd id="s-pred">–</dd></div>
+        <div><dt>Even heating, yesterday</dt><dd><span id="s-balance">–</span><span class="sub" id="s-balance-sub"></span></dd></div>
+        <div><dt>Flow to each radiator</dt><dd id="s-supply">–</dd></div>
       </dl>
     </section>
 
@@ -159,26 +186,10 @@
       <div class="people" id="people-list"></div>
     </section>
 
-    <section aria-labelledby="rooms-h">
-      <h2 id="rooms-h" class="section-h">Rooms</h2>
-      <p class="help-line">Use minus and plus on a card to change a room's temperature until its next scheduled change. <a class="help-link" href="#guide/rooms">What the badges and bars mean</a></p>
-      <div class="rooms" id="rooms"></div>
-    </section>
-
-    <section class="alerts" id="alerts" aria-labelledby="alerts-h" hidden>
-      <h2 id="alerts-h">Needs attention</h2>
-      <ul id="alerts-list"></ul>
-      <div class="alerts-actions">
-        <button class="btn alerts-more" id="alerts-more" type="button" aria-expanded="false" aria-controls="alerts-list" hidden></button>
-        <a class="alerts-devices" id="alerts-devices" href="#devices" hidden>See devices</a>
-        <a class="attention-link" href="#guide/alerts">What these alerts mean</a>
-      </div>
-    </section>
-
     <section id="week" aria-labelledby="week-h" hidden>
       <h2 id="week-h" class="section-h">Schedules</h2>
       <div class="week-head">
-        <p class="muted">The week each room follows. Blocks are warm periods, darker when warmer. <span id="week-hint" hidden>Drag the edge of a block, or use Adjust, to keep a room warm or cold for longer.</span> <span class="lock-tag" id="week-lock" hidden></span> <a class="help-link" href="#guide/schedules">Where schedules come from</a></p>
+        <p class="muted">The week each room follows. Blocks are warm times, darker when warmer. <span id="week-hint" hidden>Drag the edge of a block, or use Adjust, to keep a room warm or cold for longer.</span> <span class="lock-tag" id="week-lock" hidden></span> <a class="help-link" href="#guide/schedules">Where schedules come from</a></p>
         <p class="week-legend" id="week-legend" hidden></p>
       </div>
       <p class="away-note week-saved" id="week-saved" role="status"></p>
@@ -463,13 +474,13 @@
       <nav class="card guide-toc" aria-label="Guide contents">
         <ul>
           <li><a href="#guide/colours">What the colours mean</a></li>
-          <li><a href="#guide/model">Read the house model</a></li>
-          <li><a href="#guide/now">What the house is doing</a></li>
-          <li><a href="#guide/rooms">Read a room card</a></li>
+          <li><a href="#guide/model">Reading the house</a></li>
+          <li><a href="#guide/now">What the boiler is doing</a></li>
+          <li><a href="#guide/rooms">Reading the room table</a></li>
           <li><a href="#guide/warmer">Make a room warmer for a while</a></li>
           <li><a href="#guide/schedules">Change the weekly times</a></li>
           <li><a href="#guide/hot-water">Hot water</a></li>
-          <li><a href="#guide/modes">Heating modes, Eco and Comfort</a></li>
+          <li><a href="#guide/modes">Heating and burns</a></li>
           <li><a href="#guide/away">When someone is away</a></li>
           <li><a href="#guide/fire">Open fires and range cookers</a></li>
           <li><a href="#guide/room-model">What the room model is</a></li>
@@ -490,24 +501,24 @@
       <div class="guide-text">
         <section class="g-sec" id="g-colours" aria-labelledby="g-colours-h">
           <h3 class="section-h" id="g-colours-h" tabindex="-1">What the colours mean</h3>
-          <p>Rooms are coloured by their temperature, on one scale for the whole house. 12° and colder is cobalt blue, 17° is a neutral stone, 19° is amber and 22° or warmer is red.</p>
+          <p>Rooms are coloured by their temperature, on one scale for the whole house. 12° and colder is blue, 17° is a neutral grey, 19° is amber and 22° or warmer is red.</p>
           <div class="card g-fig g-scale" aria-hidden="true">
             <span class="g-ramp"></span>
             <span class="g-ticks"><span>12°</span><span>15°</span><span>17°</span><span>19°</span><span>22°</span></span>
           </div>
-          <p>A grey room has no reading yet. The same scale colours the strips in Today's plan and the marks in Where every room sits.</p>
-          <p>Everywhere else, colour marks a state, and each state also has words:</p>
+          <p>A pale grey room has no reading yet. The same scale colours the square beside each room in the table and the strips under Today.</p>
+          <p>Everywhere else, colour backs up a word. The buttons and controls are black and white.</p>
           <dl class="g-terms">
-            <div><dt><span class="badge" data-kind="calling">Heating</span></dt><dd>Red and orange are heat: the burner on, a room calling for heat, a valve's opening.</dd></div>
-            <div><dt><span class="badge" data-kind="ok">Comfortable</span></dt><dd>Green is a room at its target.</dd></div>
+            <div><dt><span class="badge" data-kind="calling">Heating</span></dt><dd>Red is heat: the burner on, a room taking heat, how far a valve may open.</dd></div>
+            <div><dt><span class="badge" data-kind="ok">Holding</span></dt><dd>Green is a room at its setting.</dd></div>
             <div><dt><span class="badge" data-kind="pooled">Waiting for a burn</span></dt><dd>Amber is waiting, or something that needs your attention.</dd></div>
-            <div><dt><span class="badge" data-kind="away">Away</span></dt><dd>Blue is rest and hot water, and anything you set, such as a held temperature or someone away.</dd></div>
+            <div><dt><span class="badge" data-kind="away">Away</span></dt><dd>Blue is rest and anything you set, such as a held temperature or someone away.</dd></div>
           </dl>
         </section>
 
         <section class="g-sec" id="g-model" aria-labelledby="g-model-h">
-          <h3 class="section-h" id="g-model-h" tabindex="-1">Read the house model</h3>
-          <p>The top of the House page draws your house as a model. Each block is a room, with the floors stacked and pulled apart so you can see every room. The number on a block is the room's temperature.</p>
+          <h3 class="section-h" id="g-model-h" tabindex="-1">Reading the house</h3>
+          <p>The House page draws your house. Each block is a room, with the floors stacked and pulled apart so you can see every room. The number on a block is the room's temperature.</p>
           <div class="card g-fig g-model" aria-hidden="true">
             <svg viewBox="-84 -22 184 124" width="184" height="124">
               <polygon class="g-side-r" points="88.3,51 14.7,93.5 14.7,81.9 88.3,39.4"/>
@@ -517,72 +528,75 @@
               <text class="hm-t g-ink" x="7.4" y="35.2" text-anchor="middle">19.4</text>
             </svg>
           </div>
-          <p>The bar along the front edge of a room is its radiator. It shows, blinking, while the room takes heat: when it is calling for heat or being topped up. A radiator with a manual valve that is always open, the bypass, always shows it.</p>
-          <p>Select a room, by clicking or tapping it, or with Tab and Enter, to see its details under the model: what it is doing, its humidity, how far its valve is open and its next change. Room controls takes you to its card.</p>
-          <p>Until you arrange them, Radiate guesses where rooms are from their names: bedrooms and bathrooms upstairs, the rest downstairs. Use Arrange rooms to move and resize them on each floor. The layout only draws the model. It never changes how rooms are heated.</p>
+          <p>The bar along the front edge of a room is its radiator. It blinks while the room takes heat. A radiator with a hand valve that is always open always shows it.</p>
+          <p>With more than one floor, the buttons beside the heading draw one floor on its own, larger. Select a room, by clicking or tapping it, or with Tab and Enter, to open its row in the room table.</p>
+          <p>Until you arrange them, Radiate guesses where rooms are from their names: bedrooms and bathrooms upstairs, the rest downstairs. Use Arrange rooms to move and resize them on each floor. The layout only draws the house and groups the table by floor. It never changes how rooms are heated.</p>
         </section>
 
         <section class="g-sec" id="g-now" aria-labelledby="g-now-h">
-          <h3 class="section-h" id="g-now-h" tabindex="-1">What the house is doing</h3>
+          <h3 class="section-h" id="g-now-h" tabindex="-1">What the boiler is doing</h3>
           <p>The line at the top of every page says what the boiler is doing and why, for example "Burner on for 12 min. Heating Lounge and Bedroom 3."</p>
-          <p>The house now, beside the model, starts with how many rooms want heat out of the rooms Radiate controls, such as 3/8. Where every room sits puts each room on the temperature scale, with a line at the temperature most rooms are aiming for. Its four boxes show the boiler, the heating mode, devices that need attention and how far learning has got. Coming up lists the next times a room's temperature changes.</p>
+          <p>The line of readings on the House page gives the boiler, the hot water, how many of the rooms Radiate controls are heating (such as 3 of 8), the temperature outside and the next time a room's temperature changes. When a device needs attention, it says how many.</p>
           <p>The boiler moves through four states:</p>
           <dl class="g-terms">
-            <div><dt><span class="chip">Idle</span></dt><dd>No room needs a burn.</dd></div>
+            <div><dt><span class="chip">Off</span></dt><dd>No room needs a burn.</dd></div>
             <div><dt><span class="chip" data-state="lead">Opening valves</span></dt><dd>Before the burner starts, the valves get about 90 seconds to open, so the hot water has somewhere to go.</dd></div>
-            <div><dt><span class="chip" data-state="firing">Firing</span></dt><dd>The burner is on. Each burn lasts at least 8 minutes, as short burns are hard on an oil boiler.</dd></div>
+            <div><dt><span class="chip" data-state="firing">On</span></dt><dd>The burner is on. Each burn lasts at least 8 minutes, as short burns are hard on an oil boiler.</dd></div>
             <div><dt><span class="chip" data-state="rest">Resting</span></dt><dd>After a burn the boiler stays off for at least 10 minutes before it may start again.</dd></div>
           </dl>
-          <p>Those times are the defaults, set in Radiate's house file. On the Boiler plate, the thin bar fills as a minimum burn or rest runs, and the strip below it shows the last 24 hours: burns in red, hot water in blue. If the boiler starts too often, Radiate lengthens the rest for a day and says so under the bar.</p>
+          <p>Those times are the defaults, set in Radiate's house file. On the Boiler panel, the thin bar fills as the shortest burn or the rest runs, and the strip below it shows the last 24 hours: burns in red, hot water in blue. If the boiler starts too often, Radiate lengthens the rest for a day and says so under the bar.</p>
+          <dl class="g-terms g-words">
+            <div><dt>Burn needed now</dt><dd>How long the rooms heating now need the burner, from what Radiate has learned about them.</dd></div>
+            <div><dt>Even heating, yesterday</dt><dd>How close together rooms that started warming at the same time reached their setting, out of 100. 100 means they all got there together.</dd></div>
+            <div><dt>Flow to each radiator</dt><dd>The share of the boiler's flow each open radiator gets. It falls as more valves open.</dd></div>
+          </dl>
         </section>
 
         <section class="g-sec" id="g-rooms" aria-labelledby="g-rooms-h">
-          <h3 class="section-h" id="g-rooms-h" tabindex="-1">Read a room card</h3>
-          <p>Each room has a card under Rooms: the temperature now, the target after the arrow, a badge for what the room is doing, and a line saying why.</p>
-          <p>A room calls for heat when it is below its target, and calling rooms are what make Radiate fire the boiler. Other rooms can take heat while the burner is on, but they never start it.</p>
+          <h3 class="section-h" id="g-rooms-h" tabindex="-1">Reading the room table</h3>
+          <p>Rooms, beside the house, has a row for each room, grouped by floor: the temperature now, its setting (Set), how far its valve may open and its state in words. On a phone the state sits under the room's name.</p>
+          <p>A room asks for heat when it is below its setting, and those rooms are what make Radiate start the boiler. Other rooms can take heat while the burner is on, but they never start it.</p>
           <dl class="g-terms">
-            <div><dt><span class="badge" data-kind="calling">Heating</span></dt><dd>Below its target and calling for heat.</dd></div>
-            <div><dt><span class="badge" data-kind="preheat">Preheating</span></dt><dd>Warming early, so the room reaches its next temperature on time.</dd></div>
-            <div><dt><span class="badge" data-kind="pooled">Waiting for a burn</span></dt><dd>Wants heat, but in Eco it waits for other rooms, so the boiler fires once for all of them.</dd></div>
-            <div><dt><span class="badge" data-kind="extend">Topping up</span></dt><dd>Not calling, but given a little more heat while the burner is on, so it won't need a burn of its own soon after.</dd></div>
-            <div><dt><span class="badge" data-kind="sink">Heat sink</span></dt><dd>Opened only so the burner's heat has somewhere to go when too few radiators are open.</dd></div>
+            <div><dt><span class="badge" data-kind="calling">Heating</span></dt><dd>Below its setting and asking for heat.</dd></div>
+            <div><dt><span class="badge" data-kind="preheat">Warming early</span></dt><dd>Heating early, so the room reaches its next temperature on time.</dd></div>
+            <div><dt><span class="badge" data-kind="pooled">Waiting for a burn</span></dt><dd>Wants heat, but with Fewer, longer burns it waits for other rooms, so the boiler starts once for all of them.</dd></div>
+            <div><dt><span class="badge" data-kind="extend">Warming ahead</span></dt><dd>Not asking for heat, but given a little more while the burner is on, so it won't need a burn of its own soon after.</dd></div>
+            <div><dt><span class="badge" data-kind="sink">Taking spare heat</span></dt><dd>Opened only so the burner's heat has somewhere to go when too few radiators are open.</dd></div>
             <div><dt><span class="badge" data-kind="fire">Fire lit</span></dt><dd>The open fire is lit, so the radiator is closed.</dd></div>
-            <div><dt><span class="badge" data-kind="ok">Comfortable</span></dt><dd>At or above its target, or less than 0.3° below it.</dd></div>
-            <div><dt><span class="badge">Waiting</span></dt><dd>A little below its target but not calling. The line under it says why.</dd></div>
-            <div><dt><span class="badge">Bypass, not controlled</span></dt><dd>A radiator with a manual valve that stays open. Radiate counts on it as a path the water can always take.</dd></div>
-            <div><dt><span class="badge">No radiator</span></dt><dd>The room has a sensor but no radiator. Radiate records its temperature and nothing more.</dd></div>
+            <div><dt><span class="badge" data-kind="ok">Holding</span></dt><dd>At or above its setting, or less than 0.3° below it.</dd></div>
+            <div><dt><span class="badge">Waiting</span></dt><dd>A little below its setting but not asking for heat. Its row says why.</dd></div>
+            <div><dt><span class="badge">Manual valve</span></dt><dd>A radiator with a hand valve that stays open. Radiate can't control it, and counts on it as a path the water can always take.</dd></div>
+            <div><dt><span class="badge">Unheated</span></dt><dd>The room has a sensor but no radiator. Radiate records its temperature and nothing more.</dd></div>
           </dl>
           <div class="card g-fig g-valve" aria-hidden="true">
-            <div class="valve">
-              <div class="valve-label"><span>Opening limit</span><span>35%</span></div>
-              <div class="bar"><div class="fill" style="transform: scaleX(0.35)"></div></div>
-            </div>
+            <span class="valve-mini"><i><b class="fill" style="transform: scaleX(0.35)"></b></i><span>35%</span></span>
           </div>
-          <p>The Opening limit bar is the most the room's valve may open. Radiate sets it so that rooms warming together get their heat at about the same time, instead of the radiators nearest the boiler taking most of it. The valve's own thermostat still opens and closes within that limit. The bar is faded while the room isn't taking heat.</p>
-          <p>The small print at the bottom of a card says whether Radiate is learning the room right now, or why not. Under it, "What Radiate has learned" opens to show what Radiate knows about the room, in words. See <a class="help-link" href="#guide/room-model">What the room model is</a>.</p>
+          <p>The Valve column is the most the room's valve may open, its opening limit. Radiate sets it so that rooms warming together get their heat at about the same time, instead of the radiators nearest the boiler taking most of it. The valve's own thermostat still opens and closes within that limit. The bar is faded while the room isn't taking heat.</p>
+          <p>Select a room's name, or its row, to open it under itself: its next change, how far the valve may open, its humidity, whether Radiate is learning it right now, and a line saying why it is doing what it does. "What Radiate has learned" opens to show what Radiate knows about the room, in words. See <a class="help-link" href="#guide/room-model">What the room model is</a>.</p>
         </section>
 
         <section class="g-sec" id="g-warmer" aria-labelledby="g-warmer-h">
           <h3 class="section-h" id="g-warmer-h" tabindex="-1">Make a room warmer for a while</h3>
-          <p>Use minus and plus on the room's card. Each press changes the temperature by 0.5°, between 5° and 28°. Radiate sends the new temperature once you stop pressing.</p>
+          <p>Open the room's row in the table and use minus and plus. Each press changes the temperature by 0.5°, between 5° and 28°. Radiate sends the new temperature once you stop pressing.</p>
           <div class="card g-fig g-hold" aria-hidden="true">
             <div class="sp" data-held="true">
-              <div class="sp-copy"><span class="sp-label">Held until 22:30</span><span class="g-fake-link">Resume schedule</span></div>
+              <p class="sp-title">Set Lounge</p>
               <div class="stepper">
                 <span class="step"><svg viewBox="0 0 16 16"><path d="M3.5 8h9" /></svg></span>
                 <span class="sp-val">21.5°</span>
                 <span class="step"><svg viewBox="0 0 16 16"><path d="M3.5 8h9M8 3.5v9" /></svg></span>
               </div>
+              <div class="sp-copy"><span class="sp-label">Held until 22:30</span><span class="g-fake-link">Resume schedule</span></div>
             </div>
           </div>
-          <p>The room holds the new temperature until its next scheduled change, and the card says until when. After that it follows its schedule again. A room with no schedule holds it until you clear it. To go back to the schedule sooner, select Resume schedule.</p>
+          <p>The room holds the new temperature until its next scheduled change, and the row says until when. After that it follows its schedule again. A room with no schedule holds it until you clear it. To go back to the schedule sooner, select Resume schedule.</p>
           <p>A hold is kept if Radiate restarts. It only counts in Auto: in Frost and Off every room is kept at frost protection instead.</p>
           <p>This page always holds until the next change. To hold a room for a set time, such as two hours, use Radiate's set override action in Home Assistant, which takes a duration.</p>
         </section>
 
         <section class="g-sec" id="g-schedules" aria-labelledby="g-schedules-h">
           <h3 class="section-h" id="g-schedules-h" tabindex="-1">Change the weekly times</h3>
-          <p>Each room follows a week of temperatures. Today's plan shows today for every room, and Schedules, at the bottom of the House page, shows each room's whole week. The badge on each week says where it comes from:</p>
+          <p>Each room follows a week of temperatures. Today, under the house, shows today for every room, and Schedules, at the bottom of the House page, shows each room's whole week. The badge on each week says where it comes from:</p>
           <dl class="g-terms">
             <div><dt><span class="badge">Household</span></dt><dd>Built from your household: who lives here, when you're usually up, out and in bed, and how each room is used. You can change these weeks in the app.</dd></div>
             <div><dt><span class="badge">Hand-written</span></dt><dd>Written as times and temperatures in Radiate's house file. The app shows these weeks but can't change them. Someone has to edit the house file and restart Radiate.</dd></div>
@@ -596,24 +610,24 @@
         <section class="g-sec" id="g-hot-water" aria-labelledby="g-hot-water-h">
           <h3 class="section-h" id="g-hot-water-h" tabindex="-1">Hot water</h3>
           <p>The hot-water store is heated in set windows, the same every day, up to four a day. The windows are set in Radiate's house file, so you can't change them in the app. They run in every heating mode, Off included.</p>
-          <p>Boost hot water, on the Boiler plate, turns the hot water on now for 60 minutes. Select it again to stop the boost early. While the hot water is on, the line at the top ends "Hot water on."</p>
-          <p>The boiler heats the store before the radiators. For about 25 minutes after the hot water comes on, the radiators get little heat, so rooms warm more slowly and learning pauses ("learning paused: hot water"). The thin blue strip on the Boiler plate shows when the hot water was on in the last 24 hours.</p>
+          <p>Boost hot water, on the Boiler panel, turns the hot water on now for 60 minutes. Select it again to stop the boost early. While the hot water is on, the line at the top ends "Hot water on."</p>
+          <p>The boiler heats the store before the radiators. For about 25 minutes after the hot water comes on, the radiators get little heat, so rooms warm more slowly and learning pauses ("Paused while the hot water heats"). The thin blue strip on the Boiler panel shows when the hot water was on in the last 24 hours.</p>
         </section>
 
         <section class="g-sec" id="g-modes" aria-labelledby="g-modes-h">
-          <h3 class="section-h" id="g-modes-h" tabindex="-1">Heating modes, Eco and Comfort</h3>
-          <p>The first control at the top sets the heating for the whole house:</p>
+          <h3 class="section-h" id="g-modes-h" tabindex="-1">Heating and burns</h3>
+          <p>Heating, at the top, sets the heating for the whole house:</p>
           <dl class="g-terms g-words">
             <div><dt>Auto</dt><dd>Rooms follow their schedules and any temperature you hold. This is the usual mode.</dd></div>
             <div><dt>Frost</dt><dd>Every room is kept at 7° or warmer so nothing freezes, and nothing more.</dd></div>
             <div><dt>Off</dt><dd>No heating. If a room falls below 7°, Radiate still heats it back to 7° to protect the house.</dd></div>
           </dl>
-          <p>Eco and Comfort, beside it, decide how readily the boiler fires:</p>
+          <p>Burns, beside it, decides how readily the boiler starts. The house file and Home Assistant call these Eco and Comfort.</p>
           <dl class="g-terms g-words">
-            <div><dt>Eco</dt><dd>Rooms that want heat wait until, between them, they need enough for a proper burn, or one of them is 1.5° below its target. The boiler fires fewer, longer times, and rooms may warm a little later.</dd></div>
-            <div><dt>Comfort</dt><dd>Any room more than 0.5° below its target fires the boiler. Rooms stay closer to their targets, with more burns.</dd></div>
+            <div><dt>Fewer, longer (Eco)</dt><dd>Rooms that want heat wait until, between them, they need enough for a proper burn, or one of them is 1.5° below its setting. The boiler starts fewer times and burns for longer, which uses less oil, and rooms may warm a little later.</dd></div>
+            <div><dt>Sooner (Comfort)</dt><dd>Any room more than 0.5° below its setting starts the boiler. Rooms stay closer to their settings, with more burns.</dd></div>
           </dl>
-          <p>In either mode, a room that is preheating, or below 7°, doesn't wait. The line under the controls says what the chosen mode does, and starts with "Default:" when it's the mode set in the house file. The 7° frost temperature and the 1.5° and 0.5° limits are defaults.</p>
+          <p>Either way, a room that is warming early, or below 7°, doesn't wait. The line under the controls says what the choice does, and starts with "Default:" when it's the one set in the house file. The 7° frost temperature and the 1.5° and 0.5° limits are defaults.</p>
         </section>
 
         <section class="g-sec" id="g-away" aria-labelledby="g-away-h">
@@ -627,10 +641,10 @@
 
         <section class="g-sec" id="g-fire" aria-labelledby="g-fire-h">
           <h3 class="section-h" id="g-fire-h" tabindex="-1">Open fires and range cookers</h3>
-          <p>A room with an open fire has a Fire lit button on its card. Select it when you light the fire, and again when it's out.</p>
+          <p>A room with an open fire has a Fire lit button in its row. Select it when you light the fire, and again when it's out.</p>
           <p>While the fire is lit, Radiate closes that room's radiator, leaves the room out when deciding whether to fire the boiler, and pauses its learning, so the fire's heat isn't mistaken for the radiator's. It also spots a fire by itself when the room warms quickly with the radiator off.</p>
-          <p>Once there has been no sign of the fire for 30 minutes, learning stays paused for another 4 hours while the chimney breast gives off its heat ("learning paused: fire cooling"). If Radiate restarts, the button is cleared, so select it again if the fire is still lit.</p>
-          <p>A range cooker, such as an Aga, is learned as steady background heat. The kitchen keeps learning, and a burst of heat from cooking pauses it for an hour ("learning paused: cooking").</p>
+          <p>Once there has been no sign of the fire for 30 minutes, learning stays paused for another 4 hours while the chimney breast gives off its heat ("Paused while the fire's heat dies down"). If Radiate restarts, the button is cleared, so select it again if the fire is still lit.</p>
+          <p>A range cooker, such as an Aga, is learned as steady background heat. The kitchen keeps learning, and a burst of heat from cooking pauses it for an hour ("Paused while the cooker is in use").</p>
         </section>
 
         <section class="g-sec" id="g-room-model" aria-labelledby="g-room-model-h">
@@ -644,25 +658,25 @@
             <div><dt>How sure</dt><dd>How much Radiate has seen. A new room starts from typical values and reads "Still learning" until it has seen enough warm-ups and cool-downs. Being sure means Radiate has plenty of data, not that the room behaves the same every day.</dd></div>
           </dl>
           <p>Radiate uses the model in three ways. It starts warming a room early enough to reach its next temperature on time, so a slow room starts sooner. It sets how far each valve opens, so rooms warming together get there at about the same time instead of the ones nearest the boiler taking the heat. And between burns it leaves each valve at the opening that room usually needs, so the house stays balanced if Radiate stops.</p>
-          <p>Suggestions and Savings also use the model, once Radiate is sure enough of it. This is different from the house model at the top of the House page, which is only a drawing.</p>
-          <p>The model keeps changing slowly as the seasons change. If a room starts warming differently, for example after a radiator is bled or replaced, Radiate notices and relearns it. If a room's learning was started again, for example after an update, the room card says when and why for 14 days.</p>
+          <p>Suggestions and Savings also use the model, once Radiate is sure enough of it. This is different from the drawing of the house on the House page, which is only a picture.</p>
+          <p>The model keeps changing slowly as the seasons change. If a room starts warming differently, for example after a radiator is bled or replaced, Radiate notices and relearns it. If a room's learning was started again, for example after an update, the room's row says when and why for 14 days.</p>
         </section>
 
         <section class="g-sec" id="g-learning" aria-labelledby="g-learning-h">
           <h3 class="section-h" id="g-learning-h" tabindex="-1">What learning is</h3>
           <p>Radiate learns each room: how fast its radiator warms it, how fast it cools, and how long heat takes to reach it. It uses this to start warming in time, and to share the heat so rooms reach their temperatures together.</p>
-          <p>Open "What Radiate has learned" on a room card to see what it knows about that room. <a class="help-link" href="#guide/room-model">What the room model is</a> explains the numbers. The Learning box on The house now is how sure Radiate is, on average, over the rooms it controls.</p>
-          <p>Learning pauses whenever something other than the radiator is warming or cooling the room. The small print says why:</p>
+          <p>Open "What Radiate has learned" in a room's row to see what it knows about that room. <a class="help-link" href="#guide/room-model">What the room model is</a> explains the numbers. The Learning list on the Suggestions tab shows how far each room has got.</p>
+          <p>Learning pauses whenever something other than the radiator is warming or cooling the room. Learning, in the room's row, says why:</p>
           <dl class="g-terms g-words">
-            <div><dt>fire, fire cooling</dt><dd>The open fire is lit, and for 4 hours after.</dd></div>
-            <div><dt>window</dt><dd>A sudden drop in temperature, as from an open window. For 30 minutes.</dd></div>
-            <div><dt>shower</dt><dd>A jump in humidity. For 45 minutes.</dd></div>
-            <div><dt>cooking</dt><dd>A burst of heat from a range cooker. For an hour.</dd></div>
-            <div><dt>extra heat</dt><dd>Warmth the radiator can't explain, such as sun or guests. For an hour.</dd></div>
-            <div><dt>hot water</dt><dd>The boiler is heating the store first, for about 25 minutes.</dd></div>
-            <div><dt>settling</dt><dd>For 15 minutes after the room's target changes.</dd></div>
-            <div><dt>gathering data</dt><dd>No usable reading yet.</dd></div>
-            <div><dt>TRV offline</dt><dd>The room's valve can't be reached.</dd></div>
+            <div><dt>The fire is lit, or its heat dies down</dt><dd>While the open fire is lit, and for 4 hours after.</dd></div>
+            <div><dt>A window may be open</dt><dd>A sudden drop in temperature, as from an open window. For 30 minutes.</dd></div>
+            <div><dt>After a shower</dt><dd>A jump in humidity. For 45 minutes.</dd></div>
+            <div><dt>The cooker is in use</dt><dd>A burst of heat from a range cooker. For an hour.</dd></div>
+            <div><dt>Heat from somewhere else</dt><dd>Warmth the radiator can't explain, such as sun or people. For an hour.</dd></div>
+            <div><dt>The hot water heats</dt><dd>The boiler is heating the store first, for about 25 minutes.</dd></div>
+            <div><dt>Settling after a change</dt><dd>For 15 minutes after the room's setting changes.</dd></div>
+            <div><dt>Waiting for readings</dt><dd>No usable reading yet.</dd></div>
+            <div><dt>The valve is offline</dt><dd>The room's valve can't be reached.</dd></div>
           </dl>
           <p>Learning counts only the minutes that pass every check. Suggestions about a room start once it has 48 hours of learning and Radiate is sure enough of it. Radiate keeps learning after that, remembers up to two years, and relearns a room that changes, for example after a new radiator.</p>
           <p>What Radiate has learned carries over when you update it. If an update finds that some rooms learned from data it now knows was wrong, for example a dry run before it could see the burner, it starts just those rooms again and says so in a Learning notice under the header for 14 days.</p>
@@ -670,16 +684,16 @@
 
         <section class="g-sec" id="g-not-heating" aria-labelledby="g-not-heating-h">
           <h3 class="section-h" id="g-not-heating-h" tabindex="-1">Why a room isn't heating</h3>
-          <p>Start with the room's badge and the line under its Opening limit bar. The usual reasons:</p>
+          <p>Start with the room's state in the table, then open its row for the reason. The usual reasons:</p>
           <ul class="g-list">
-            <li>It's at its target. Comfortable means within 0.3°.</li>
-            <li>It's waiting for a burn. In Eco, a room that is only a little cold waits for other rooms. Choose Comfort if you'd rather it didn't.</li>
-            <li>The boiler is resting. After a burn it stays off for at least 10 minutes, and the Boiler plate counts down.</li>
+            <li>It's at its setting. Holding means within 0.3°.</li>
+            <li>It's waiting for a burn. With Fewer, longer burns, a room that is only a little cold waits for other rooms. Choose Sooner if you'd rather it didn't.</li>
+            <li>The boiler is resting. After a burn it stays off for at least 10 minutes, and the Boiler panel counts down.</li>
             <li>The hot water is heating. The radiators get little heat for about 25 minutes after it comes on.</li>
             <li>The fire is lit, so its radiator is closed.</li>
             <li>The heating mode is Frost or Off, or everyone who uses the room is away.</li>
-            <li>Its schedule says it should be cooler now. Check Today's plan, or hold a higher temperature.</li>
-            <li>The valve may be stuck. An amber line on the card says so once the radiator has stayed cold for 3 burns.</li>
+            <li>Its schedule says it should be cooler now. Check Today, or hold a higher temperature.</li>
+            <li>The valve may be stuck. An amber line in its row says so once the radiator has stayed cold for 3 burns.</li>
             <li>The valve can't be reached. Radiate leaves it out until it's back. Devices shows it as offline.</li>
             <li>Radiate is in dry run: it's watching the house but not switching anything. A Dry run notice under the header says so.</li>
             <li>The boiler switch isn't linked yet. The line at the top says so, and the boiler follows its own timer.</li>
@@ -734,7 +748,7 @@
             <div><dt>Boiler state</dt><dd>Idle, lead (opening valves before the burner), firing or rest, as the boiler guard has it.</dd></div>
             <div><dt>People home and away</dt><dd>How many people count as home or away. Only the counts are kept, never who.</dd></div>
           </dl>
-          <p>Radiate can also send these readings, and every decision and alert, to an OpenTelemetry collector over OTLP/HTTP, such as Elastic's managed OTLP endpoint. Add an <code>export.otlp</code> section to the house file with the endpoint and an API key. The OpenTelemetry export plate on the Raw data tab says when it last sent, what is waiting, and any error. While the collector can't be reached, Radiate keeps up to 7 days of readings and sends them once it can; if the queue fills, the oldest go first and the plate counts them.</p>
+          <p>Radiate can also send these readings, and every decision and alert, to an OpenTelemetry collector over OTLP/HTTP, such as Elastic's managed OTLP endpoint. Add an <code>export.otlp</code> section to the house file with the endpoint and an API key. The OpenTelemetry export panel on the Raw data tab says when it last sent, what is waiting, and any error. While the collector can't be reached, Radiate keeps up to 7 days of readings and sends them once it can; if the queue fills, the oldest go first and the panel counts them.</p>
         </section>
 
         <section class="g-sec" id="g-settings" aria-labelledby="g-settings-h">
@@ -753,9 +767,9 @@
 
         <section class="g-sec" id="g-security-log" aria-labelledby="g-security-log-h">
           <h3 class="section-h" id="g-security-log-h" tabindex="-1">The security log</h3>
-          <p>Admins see the Security log at the end of the Settings tab: every sign-in and sign-out, every refused sign-in or request with the reason, lockouts after too many wrong passwords, users added or changed with <code>radiate users</code>, and who changed the settings, the household, the layout, learning, the heating mode or Eco and Comfort. Each entry says who and from which address, and never holds a password, token or other secret.</p>
+          <p>Admins see the Security log at the end of the Settings tab: every sign-in and sign-out, every refused sign-in or request with the reason, lockouts after too many wrong passwords, users added or changed with <code>radiate users</code>, and who changed the settings, the household, the layout, learning, the heating mode or Burns. Each entry says who and from which address, and never holds a password, token or other secret.</p>
           <p>It also records who used the everyday controls: a room held at a temperature, Fire lit, a hot-water boost, and Away or Home. It says what was set, never where anyone is. To leave these out, turn off Log day-to-day controls in the Login section of the Settings tab; it applies at once.</p>
-          <p>A change to the heating mode, Eco and Comfort, or a setting in the household, such as a room adjustment from the week view, says what it was before and what it became. A change to the people in the household names no one. Settings saved on this tab say which ones changed, but not their values, as a value can be a password.</p>
+          <p>A change to the heating mode, Burns, or a setting in the household, such as a room adjustment from the week view, says what it was before and what it became. A change to the people in the household names no one. Settings saved on this tab say which ones changed, but not their values, as a value can be a password.</p>
           <p>When someone signs in with a username that isn't an account, the log shows <code>unknown:</code> and a code instead of what they typed, as that is often a password typed in the wrong box. The same mistyped name always gets the same code, so you can still see it tried again and again.</p>
           <p>Radiate keeps it for 90 days (<code>auth.audit_days</code>), whether or not login is on. When the OpenTelemetry export is on, it sends these events too, unless <code>export.otlp.security</code> is off.</p>
         </section>
@@ -779,14 +793,14 @@
           <p>The valves carry on. Each keeps its opening limit and its own copy of the room's week, and runs its own thermostat. After about 2 hours without Radiate, a valve goes back to its own temperature sensor, which sits by the radiator, so rooms may not hold their temperature as closely.</p>
           <p>Radiate checks in with the boiler relay every minute. With the watchdog script installed on the relay, after 10 minutes without word from Radiate the relay runs the heating on its own fallback times, which start an hour before your rooms' warm periods, with its own minimum burn and rest. The hot water keeps its usual windows.</p>
           <p>The heating can't stay on by mistake. Each time the heating relay is switched on it starts a 2 hour timer, and switches itself off when that runs out unless it's switched on again.</p>
-          <p>When Radiate is back it takes over again, and a burn already running still gets its full minimum burn. Learning, held temperatures and today's figures are kept across a restart.</p>
+          <p>When Radiate is back it takes over again, and a burn already running still gets its full shortest burn. Learning, held temperatures and today's figures are kept across a restart.</p>
           <p>If the Zigbee network or MQTT goes down while Radiate is running, it can't reach any valve. It shows "No TRVs reachable: safe mode", lets the current burn finish its minimum and hands the boiler to the watchdog until the valves are back.</p>
           <p>If this page loses Radiate, it dims and the line at the top says "Cannot reach Radiate. Retrying…" with the time of the data shown. It reconnects by itself. Home Assistant or the internet going down doesn't affect the heating.</p>
         </section>
 
         <section class="g-sec" id="g-home-assistant" aria-labelledby="g-home-assistant-h">
           <h3 class="section-h" id="g-home-assistant-h" tabindex="-1">Home Assistant</h3>
-          <p>With the Radiate integration in Home Assistant, the same controls are there: a thermostat for each room, the heating mode, Eco or Comfort, hot-water boost, the fire switch and away for each person.</p>
+          <p>With the Radiate integration in Home Assistant, the same controls are there: a thermostat for each room, the heating mode, Burns (Eco or Comfort there), hot-water boost, the fire switch and away for each person.</p>
           <p>Changing a room's target in Home Assistant holds it, the same as minus and plus here, and this page shows the hold. Home Assistant can also hold a room for a set time, with Radiate's set override action and a duration.</p>
           <p>Radiate doesn't need Home Assistant to run the heating. If Home Assistant stops, the heating carries on.</p>
         </section>
@@ -857,43 +871,48 @@
   </section>
 
   <template id="room-tpl">
-    <article class="card room">
-      <header>
-        <h3 class="name"></h3>
-        <span class="badge"></span>
-      </header>
-      <p class="temp"><span class="now"></span><span class="target"></span></p>
-      <div class="sp" hidden>
-        <div class="sp-copy">
-          <span class="sp-label">Setpoint</span>
-          <button type="button" class="link hold-clear" hidden>Resume schedule</button>
-          <span class="lock-tag" hidden></span>
+    <tr class="room">
+      <th scope="row"><span class="swatch" aria-hidden="true"></span><button type="button" class="name-btn" aria-expanded="false"><span class="name"></span></button><span class="state-inline"><span class="badge"></span></span></th>
+      <td class="r now"></td>
+      <td class="r set"></td>
+      <td class="col-valve"><span class="valve-mini"><i aria-hidden="true"><b class="fill"></b></i><span class="valve-val"></span></span></td>
+      <td class="col-state"><span class="badge"></span></td>
+    </tr>
+    <tr class="more" hidden>
+      <td colspan="5">
+        <div class="more-in">
+          <div class="more-main">
+            <p class="flag" hidden></p>
+            <dl class="facts"></dl>
+            <p class="reason"></p>
+            <button type="button" class="btn fire" hidden>Fire lit</button>
+            <p class="action-error fire-error" role="alert" hidden></p>
+            <details class="learned" hidden>
+              <summary><span class="learned-title">What Radiate has learned</span><span class="learned-tag" hidden>Still learning</span></summary>
+              <div class="learned-body">
+                <p class="learned-status" hidden></p>
+                <dl class="learned-rows"></dl>
+                <p class="learned-raw"></p>
+                <p class="learned-help"><a class="help-link" href="#guide/room-model">What the room model is</a></p>
+              </div>
+            </details>
+          </div>
+          <div class="sp" hidden>
+            <p class="sp-title"></p>
+            <div class="stepper" role="group">
+              <button type="button" class="step" data-step="-0.5"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" /></svg></button>
+              <span class="sp-val" aria-live="polite" aria-atomic="true"></span>
+              <button type="button" class="step" data-step="0.5"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" /></svg></button>
+            </div>
+            <div class="sp-copy">
+              <span class="sp-label"></span>
+              <button type="button" class="link hold-clear" hidden>Resume schedule</button>
+              <span class="lock-tag" hidden></span>
+            </div>
+          </div>
         </div>
-        <div class="stepper" role="group">
-          <button type="button" class="step" data-step="-0.5"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" /></svg></button>
-          <span class="sp-val" aria-live="polite" aria-atomic="true"></span>
-          <button type="button" class="step" data-step="0.5"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" /></svg></button>
-        </div>
-      </div>
-      <p class="flag" hidden></p>
-      <div class="valve">
-        <div class="valve-label"><span>Opening limit</span><span class="valve-val"></span></div>
-        <div class="bar"><div class="fill"></div></div>
-      </div>
-      <p class="reason"></p>
-      <footer class="meta"></footer>
-      <button class="btn fire" hidden>Fire lit</button>
-      <p class="action-error fire-error" role="alert" hidden></p>
-      <details class="learned" hidden>
-        <summary><span class="learned-title">What Radiate has learned</span><span class="learned-tag" hidden>Still learning</span></summary>
-        <div class="learned-body">
-          <p class="learned-status" hidden></p>
-          <dl class="learned-rows"></dl>
-          <p class="learned-raw"></p>
-          <p class="learned-help"><a class="help-link" href="#guide/room-model">What the room model is</a></p>
-        </div>
-      </details>
-    </article>
+      </td>
+    </tr>
   </template>
 
   <template id="person-tpl">

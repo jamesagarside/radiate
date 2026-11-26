@@ -14,7 +14,7 @@ import { createDevices } from "./devices.js";
 import { createSuggestions } from "./suggestions.js";
 import { createSavings, houseLine } from "./savings.js";
 import { createData } from "./data.js";
-import { createHouse } from "./house.js";
+import { createHouse, tempColour } from "./house.js";
 import { createGuide, guideNote } from "./guide.js";
 import { createSettings } from "./settings.js";
 import { failText, pendingValue, sendChange } from "./pending.js";
@@ -214,63 +214,143 @@ function applyRole() {
 // it, so the boiler fires once for all of them.
 const pooled = (r) => r.reason_code === "demand.pooled";
 
+// A room's state in a word or two, and the tint that backs it up.
 function badgeFor(r) {
-  if (r.role === "passive") return ["Bypass, not controlled", ""];
-  if (r.role === "unheated") return ["No radiator", ""];
+  if (r.role === "passive") return ["Manual valve", ""];
+  if (r.role === "unheated") return ["Unheated", ""];
   if (r.fire) return ["Fire lit", "fire"];
-  if (r.preheating) return ["Preheating", "preheat"];
+  if (r.preheating) return ["Warming early", "preheat"];
   if (pooled(r)) return ["Waiting for a burn", "pooled"];
   if (r.calling) return ["Heating", "calling"];
   // Older servers send `topup` without `extend`, so cannot tell the two apart.
-  if (r.topup && r.extend === true) return ["Topping up", "extend"];
-  if (r.topup && r.extend === false) return ["Heat sink", "sink"];
-  if (r.topup) return ["Topped up", "sink"];
-  if (r.temperature != null && r.target != null && r.temperature >= r.target - 0.3) return ["Comfortable", "ok"];
+  if (r.topup && r.extend === true) return ["Warming ahead", "extend"];
+  if (r.topup) return ["Taking spare heat", "sink"];
+  if (r.temperature != null && r.target != null && r.temperature >= r.target - 0.3) return ["Holding", "ok"];
   return ["Waiting", ""];
 }
 
+// Why learning has stopped for now (the room's learning gate), in words.
 const LEARNING = {
-  fire: "learning paused: fire",
-  fire_holdoff: "learning paused: fire cooling",
-  window: "learning paused: window",
-  shower: "learning paused: shower",
-  cooker_spike: "learning paused: cooking",
-  unexplained_heat: "learning paused: extra heat (sun or guests?)",
-  store_recovery: "learning paused: hot water",
-  heat_unknown: "learning paused: no boiler reading",
-  setpoint_change: "settling",
-  no_data: "gathering data",
-  trv_offline: "TRV offline",
+  fire: "Paused while the fire is lit",
+  fire_holdoff: "Paused while the fire's heat dies down",
+  window: "Paused: a window may be open",
+  shower: "Paused after a shower",
+  cooker_spike: "Paused while the cooker is in use",
+  unexplained_heat: "Paused: heat from somewhere else, such as sun or people",
+  store_recovery: "Paused while the hot water heats",
+  heat_unknown: "Paused: no reading from the boiler",
+  no_heat: "Paused: the radiator isn't getting heat",
+  valve_untrusted: "Paused: the valve may be stuck",
+  valve_leaking: "Paused: the valve may not be closing",
+  valve_rejected: "Paused: the valve refused a setting",
+  sensor_stale: "Paused: the room sensor has gone quiet",
+  setpoint_change: "Settling after a change",
+  no_data: "Waiting for readings",
+  starting: "Starting",
+  trv_offline: "Paused: the valve is offline",
 };
+
+// The room table. Each room is two rows: the row you read, and a row under it that
+// opens to change the room. Rows sit in one tbody per floor, top floor first.
+const OBSERVED_ONLY = new Set(["passive", "unheated"]);
+let openRoomId = null;
+let rowOrder = "";
 
 function ensureCard(r) {
   if (cards.has(r.id)) return cards.get(r.id);
-  const node = $("room-tpl").content.firstElementChild.cloneNode(true);
-  node.id = `room-${r.id}`;
-  node.tabIndex = -1;
-  node.querySelector(".name").textContent = r.name;
-  node.dataset.passive = String(r.role === "passive");
-  node.dataset.unheated = String(r.role === "unheated");
-  const fire = node.querySelector(".fire");
+  const [row, more] = $("room-tpl").content.cloneNode(true).querySelectorAll("tr");
+  row.dataset.id = r.id;
+  row.id = `room-${r.id}`;
+  more.id = `more-${r.id}`;
+  const n = {
+    row,
+    more,
+    q: (s) => row.querySelector(s) ?? more.querySelector(s),
+  };
+  row.querySelector(".name").textContent = r.name;
+  const nameBtn = row.querySelector(".name-btn");
+  nameBtn.setAttribute("aria-controls", more.id);
+  row.dataset.passive = String(r.role === "passive");
+  row.dataset.unheated = String(r.role === "unheated");
+  const fire = more.querySelector(".fire");
   if (r.heat_source === "episodic") {
     fire.hidden = false;
     fire.addEventListener("click", () => {
       const p = firePending(r.id);
       const lit = !p.shown(fireOn(rooms.get(r.id) ?? r));
-      change(p, lit, `rooms/${r.id}/fire`, { lit }, () => renderFire(node, rooms.get(r.id) ?? r));
+      change(p, lit, `rooms/${r.id}/fire`, { lit }, () => renderFire(n, rooms.get(r.id) ?? r));
     });
   }
-  const stepper = node.querySelector(".stepper");
-  stepper.setAttribute("aria-label", `${r.name} setpoint`);
+  const stepper = more.querySelector(".stepper");
+  stepper.setAttribute("aria-label", `Set ${r.name}`);
+  more.querySelector(".sp-title").textContent = `Set ${r.name}`;
   for (const btn of stepper.querySelectorAll(".step")) {
     const step = Number(btn.dataset.step);
-    btn.setAttribute("aria-label", `${step < 0 ? "Lower" : "Raise"} ${r.name} setpoint by 0.5°`);
+    btn.setAttribute("aria-label", `${step < 0 ? "Lower" : "Raise"} ${r.name} by 0.5°`);
     btn.addEventListener("click", () => nudge(r.id, step));
   }
-  node.querySelector(".hold-clear").addEventListener("click", () => resumeSchedule(r.id));
-  $("rooms").appendChild(node);
-  cards.set(r.id, node);
-  return node;
+  more.querySelector(".hold-clear").addEventListener("click", () => resumeSchedule(r.id));
+  cards.set(r.id, n);
+  return n;
+}
+
+// Open one room's row, or none. The house model follows unless the house asked.
+function openRoom(id, { fromHouse = false } = {}) {
+  openRoomId = id;
+  for (const [rid, n] of cards) {
+    const open = rid === id;
+    n.more.hidden = !open;
+    n.row.classList.toggle("sel", open);
+    n.row.querySelector(".name-btn").setAttribute("aria-expanded", String(open));
+  }
+  if (!fromHouse) houseView.select(id);
+  if (fromHouse && id) {
+    const row = cards.get(id)?.row;
+    if (!row) return;
+    const box = row.getBoundingClientRect();
+    if (box.top < 120 || box.bottom > innerHeight) {
+      row.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    }
+  }
+}
+
+$("rooms-table").addEventListener("click", (e) => {
+  const row = e.target.closest("tr.room");
+  if (!row) return;
+  // A click on the row reads as a click on its name, except on a text selection.
+  if (!e.target.closest(".name-btn") && getSelection()?.toString()) return;
+  const id = row.dataset.id;
+  openRoom(openRoomId === id ? null : id);
+  if (!e.target.closest(".name-btn")) row.querySelector(".name-btn").focus({ preventScroll: true });
+});
+
+// Put the rows under their floors, in the house view's order. Only when the order
+// changes, as moving a row would drop focus inside it.
+function orderRooms() {
+  const groups = houseView.groups();
+  const key = JSON.stringify(groups.map((g) => [g.name, g.ids]));
+  if (!groups.length || key === rowOrder) return;
+  rowOrder = key;
+  const table = $("rooms-table");
+  for (const old of table.querySelectorAll("tbody")) old.remove();
+  const one = groups.length === 1;
+  for (const g of groups) {
+    const body = document.createElement("tbody");
+    if (!one) {
+      const tr = document.createElement("tr");
+      const th = document.createElement("th");
+      th.scope = "rowgroup";
+      th.colSpan = 5;
+      th.textContent = g.name;
+      tr.appendChild(th);
+      body.appendChild(tr);
+    }
+    for (const id of g.ids) {
+      const n = cards.get(id);
+      if (n) body.append(n.row, n.more);
+    }
+    table.appendChild(body);
+  }
 }
 
 // The fire switch: the manual flag a person sets, `fire_switch`. `fire` is also true
@@ -284,12 +364,12 @@ function firePending(id) {
 const fireOn = (r) => Boolean(r.fire_switch ?? r.fire);
 
 function renderFire(n, r) {
-  const fire = n.querySelector(".fire");
+  const fire = n.q(".fire");
   if (fire.hidden) return;
   const p = firePending(r.id);
   fire.setAttribute("aria-pressed", String(Boolean(p.shown(fireOn(r)))));
   fire.setAttribute("aria-busy", String(p.busy));
-  showError(n.querySelector(".fire-error"), p.error);
+  showError(n.q(".fire-error"), p.error);
 }
 
 // Setpoint control. Presses change the shown value at once and are sent together
@@ -384,23 +464,36 @@ function holdText(o) {
   return last ? `Held until ${clock((last.minute_of_day + o.expires_in_min) % 1440)}` : "Held until the next change";
 }
 
-// Roles Radiate observes but never controls: a bypass radiator, a room with no radiator.
-const OBSERVED_ONLY = new Set(["passive", "unheated"]);
-
 function controllable(r) {
   const known = house?.rooms?.find((h) => h.id === r.id);
   return known ? known.controllable : !OBSERVED_ONLY.has(r.role);
 }
 
+// A reason from the core starts with the room's name ("Lounge: fire lit, ..."). In
+// the room's own row the name is already there, so drop it.
+function ownReason(r, text) {
+  const prefix = `${r.name}: `;
+  const rest = text.startsWith(prefix) ? text.slice(prefix.length) : text;
+  if (!rest) return "";
+  const sentence = rest[0].toUpperCase() + rest.slice(1);
+  return /[.?!]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+// 16, 16.5: a whole degree without a trailing ".0" in sentences.
+const deg = (t) => `${Number.isInteger(t) ? t : t.toFixed(1)}°`;
+
 function renderRoom(r) {
   // `last` is set before rooms render, so the next-setpoint clock is current.
   const n = ensureCard(r);
   rooms.set(r.id, r);
+  const { row, more } = n;
   const [label, kind] = badgeFor(r);
-  const badge = n.querySelector(".badge");
-  badge.textContent = label;
-  badge.dataset.kind = kind;
-  n.querySelector(".now").textContent = fmtT(r.temperature);
+  for (const badge of row.querySelectorAll(".badge")) {
+    badge.textContent = label;
+    badge.dataset.kind = kind;
+  }
+  row.querySelector(".now").textContent = fmtT(r.temperature);
+  row.querySelector(".swatch").style.background = tempColour(r.temperature);
 
   // Setpoint control and any hold on it.
   const c = control(r.id);
@@ -410,56 +503,79 @@ function renderRoom(r) {
   }
   if (c.clearing && !r.override) c.clearing = false;
   const canSet = controllable(r);
-  const sp = n.querySelector(".sp");
-  const fireBtn = n.querySelector(".fire");
+  const sp = more.querySelector(".sp");
+  const fireBtn = more.querySelector(".fire");
   const locked = lock([...sp.querySelectorAll(".step"), fireBtn.hidden ? null : fireBtn], sp.querySelector(".lock-tag"), "household");
   sp.hidden = !canSet;
-  const target = n.querySelector(".target");
-  target.textContent = r.target != null ? `→ ${r.target.toFixed(1)}°` : !canSet && r.setpoint != null ? `set ${r.setpoint.toFixed(1)}°` : "";
+  const shown = canSet ? heldSetpoint(r) : null;
+  const held = canSet && c.pending == null && !c.clearing && r.override?.setpoint != null;
+  row.querySelector(".set").textContent = canSet ? fmtT(shown) : "";
+  row.dataset.held = String(held || c.pending != null);
   if (canSet) {
-    const shown = heldSetpoint(r);
-    const held = c.pending == null && !c.clearing && r.override?.setpoint != null;
     sp.dataset.held = String(held || c.pending != null);
     sp.dataset.error = String(Boolean(c.error));
     sp.querySelector(".sp-val").textContent = fmtT(shown);
     const [down, up] = sp.querySelectorAll(".step");
     down.disabled = locked || (shown != null && shown <= SETPOINT_MIN);
     up.disabled = locked || (shown != null && shown >= SETPOINT_MAX);
-    sp.querySelector(".sp-label").textContent = c.error || (held ? holdText(r.override) : "Setpoint");
+    sp.querySelector(".sp-label").textContent = c.error || (held ? holdText(r.override) : "From the schedule");
     sp.querySelector(".hold-clear").hidden = !held || locked;
   }
 
+  // The valve's opening limit, in the row and in words when it opens.
+  const observed = OBSERVED_ONLY.has(r.role);
+  const valve = row.querySelector(".valve-mini");
+  valve.hidden = observed || r.opening == null;
+  const opening = r.opening ?? 0;
+  row.querySelector(".valve-val").textContent = `${opening}%`;
+  row.querySelector(".fill").style.transform = `scaleX(${opening / 100})`;
+  row.dataset.idle = String(!(r.calling || r.topup));
+
   // Stuck-valve check (spec 7): the radiator stayed cold for burns in a row.
-  const flag = n.querySelector(".flag");
+  const flag = more.querySelector(".flag");
   flag.hidden = !r.valve?.untrusted;
   if (r.valve?.untrusted) {
-    flag.textContent = r.valve.leaking ? "Valve may not be closing: radiator warmed while shut." : r.valve.misses
-      ? `Valve may be stuck: radiator stayed cold for ${plural(r.valve.misses, "burn", "burns")}.`
-      : "Valve may be stuck: radiator not warming.";
+    flag.textContent = r.valve.leaking ? "The valve may not be closing: the radiator warmed while it was shut." : r.valve.misses
+      ? `The valve may be stuck: the radiator stayed cold for ${plural(r.valve.misses, "burn", "burns")}.`
+      : "The valve may be stuck: the radiator isn't warming.";
   }
-  const opening = r.opening ?? 0;
-  n.querySelector(".valve-val").textContent = r.opening == null ? "–" : `${opening}%`;
-  n.querySelector(".fill").style.transform = `scaleX(${opening / 100})`;
-  n.dataset.idle = String(!(r.calling || r.topup));
-  let reason = r.reason || "";
+
+  // Facts, label and value.
+  const facts = [];
+  if (canSet && r.target != null && shown != null && Math.abs(r.target - shown) >= 0.05) facts.push(["Aiming for", fmtT(r.target)]);
+  if (canSet && r.next_setpoint != null && r.next_in_min != null && last) {
+    facts.push(["Then", `${fmtT(r.next_setpoint)} at ${clock((last.minute_of_day + r.next_in_min) % 1440)}`]);
+  }
+  if (!observed && r.opening != null) facts.push(["Valve", r.opening ? `Opens up to ${r.opening}%` : "Closed"]);
+  if (r.humidity != null) facts.push(["Humidity", `${Math.round(r.humidity)}%`]);
+  if (r.model) facts.push(["Learning", r.learning ? LEARNING[r.learning] ?? r.learning : "Yes"]);
+  const factsKey = JSON.stringify(facts);
+  const dl = more.querySelector(".facts");
+  if (dl.dataset.key !== factsKey) {
+    dl.dataset.key = factsKey;
+    dl.textContent = "";
+    for (const [k, v] of facts) {
+      const dt = document.createElement("dt");
+      const dd = document.createElement("dd");
+      dt.textContent = k;
+      dd.textContent = v;
+      dl.append(dt, dd);
+    }
+  }
+
+  let reason = r.reason ? ownReason(r, r.reason) : "";
+  // Learning has its own line in the facts, so don't say it twice.
+  if (r.learning && /^learning paused/i.test(reason)) reason = "";
   if (pooled(r)) reason = "Waiting to share a burn with other rooms.";
-  if (!r.calling && r.topup && r.extend === true) reason = "Topped up now so it does not need a second burn soon.";
+  if (!r.calling && r.topup && r.extend === true) reason = "Taking heat now, so it won't need a burn of its own soon.";
   if (!r.calling && r.topup && r.extend === false) reason = "Opened so the burner's heat has somewhere to go.";
-  if (!reason && r.role === "passive") reason = "Manual valve, always open: counted as the system's open path.";
-  if (!reason && r.role === "unheated") reason = "No radiator here. Temperature recorded, not controlled.";
-  if (!reason && r.heat_source === "continuous") reason = "Range cooker heat is learned as a steady background.";
-  if (!reason && r.next_setpoint != null && r.next_in_min != null && last) {
-    const at = (last.minute_of_day + r.next_in_min) % 1440;
-    reason = `Next ${r.next_setpoint.toFixed(1)}° at ${clock(at)}.`;
+  if (!reason && r.role === "passive") reason = "Hand valve, always open. Keeps water moving round the system. Not controlled.";
+  if (!reason && r.role === "unheated") reason = "No radiator. Temperature recorded only.";
+  if (!reason && r.heat_source === "continuous") reason = "Heat from the range cooker is learned as steady background warmth.";
+  if (!reason && canSet && r.target != null && r.temperature != null) {
+    reason = r.temperature < r.target - 0.05 ? `${deg(Math.round((r.target - r.temperature) * 10) / 10)} below setting.` : "At or above setting.";
   }
-  n.querySelector(".reason").textContent = reason;
-  const meta = n.querySelector(".meta");
-  if (r.model) {
-    const learn = r.learning ? LEARNING[r.learning] || r.learning : "learning";
-    meta.textContent = learn[0].toUpperCase() + learn.slice(1);
-  } else {
-    meta.textContent = r.humidity != null ? `${r.humidity}% RH` : "";
-  }
+  more.querySelector(".reason").textContent = reason;
   renderFire(n, r);
   renderLearned(n, r);
 }
@@ -468,21 +584,21 @@ function renderRoom(r) {
 // rebuilt only when their words change; they hold nothing focusable, and the guide
 // link sits outside them, so focus survives each tick.
 function renderLearned(n, r) {
-  const box = n.querySelector(".learned");
+  const box = n.q(".learned");
   box.hidden = !r.model;
   if (!r.model) return;
   const notes = (last?.learning_notes ?? []).filter((x) => x.room_id === r.id);
   const rows = learnedRows(r, { outdoor: last?.outdoor, minute_of_day: last?.minute_of_day, notes });
   const learning = stillLearning(r.model);
-  n.querySelector(".learned-tag").hidden = !learning;
-  const status = n.querySelector(".learned-status");
+  n.q(".learned-tag").hidden = !learning;
+  const status = n.q(".learned-status");
   status.hidden = !learning;
   status.textContent = r.model.samples === 0
     ? "Still learning. Nothing learned yet, so Radiate uses typical values for now."
     : "Still learning. These numbers will change as Radiate sees this room warm up and cool down more often.";
-  n.querySelector(".learned-raw").textContent = rawText(r.model);
+  n.q(".learned-raw").textContent = rawText(r.model);
   const key = JSON.stringify(rows);
-  const list = n.querySelector(".learned-rows");
+  const list = n.q(".learned-rows");
   if (list.dataset.key === key) return;
   list.dataset.key = key;
   list.textContent = "";
@@ -682,19 +798,18 @@ function renderPeople(away) {
 // 10 minutes. Each state moves the now marker. An older server without the route
 // answers 404 and the section stays hidden.
 const WEEK_REFRESH_MS = 10 * 60 * 1000;
-// The house model, the whole-house plate and today's plan (house.js).
+// The readings, the house model and today (house.js).
 const houseView = createHouse({
   modelEl: $("hm-model"),
-  statusEl: $("hm-status"),
+  readingsEl: $("readings"),
+  previewEl: $("hm-preview"),
+  roomsEl: $("rooms-section"),
   planEl: $("hm-plan"),
   transport,
   arrangeLock: () => lockText("admin"),
-  onRoom: (id) => {
-    const card = $(`room-${id}`);
-    if (!card) return;
-    card.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-    card.focus({ preventScroll: true });
-  },
+  describe: (r) => badgeFor(r)[0],
+  onRoom: (id) => openRoom(id, { fromHouse: true }),
+  onLayout: () => orderRooms(),
   onWeek: () => {
     $("week").scrollIntoView({ block: "start" });
     $("week-h").setAttribute("tabindex", "-1");
@@ -803,12 +918,11 @@ function render(s) {
   // report the configured value, in /house.
   const minOff = b.min_off_s ?? house?.boiler.min_off_s ?? 600;
   $("status").textContent = statusLine(s, minBurn);
-  $("outdoor").textContent = s.outdoor != null ? `Outside ${s.outdoor.toFixed(1)}°` : "";
   renderMode(s.mode);
   renderDemand(s.settings);
 
   const chip = $("boiler-chip");
-  chip.textContent = { idle: "Idle", lead: "Opening valves", firing: "Firing", rest: "Resting" }[b.state];
+  chip.textContent = { idle: "Off", lead: "Opening valves", firing: "On", rest: "Resting" }[b.state];
   chip.dataset.state = b.state;
   const guard = $("guard");
   let frac = 0;
@@ -817,8 +931,8 @@ function render(s) {
   guard.dataset.kind = b.state;
   guard.firstElementChild.style.transform = `scaleX(${frac})`;
   $("boiler-detail").textContent = firing
-    ? b.burn_elapsed_s < minBurn ? `minimum burn ${mins(minBurn - b.burn_elapsed_s)} to go` : "minimum burn met"
-    : b.state === "rest" ? `${mins(Math.max(0, minOff - b.state_elapsed_s))} until it may start again` : "";
+    ? b.burn_elapsed_s < minBurn ? `Shortest burn: ${mins(minBurn - b.burn_elapsed_s)} to go` : "Shortest burn done"
+    : b.state === "rest" ? `Can start again in ${mins(Math.max(0, minOff - b.state_elapsed_s))}` : "";
   renderBoost(s.store.boost);
 
   lane(document.querySelector(".lane.burns"), s.timeline.burns, s.timeline.window_s);
@@ -826,13 +940,13 @@ function render(s) {
   $("s-starts").textContent = `${b.starts_last_hour}`;
   $("s-pred").textContent = b.predicted_burn_min ? `${b.predicted_burn_min} min` : "–";
   renderAccounting(s);
-  $("s-supply").textContent = b.supply != null ? b.supply.toFixed(2) : "–";
+  $("s-supply").textContent = b.supply != null ? `${Math.round(b.supply * 100)}%` : "–";
   renderShortCycle(b);
 
   const banner = $("banner");
   if (s.telemetry?.simulated) {
     banner.hidden = false;
-    $("banner-text").textContent = `Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time. Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
+    $("banner-text").textContent = `Simulated house, ${clock(s.minute_of_day)}. Boiler water ${s.telemetry.boiler_water_c}°, hot-water store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
   }
   renderDryRun(s.telemetry);
   renderLearningNotes(s.learning_notes);
@@ -841,6 +955,7 @@ function render(s) {
   renderAlerts(s.alerts);
   renderDeviceCount(s.alert_details);
   houseView.update(s, house);
+  orderRooms();
   syncWeek(s);
 
   lastAt = new Date();
@@ -850,6 +965,8 @@ function render(s) {
 
 // Why the burner is doing what it is doing, point first. When no room is calling,
 // say what the heat is for, so a long burn with every room comfortable makes sense.
+// The room table shows which rooms are heating, so a long list becomes a count.
+const few = (list) => (list.length > 3 ? `${list.length} rooms` : names(list));
 function statusLine(s, minBurn) {
   const b = s.boiler;
   const active = s.rooms.filter((r) => !OBSERVED_ONLY.has(r.role));
@@ -862,32 +979,32 @@ function statusLine(s, minBurn) {
   // never claim it is idle. Older servers don't send `boiler_linked`.
   if (s.telemetry && !s.telemetry.simulated && s.telemetry.boiler_linked === false) {
     if (!calling.length) return "No room needs heat. The boiler switch isn't linked yet.";
-    return `${names(calling)} ${calling.length === 1 ? "wants" : "want"} heat. The boiler switch isn't linked yet, so the boiler follows its own timer.`;
+    return `${few(calling)} ${calling.length === 1 ? "wants" : "want"} heat. The boiler switch isn't linked yet, so the boiler follows its own timer.`;
   }
   const on = `Burner on for ${mins(b.burn_elapsed_s)}`;
-  const extend = (list) => `topping up ${names(list)} to save a second burn soon`;
+  const extend = (list) => `warming ${few(list)} ahead to save a second burn soon`;
   switch (b.state) {
     case "idle":
       if (waiting.length) {
         const verb = waiting.length === 1 ? "is" : "are";
-        return `Boiler idle. ${names(waiting)} ${verb} waiting to share a burn with other rooms.${water}`;
+        return `Boiler off. ${few(waiting)} ${verb} waiting to share a burn with other rooms.${water}`;
       }
       // Quiet hours (spec 5.10). Older servers don't send `quiet`.
       if (s.quiet?.active) return `Quiet hours until ${s.quiet.until}. Heating only to keep rooms above 12°.${water}`;
-      return water ? `Heating idle.${water}` : "Boiler idle. Rooms are within comfort.";
+      return water ? `Heating off.${water}` : "Boiler off. Every room is warm enough.";
     case "lead":
-      return `Opening valves before calling the burner.${calling.length ? ` Heating ${names(calling)}.` : ""}${water}`;
+      return `Opening valves before the burner starts.${calling.length ? ` Heating ${few(calling)}.` : ""}${water}`;
     case "rest":
-      return `Burner resting: minimum off time, ${mins(b.state_elapsed_s)} so far.${water}`;
+      return `Burner resting between burns, ${mins(b.state_elapsed_s)} so far.${water}`;
     case "firing":
       if (calling.length) {
         const also = extending.length ? ` Also ${extend(extending)}.` : "";
-        return `${on}. Heating ${names(calling)}.${also}${water}`;
+        return `${on}. Heating ${few(calling)}.${also}${water}`;
       }
       if (extending.length) return `${on}, ${extend(extending)}.${water}`;
       if (b.burn_elapsed_s < minBurn) {
-        const into = sinks.length ? `, with the heat going to ${names(sinks)}` : "";
-        return `${on} to finish its minimum burn${into}.${water}`;
+        const into = sinks.length ? `, with the heat going to ${few(sinks)}` : "";
+        return `${on} to finish its shortest burn${into}.${water}`;
       }
       return `${on}. Stopping now that rooms are warm.${water}`;
     default:
@@ -941,8 +1058,8 @@ function renderShortCycle(b) {
 // A press shows at once and is held until a state confirms it. Choosing the configured
 // default sends null, so the server follows its configuration file again.
 const DEMAND_NOTE = {
-  eco: "fewer, longer burns. Rooms might warm a bit later.",
-  comfort: "every room held at its target, with more burns.",
+  eco: "uses less oil. Rooms may warm a little later.",
+  comfort: "rooms warm sooner, with more burns.",
 };
 const demand = pendingValue();
 
@@ -950,7 +1067,7 @@ function renderDemand(settings) {
   const group = $("demand");
   const note = $("demand-note");
   const known = settings && DEMAND_NOTE[settings.demand_mode];
-  group.hidden = note.hidden = !known;
+  $("demand-ctl").hidden = note.hidden = !known;
   if (!known) return;
   const shown = demand.shown(settings.demand_mode);
   for (const btn of group.querySelectorAll("button")) btn.setAttribute("aria-checked", String(btn.dataset.demand === shown));

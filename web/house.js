@@ -1,16 +1,16 @@
-// House model view: the top of the House page.
+// House view: the top of the House page.
 //
+//   - A line of readings: boiler, hot water, rooms heating, outside, the next change.
 //   - An axonometric model of the house, every room coloured by its temperature,
-//     floors stacked and pulled apart. Selecting a room shows its line underneath.
+//     floors stacked and pulled apart, with a floor picker to draw one floor larger.
+//     Selecting a room opens its row in the room table (app.js), and the reverse.
 //   - "Arrange rooms": a floor-plan editor. Drag a room to move it, drag its corner to
 //     resize, 0.5 m snapping; arrow keys do the same. Saved with PUT layout; the
-//     layout only draws the model, control never reads it.
-//   - The house status plate: rooms calling, every room on one temperature scale,
-//     the boiler, dry run, devices, learning, and what changes next.
-//   - Today's plan: every scheduled room's day as a strip, with a now line.
+//     layout only draws the model and groups the table, control never reads it.
+//   - Today: every scheduled room's day as a strip, with a now line.
 //
-// app.js owns the data and calls update(state, house), week(view) and devices(n).
-// Everything here is drawn from those; the only request is the layout.
+// app.js owns the data and calls update(state, house), week(view), devices(n) and
+// select(id). Everything here is drawn from those; the only request is the layout.
 
 const SVG = "http://www.w3.org/2000/svg";
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -28,7 +28,7 @@ const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValu
 const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 function tempRgb(t) {
   const stops = [12, 15, 17, 19, 22].map((s) => [s, hexRgb(cssVar(`--t${s}`) || "#888888")]);
-  if (t == null) return hexRgb(cssVar("--surface-2") || "#cccccc");
+  if (t == null) return hexRgb(cssVar("--t-none") || "#cccccc");
   const v = Math.max(12, Math.min(22, t));
   for (let i = 0; i < stops.length - 1; i++) {
     const [a, ca] = stops[i];
@@ -41,13 +41,18 @@ const rgb = (c, k = 1) => `rgb(${c.map((v) => Math.round(v * k)).join(",")})`;
 // Ink or white on a temperature colour, whichever has the higher WCAG contrast.
 const lin = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
 const luminance = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
-const INK = [20, 28, 24];
 function inkOn(c) {
+  const ink = hexRgb(cssVar("--house-ink") || "#1c2024");
   const l = luminance(c);
-  const onInk = (l + 0.05) / (luminance(INK) + 0.05);
+  const onInk = (l + 0.05) / (luminance(ink) + 0.05);
   const onWhite = 1.05 / (l + 0.05);
-  return onInk >= onWhite ? "#141c18" : "#ffffff";
+  return onInk >= onWhite ? rgb(ink) : "#ffffff";
 }
+// 16, 16.5: a temperature as people say it, without a trailing ".0".
+const deg = (t) => `${Number.isInteger(t) ? t : (Math.round(t * 10) / 10).toFixed(1)}°`;
+
+// A temperature's colour on the house scale, for the swatch in each table row.
+export const tempColour = (t) => rgb(tempRgb(t));
 
 // ---------- layout ----------
 // A first guess until the owner arranges the house: bedrooms and bathrooms upstairs,
@@ -74,20 +79,23 @@ const liftFor = (extent) => Math.max(3.2, extent * SIN * 0.8);
 const P = (x, y, z) => [(x - y) * COS * S, (x + y) * SIN * S - z * S];
 const pts = (a) => a.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
 
-function isoMarkup(layout, rooms, { selected, interactive }) {
+// `only`: draw that floor alone, at ground level, so it fills the space.
+// `describe(r)`: a room's state in words, for its accessible name.
+function isoMarkup(layout, rooms, { selected, interactive, only = null, describe = () => "" }) {
   let out = "";
   let under = ""; // floor outlines and labels, drawn first so rooms always sit on top
-  const line = cssVar("--line");
+  const line = cssVar("--line-strong");
   let extent = 0;
   for (const [id, p] of Object.entries(layout.rooms)) if (rooms.has(id)) extent = Math.max(extent, p.x + p.w + p.y + p.d);
-  const LIFT = liftFor(extent);
+  const LIFT = only == null ? liftFor(extent) : 0;
   layout.floors.forEach((name, f) => {
+    if (only != null && only !== f) return;
     const z = f * LIFT;
     const mine = Object.entries(layout.rooms).filter(([id, p]) => p.floor === f && rooms.has(id));
     const maxX = Math.max(3, ...mine.map(([, p]) => p.x + p.w));
     const maxY = Math.max(3, ...mine.map(([, p]) => p.y + p.d));
     under += `<polygon points="${pts([P(-0.2, -0.2, z), P(maxX + 0.2, -0.2, z), P(maxX + 0.2, maxY + 0.2, z), P(-0.2, maxY + 0.2, z)])}" fill="none" stroke="${line}" stroke-width="1.5"/>`;
-    if (f > 0) {
+    if (f > 0 && only == null) {
       for (const [x, y] of [[-0.2, -0.2], [maxX + 0.2, -0.2], [-0.2, maxY + 0.2]]) {
         const a = P(x, y, z);
         const b = P(x, y, z - LIFT + SLAB);
@@ -115,7 +123,8 @@ function isoMarkup(layout, rooms, { selected, interactive }) {
         const b = P(x + Math.min(w - 0.25, 1.4), y + d - 0.15, top);
         rad = `<line class="hm-rad" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${ink}" stroke-width="3"/>`;
       }
-      const label = `${r.name}, ${r.temperature == null ? "no reading" : `${fmt(r.temperature)} degrees`}${r.calling ? ", heating" : ""}`;
+      const state = describe(r);
+      const label = `${r.name}, ${r.temperature == null ? "no reading" : `${fmt(r.temperature)} degrees`}${state ? `, ${state.toLowerCase()}` : ""}`;
       const attrs = interactive ? `tabindex="0" role="button" aria-pressed="${id === selected}"` : "";
       out += `<g class="hm-room" data-id="${esc(id)}" ${attrs} aria-label="${esc(label)}">
         <polygon points="${pts(R)}" fill="${rgb(c, 0.62)}"/><polygon points="${pts(F)}" fill="${rgb(c, 0.8)}"/>
@@ -139,7 +148,13 @@ function fitView(svg) {
 // ---------- the view ----------
 // `arrangeLock()` says why the signed-in person can't arrange rooms ("Ask an admin",
 // "Read only"), or "" when they can: the layout is an admin's (ADR-0006).
-export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWeek, arrangeLock = () => "" }) {
+// `roomsEl` is the room table's section, which the live preview replaces while the
+// editor is open. `onRoom(id)` is called when a room is picked in the model (null when
+// it is picked again); `describe(r)` gives a room's state in words.
+export function createHouse({
+  modelEl, readingsEl, previewEl, roomsEl, planEl, transport, onRoom, onWeek, onLayout,
+  describe = () => "", arrangeLock = () => "",
+}) {
   let state = null;
   let houseInfo = null;
   let rooms = new Map();
@@ -149,6 +164,7 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
   let editing = false;
   let edFloor = 0;
   let selected = null;
+  let only = null; // the floor drawn on its own, or null for every floor
   let weekView = null;
   let deviceCount = 0;
   let drag = null;
@@ -161,7 +177,9 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
       if (res.status === 200 && res.body?.layout) { layout = res.body.layout; saved = true; }
       else if (res.status === 404) layoutGone = true;
     } catch { /* keep the guess */ }
+    if (only != null && only >= layout.floors.length) only = null;
     drawModel();
+    onLayout?.();
   }
 
   function queueSave() {
@@ -190,31 +208,72 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
   const placed = () => Object.keys(layout.rooms).filter((id) => rooms.has(id));
   const unplaced = () => [...rooms.keys()].filter((id) => !layout.rooms[id]);
 
-  // ---------- model plate ----------
+  // ---------- the house ----------
+  // Floors for the picker and the table, top floor first, as a house is read.
+  function floorOrder() {
+    return layout.floors.map((name, f) => ({ name, f })).reverse();
+  }
+
+  function drawFloors() {
+    const group = modelEl.querySelector(".hm-floors-pick");
+    const many = layout.floors.length > 1;
+    group.hidden = !many;
+    if (!many) { only = null; return; }
+    const key = JSON.stringify([layout.floors, only]);
+    if (group.dataset.key === key) return;
+    group.dataset.key = key;
+    const hadFocus = group.contains(document.activeElement);
+    const all = layout.floors.length === 2 ? "Both floors" : "All floors";
+    const options = [{ f: null, name: all }, ...floorOrder()];
+    group.innerHTML = options.map((o) => {
+      const on = o.f === only;
+      return `<button type="button" role="radio" data-f="${o.f ?? ""}" aria-checked="${on}" tabindex="${on ? 0 : -1}">${esc(o.name)}</button>`;
+    }).join("");
+    if (hadFocus) group.querySelector('[aria-checked="true"]')?.focus();
+  }
+
+  function chooseFloor(button) {
+    only = button.dataset.f === "" ? null : Number(button.dataset.f);
+    drawModel();
+  }
+
   function drawModel() {
     if (!layout || !rooms.size) return;
     if (editing) { drawEditor(); return; }
     if (!modelEl.querySelector(".hm-iso")) {
       modelEl.innerHTML = `
         <div class="hm-head">
-          <h2 id="hm-model-h">Your house</h2>
-          <div class="hm-head-right">
-            <span class="hm-scale" aria-hidden="true"><span class="hm-lab">12°</span><span class="hm-ramp"></span><span class="hm-lab">22°</span></span>
-            <button type="button" class="btn" data-act="arrange" aria-describedby="hm-arrange-lock">Arrange rooms</button>
-            <span class="lock-tag" id="hm-arrange-lock" hidden></span>
-          </div>
+          <h2 class="section-h" id="hm-model-h">House</h2>
+          <div class="seg hm-floors-pick" role="radiogroup" aria-label="Floors shown" hidden></div>
         </div>
-        <p class="hm-hint">Each block is a room in its temperature colour. A blinking bar is a radiator taking heat. <span class="hm-guess" hidden>Rooms are placed by a guess from their names. Arrange them to match your house.</span> <a class="help-link" href="#guide/model">How to read the model</a></p>
         <svg class="hm-iso" role="group" aria-labelledby="hm-model-h"></svg>
-        <div class="hm-pick" aria-live="polite"></div>`;
-      modelEl.querySelector("[data-act=arrange]").addEventListener("click", () => { editing = true; edFloor = layout.floors.length > 1 ? 0 : 0; drawModel(); drawStatus(); });
+        <p class="hm-key"><span class="hm-scale" aria-hidden="true"><span>12°</span><span class="hm-ramp"></span><span>22°</span></span><span>Bar on a room: radiator on.</span> <a class="help-link" href="#guide/model">Reading the house</a></p>
+        <p class="hm-guess" hidden>Rooms are placed by a guess from their names. Arrange them to match your house.</p>
+        <div class="hm-arrange lock-row">
+          <button type="button" class="btn" data-act="arrange" aria-describedby="hm-arrange-lock">Arrange rooms</button>
+          <span class="lock-tag" id="hm-arrange-lock" hidden></span>
+        </div>`;
+      modelEl.querySelector("[data-act=arrange]").addEventListener("click", () => { editing = true; edFloor = 0; drawModel(); drawPreview(); });
       const svg = modelEl.querySelector(".hm-iso");
       svg.addEventListener("click", (e) => { const g = e.target.closest(".hm-room"); if (g) pick(g.dataset.id); });
       svg.addEventListener("keydown", (e) => {
         const g = e.target.closest(".hm-room");
         if (g && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pick(g.dataset.id); }
       });
+      // A radio group: one tab stop, arrow keys move and choose.
+      const floors = modelEl.querySelector(".hm-floors-pick");
+      floors.addEventListener("click", (e) => { const b = e.target.closest("[role=radio]"); if (b) chooseFloor(b); });
+      floors.addEventListener("keydown", (e) => {
+        const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+        const list = [...floors.querySelectorAll("[role=radio]")];
+        const i = list.indexOf(document.activeElement);
+        if (!d || i < 0) return;
+        e.preventDefault();
+        chooseFloor(list[(i + d + list.length) % list.length]);
+        floors.querySelector('[aria-checked="true"]')?.focus();
+      });
     }
+    drawFloors();
     modelEl.querySelector(".hm-ramp").style.background = `linear-gradient(90deg, ${[12, 15, 17, 19, 22].map((t) => rgb(tempRgb(t))).join(", ")})`;
     modelEl.querySelector(".hm-guess").hidden = saved;
     const why = arrangeLock();
@@ -222,46 +281,37 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     arrange.disabled = Boolean(why);
     if (why) arrange.dataset.locked = "";
     else delete arrange.dataset.locked;
-    const arrangeTag = modelEl.querySelector(".lock-tag");
+    const arrangeTag = modelEl.querySelector("#hm-arrange-lock");
     arrangeTag.hidden = !why;
     arrangeTag.textContent = why;
     const svg = modelEl.querySelector(".hm-iso");
     const focused = svg.contains(document.activeElement) ? document.activeElement.closest(".hm-room")?.dataset.id : null;
-    svg.innerHTML = isoMarkup(layout, rooms, { selected, interactive: true });
+    svg.innerHTML = isoMarkup(layout, rooms, { selected, interactive: true, only, describe });
     if (focused) svg.querySelector(`.hm-room[data-id="${CSS.escape(focused)}"]`)?.focus();
     fitView(svg);
-    drawPick();
+  }
+
+  function markSelected() {
+    for (const g of modelEl.querySelectorAll(".hm-room")) g.setAttribute("aria-pressed", String(g.dataset.id === selected));
   }
 
   function pick(id) {
     selected = selected === id ? null : id;
-    for (const g of modelEl.querySelectorAll(".hm-room")) g.setAttribute("aria-pressed", String(g.dataset.id === selected));
-    drawPick();
+    // A room on a floor not drawn: show every floor, so the picked room is in view.
+    if (selected && only != null && layout.rooms[selected]?.floor !== only) { only = null; drawModel(); }
+    markSelected();
+    onRoom?.(selected);
   }
 
-  function drawPick() {
-    const el = modelEl.querySelector(".hm-pick");
-    if (!el) return;
-    // A redraw would drop focus from "Room controls"; the line catches up on the next tick.
-    if (el.contains(document.activeElement) && el.dataset.id === String(selected)) return;
-    el.dataset.id = String(selected);
-    const r = selected && rooms.get(selected);
-    if (!r) {
-      el.innerHTML = `<span class="hm-muted">Select a room for its details.</span>`;
-      return;
-    }
-    let what;
-    if (r.role === "unheated") what = "No radiator. Temperature recorded, not controlled.";
-    else if (r.role === "passive") what = "Manual valve, always open.";
-    else if (r.calling && r.target != null) what = `Heating to ${fmt(r.target)}°${r.temperature != null ? `, ${fmt(Math.max(0, r.target - r.temperature))}° to go` : ""}.`;
-    else if (r.target != null) what = `Holding ${fmt(r.target)}°.`;
-    else what = "";
-    const bits = [];
-    if (r.humidity != null) bits.push(`Humidity ${Math.round(r.humidity)}%`);
-    if (r.opening != null && !OBSERVED.has(r.role)) bits.push(`Valve open ${r.opening}%`);
-    if (r.next_setpoint != null && r.next_in_min != null && state) bits.push(`${fmt(r.next_setpoint)}° at ${clock((state.minute_of_day + r.next_in_min) % 1440)}`);
-    el.innerHTML = `<b>${esc(r.name)}</b><span class="hm-readout">${fmt(r.temperature)}°</span><span>${esc(what)}</span>${bits.map((b) => `<span class="hm-muted">${esc(b)}</span>`).join("")}<button type="button" class="link hm-open">Room controls</button>`;
-    el.querySelector(".hm-open").addEventListener("click", () => onRoom?.(r.id));
+  // Groups for the room table: each floor, top first, then rooms not on the plan.
+  function groups() {
+    if (!layout) return [];
+    const out = floorOrder().map(({ name, f }) => ({
+      name, ids: [...rooms.keys()].filter((id) => layout.rooms[id]?.floor === f),
+    }));
+    const loose = unplaced();
+    if (loose.length) out.push({ name: "Not on the plan", ids: loose });
+    return out.filter((g) => g.ids.length);
   }
 
   // ---------- editor ----------
@@ -287,7 +337,7 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     const sel = selected && layout.rooms[selected]?.floor === edFloor ? rooms.get(selected) : null;
     modelEl.innerHTML = `
       <div class="hm-head">
-        <h2 id="hm-model-h" tabindex="-1">Arrange rooms</h2>
+        <h2 class="section-h" id="hm-model-h" tabindex="-1">Arrange rooms</h2>
         <div class="hm-head-right"><button type="button" class="btn" data-act="reset">Start again</button><button type="button" class="btn btn-primary" data-act="done">Done</button></div>
       </div>
       <div class="hm-floors" role="group" aria-label="Floor">
@@ -315,7 +365,7 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
       editing = false;
       modelEl.innerHTML = "";
       drawModel();
-      drawStatus();
+      drawPreview(); onLayout?.();
       modelEl.querySelector("[data-act=arrange]")?.focus();
     });
     el.querySelector("[data-act=reset]").addEventListener("click", () => {
@@ -323,7 +373,7 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
       edFloor = 0;
       queueSave();
       drawEditor();
-      drawStatus();
+      drawPreview(); onLayout?.();
     });
     for (const b of el.querySelectorAll("[data-floor]")) b.addEventListener("click", () => { edFloor = Number(b.dataset.floor); drawEditor(); });
     el.querySelector("[data-act=add-floor]")?.addEventListener("click", () => {
@@ -331,7 +381,7 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
       edFloor = layout.floors.length - 1;
       queueSave();
       drawEditor();
-      drawStatus();
+      drawPreview(); onLayout?.();
     });
     el.querySelector("[data-act=remove-floor]")?.addEventListener("click", () => {
       layout.floors.splice(edFloor, 1);
@@ -339,11 +389,11 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
       edFloor = Math.max(0, edFloor - 1);
       queueSave();
       drawEditor();
-      drawStatus();
+      drawPreview(); onLayout?.();
     });
     el.querySelector("[data-act=rename]").addEventListener("change", (e) => {
       const v = e.target.value.trim();
-      if (v) { layout.floors[edFloor] = v; queueSave(); drawEditor(); drawStatus(); }
+      if (v) { layout.floors[edFloor] = v; queueSave(); drawEditor(); drawPreview(); onLayout?.(); }
     });
     for (const b of el.querySelectorAll("[data-add]")) b.addEventListener("click", () => {
       const id = b.dataset.add;
@@ -351,14 +401,14 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
       selected = id;
       queueSave();
       drawEditor();
-      drawStatus();
+      drawPreview(); onLayout?.();
       modelEl.querySelector(`.hm-r2[data-id="${CSS.escape(id)}"]`)?.focus();
     });
     el.querySelector("[data-act=unplace]")?.addEventListener("click", () => {
       delete layout.rooms[selected];
       queueSave();
       drawEditor();
-      drawStatus();
+      drawPreview(); onLayout?.();
     });
 
     const svg = el.querySelector(".hm-plan2d");
@@ -460,124 +510,73 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     return { x: 0, y: 0, w: 2, d: 2 };
   }
 
-  // ---------- status plate ----------
+  // ---------- live preview while arranging ----------
+  // While the editor is open the room table steps aside for the model as it will look.
   function drawPreview() {
-    const svg = statusEl.querySelector(".hm-preview");
-    if (!svg) return;
+    previewEl.hidden = !editing;
+    roomsEl.hidden = editing;
+    if (!editing) return;
+    if (!previewEl.querySelector(".hm-preview")) {
+      previewEl.innerHTML = `<h2 class="section-h">How it will look</h2>
+        <svg class="hm-iso hm-preview" role="img" aria-label="Preview of the house"></svg>
+        <p class="hm-note"></p>`;
+    }
+    previewEl.querySelector(".hm-note").textContent = `${plural(layout.floors.length, "floor", "floors")}, ${placed().length} of ${plural(rooms.size, "room", "rooms")} placed. The layout only draws the house and groups the rooms. It never changes how they are heated.`;
+    const svg = previewEl.querySelector(".hm-preview");
     svg.innerHTML = isoMarkup(layout, rooms, { selected, interactive: false });
     fitView(svg);
   }
 
-  // The plate's figures are redrawn on every state; its help line is made once, so a
-  // keyboard user's focus on the link survives the next tick.
-  function statusBody() {
-    let live = statusEl.querySelector(".hm-live");
-    if (!live) {
-      statusEl.innerHTML = `<div class="hm-live"></div>
-        <p class="hm-hint hm-help">The big number is rooms that want heat, out of the rooms Radiate controls. <a class="help-link" href="#guide/now">What the house now shows</a></p>`;
-      live = statusEl.querySelector(".hm-live");
-    }
-    statusEl.querySelector(".hm-help").hidden = editing;
-    return live;
-  }
-
-  function drawStatus() {
+  // ---------- readings ----------
+  // One line of facts, label and value, in place of a row of tiles.
+  let readingsKey = "";
+  function drawReadings() {
     if (!state) return;
-    const body = statusBody();
-    if (editing) {
-      body.innerHTML = `<h2>Live model</h2>
-        <svg class="hm-iso hm-preview" role="img" aria-label="Preview of the house model"></svg>
-        <p class="hm-hint">${plural(layout.floors.length, "floor", "floors")}, ${placed().length} of ${plural(rooms.size, "room", "rooms")} placed. Radiate uses the layout only to draw your house. It never changes how rooms are heated.</p>`;
-      drawPreview();
-      return;
-    }
     const all = [...rooms.values()];
     const controlled = all.filter((r) => !OBSERVED.has(r.role));
     const calling = controlled.filter((r) => r.calling);
-    const read = all.filter((r) => r.temperature != null);
     const tel = state.telemetry ?? {};
     const linked = tel.simulated || tel.boiler_linked !== false;
     const b = state.boiler;
-
-    // The headline: how many rooms want heat, and what the boiler is doing about it.
-    let line;
-    if (state.mode === "off") line = "Heating is off.";
-    else if (state.mode === "frost") line = "Frost protection only.";
-    else if (!calling.length) line = "No room needs heat right now.";
-    else if (!linked) line = `${calling.length === 1 ? "room wants" : "rooms want"} heat. The boiler switch isn't linked yet, so the boiler follows its own timer.`;
-    else if (b.state === "firing") line = `${calling.length === 1 ? "room is" : "rooms are"} heating. Burner on.`;
-    else line = `${calling.length === 1 ? "room wants" : "rooms want"} heat.`;
-
-    // Every room on one scale, with the target most heated rooms are aiming for.
-    const targets = controlled.map((r) => r.target).filter((t) => t != null);
-    const common = targets.length ? mode(targets) : null;
-    const X = (t) => ((Math.max(12, Math.min(22, t)) - 12) / 10) * 100;
-    const sorted = [...read].sort((a, c) => a.temperature - c.temperature);
-    const ticks = read.map((r) => `<rect x="${X(r.temperature)}%" y="14" width="4" height="26" fill="${rgb(tempRgb(r.temperature))}" transform="translate(-2,0)"><title>${esc(r.name)} ${fmt(r.temperature)}°</title></rect>`).join("");
-    const axis = [12, 14, 16, 18, 20, 22].map((t) => `<text class="hm-axis" x="${X(t)}%" y="58" text-anchor="middle">${t}</text>`).join("");
-    const target = common != null ? `<rect x="${X(common)}%" y="6" width="2" height="40" class="hm-target" transform="translate(-1,0)"/>` : "";
-    const spreadLabel = sorted.length
-      ? `Coldest ${sorted[0].name} ${fmt(sorted[0].temperature)}°, warmest ${sorted.at(-1).name} ${fmt(sorted.at(-1).temperature)}°.${common != null ? ` Most heated rooms aim for ${fmt(common)}°.` : ""}`
-      : "No readings yet.";
-
-    // Four cells.
-    const boilerCell = !linked
-      ? cell("Boiler", "Not linked", "Radiate can't switch it until the relay is set up.", false, "text")
-      : cell("Boiler", { idle: "Idle", lead: "Opening valves", firing: "Firing", rest: "Resting" }[b.state] ?? "–", b.state === "firing" ? `${Math.round(b.burn_elapsed_s / 60)} min so far` : `${plural(b.starts_last_hour, "start", "starts")} in the last hour`, false, "text");
-    const control = tel.dry_run
-      ? cell("Dry run", String(tel.intended_writes ?? 0), "valve and boiler changes held back", false)
-      : cell("Mode", { auto: "Auto", frost: "Frost", off: "Off" }[state.mode] ?? state.mode, state.settings?.demand_mode ? `${cap(state.settings.demand_mode)} demand` : "", false, "text");
-    const devices = cell("Devices", String(deviceCount), deviceCount ? (deviceCount === 1 ? "needs attention" : "need attention") : "all reporting well", deviceCount > 0);
-    const models = controlled.map((r) => r.model?.confidence).filter((c) => c != null);
-    const conf = models.length ? Math.round((models.reduce((a, c) => a + c, 0) / models.length) * 100) : null;
-    const learning = cell("Learning", conf == null ? "–" : `${conf}%`, conf == null ? "waiting for the first burns" : conf < 50 ? "how sure Radiate is of each room, on average" : "average confidence in each room", false);
-
-    body.innerHTML = `
-      <h2>The house now</h2>
-      <div class="hm-hero">
-        <div class="hm-big">${calling.length}<small>/${controlled.length}</small></div>
-        <p>${esc(line)}</p>
-      </div>
-      <div class="hm-spread">
-        <span class="hm-muted">Where every room sits</span>
-        <svg role="img" aria-label="${esc(spreadLabel)}"><line x1="0" y1="27" x2="100%" y2="27" class="hm-axisline"/>${target}${ticks}${axis}</svg>
-        <span class="hm-muted">${esc(spreadLabel)}</span>
-      </div>
-      <div class="hm-cells">${boilerCell}${control}${devices}${learning}</div>
-      ${comingUp()}`;
+    const items = [];
+    if (!linked) items.push(["Boiler", "Not linked", ""]);
+    else if (b.state === "firing") items.push(["Boiler", `On, ${Math.round(b.burn_elapsed_s / 60)} min`, "heat"]);
+    else items.push(["Boiler", { idle: "Off", lead: "Opening valves", rest: "Resting" }[b.state] ?? "–", ""]);
+    if (state.store) items.push(["Hot water", state.store.relay ? (state.store.boost ? "On, boosted" : "On") : "Off", ""]);
+    if (state.mode === "off") items.push(["Heating", "Off", ""]);
+    else if (state.mode === "frost") items.push(["Heating", "Frost only", ""]);
+    else items.push(["Rooms heating", `${calling.length} of ${controlled.length}`, ""]);
+    if (state.quiet?.active) items.push(["Quiet hours", `until ${state.quiet.until}`, ""]);
+    if (state.outdoor != null) items.push(["Outside", `${fmt(state.outdoor)}°`, ""]);
+    const next = nextChange();
+    if (next) items.push(["Next change", next, ""]);
+    if (deviceCount) items.push(["Devices", `${deviceCount} ${deviceCount === 1 ? "needs" : "need"} attention`, "attn", "#devices"]);
+    // Rewritten only when the words change, so focus on the Devices link survives a tick.
+    const html = items.map(([k, v, cls, href]) => `<div${cls ? ` class="${cls}"` : ""}><dt>${esc(k)}</dt><dd>${href ? `<a href="${href}">${esc(v)}</a>` : esc(v)}</dd></div>`).join("");
+    if (readingsKey === html) return;
+    readingsKey = html;
+    readingsEl.innerHTML = html;
   }
 
-  function cell(label, value, note, attention, kind = "readout") {
-    const v = kind === "readout" ? `<span class="hm-readout">${esc(value)}</span>` : `<b>${esc(value)}</b>`;
-    return `<div class="hm-cell${attention ? " need" : ""}"><span class="hm-muted">${esc(label)}</span>${v}<p>${esc(note)}</p></div>`;
-  }
-
-  // The next three moments a room's setpoint changes, rooms at the same time together.
-  function comingUp() {
-    const at = new Map();
+  // The next time a room's temperature changes: "08:30, Bedroom 1 and Bedroom 2 to 16°".
+  function nextChange() {
+    let soonest = null;
     for (const r of rooms.values()) {
       if (OBSERVED.has(r.role) || r.next_setpoint == null || r.next_in_min == null) continue;
-      const key = r.next_in_min;
-      if (!at.has(key)) at.set(key, []);
-      at.get(key).push(r);
+      if (soonest == null || r.next_in_min < soonest) soonest = r.next_in_min;
     }
-    const next = [...at.entries()].sort((a, c) => a[0] - c[0]).slice(0, 3);
-    if (!next.length) return "";
-    const rows = next.map(([inMin, list]) => {
-      const byTemp = new Map();
-      for (const r of list) {
-        if (!byTemp.has(r.next_setpoint)) byTemp.set(r.next_setpoint, []);
-        byTemp.get(r.next_setpoint).push(r.name);
-      }
-      const words = [...byTemp.entries()].map(([t, names]) => {
-        const who = names.length < 2 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-        const was = list.find((r) => r.next_setpoint === t)?.target;
-        const verb = was != null && t < was ? "cools to" : names.length > 1 ? "warm to" : "warms to";
-        return `${who} ${names.length > 1 && verb === "cools to" ? "cool to" : verb} ${fmt(t)}°`;
-      }).join(". ");
-      return `<div><time>${clock((state.minute_of_day + inMin) % 1440)}</time><span>${esc(words)}.</span></div>`;
-    }).join("");
-    return `<div class="hm-next"><span class="hm-muted">Coming up</span>${rows}</div>`;
+    if (soonest == null) return "";
+    const byTemp = new Map();
+    for (const r of rooms.values()) {
+      if (OBSERVED.has(r.role) || r.next_in_min !== soonest) continue;
+      if (!byTemp.has(r.next_setpoint)) byTemp.set(r.next_setpoint, []);
+      byTemp.get(r.next_setpoint).push(r.name);
+    }
+    const words = [...byTemp.entries()].map(([t, names]) => {
+      const who = names.length < 2 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+      return `${who} to ${deg(t)}`;
+    }).join(", ");
+    return `${clock((state.minute_of_day + soonest) % 1440)}, ${words}`;
   }
 
   // ---------- today's plan ----------
@@ -601,8 +600,8 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     // The heading, its links and the help line are made once, so focus on them survives
     // a redraw; only the strips change.
     if (!planEl.querySelector(".hm-tl")) {
-      planEl.innerHTML = `<div class="hm-head"><h2>Today's plan</h2><button type="button" class="link" data-act="week">Week schedules</button></div>
-        <p class="hm-hint">Each strip is a room's day, coloured by the temperature it aims for. The upright line is now. <a class="help-link" href="#guide/schedules">Change the weekly times</a></p>
+      planEl.innerHTML = `<div class="hm-head"><h2 class="section-h">Today</h2><button type="button" class="link" data-act="week">Week schedules</button></div>
+        <p class="hm-hint">Each room's day, coloured by the temperature it aims for. The upright line is now. <a class="help-link" href="#guide/schedules">Changing the weekly times</a></p>
         <div class="hm-tl"></div>`;
       planEl.querySelector("[data-act=week]").addEventListener("click", () => onWeek?.());
     }
@@ -621,22 +620,22 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onRoom, onWe
     if (firstTime) loadLayout();
     if (!editing) drawModel();
     else drawPreview();
-    drawStatus();
+    drawReadings();
     drawPlan();
   }
 
   return {
     update,
     week(view) { weekView = view; drawPlan(); },
-    devices(n) { deviceCount = n; drawStatus(); },
-    redraw() { if (!editing && modelEl.querySelector(".hm-iso")) drawModel(); drawStatus(); drawPlan(); },
+    devices(n) { deviceCount = n; drawReadings(); },
+    redraw() { if (!editing && modelEl.querySelector(".hm-iso")) drawModel(); else if (editing) drawPreview(); drawPlan(); },
+    // Select a room from the table, without calling onRoom back.
+    select(id) {
+      selected = id;
+      if (selected && only != null && layout?.rooms[selected] && layout.rooms[selected].floor !== only) { only = null; drawModel(); }
+      markSelected();
+    },
+    groups,
     get editing() { return editing; },
   };
 }
-
-function mode(values) {
-  const counts = new Map();
-  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
-}
-const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
