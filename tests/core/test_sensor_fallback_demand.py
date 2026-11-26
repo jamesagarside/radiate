@@ -91,7 +91,9 @@ def test_incident_stale_sensor_room_does_not_call_or_fire_the_boiler():
     assert not any(a.heating_relay for a in out)
     reason = room_reason(out[-1], "dining")
     assert reason.code == "demand.sensor_stale"
-    assert reason.message == "Dining room: no reading from its room sensor, heating only below 12 °C"
+    assert (
+        reason.message == "Dining room: no reading from its room sensor, heating only below 12 °C"
+    )
     assert reason.values == {"floor_c": DAMP_FLOOR_C}
 
 
@@ -142,7 +144,9 @@ def test_an_implausible_reading_gets_its_own_wording():
     _, out = run(lambda m: warm_house(dining), minutes=3)
     reason = room_reason(out[-1], "dining")
     assert reason.code == "demand.sensor_stale"
-    assert reason.message == "Dining room: room sensor reading not trusted, heating only below 12 °C"
+    assert (
+        reason.message == "Dining room: room sensor reading not trusted, heating only below 12 °C"
+    )
 
 
 def test_internal_sensor_rooms_are_not_affected():
