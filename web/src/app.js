@@ -19,7 +19,7 @@ import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/callout/callout.js";
 import "@awesome.me/webawesome/dist/components/badge/badge.js";
 import "@awesome.me/webawesome/dist/components/tag/tag.js";
-import "@awesome.me/webawesome/dist/components/number-input/number-input.js";
+import "@awesome.me/webawesome/dist/components/toast/toast.js";
 import "@awesome.me/webawesome/dist/components/input/input.js";
 import "@awesome.me/webawesome/dist/components/switch/switch.js";
 import "@awesome.me/webawesome/dist/components/details/details.js";
@@ -303,7 +303,8 @@ const fireOn = (r) => Boolean(r.fire_switch ?? r.fire);
 function toggleFire(r) {
   const p = firePending(r.id);
   const lit = !p.shown(fireOn(rooms.get(r.id) ?? r));
-  change(p, lit, `rooms/${r.id}/fire`, { lit }, renderRoomDetail);
+  change(p, lit, `rooms/${r.id}/fire`, { lit }, renderRoomDetail)
+    .then((took) => took && toast(lit ? `${r.name}: fire lit. Its radiator is closed.` : `${r.name}: fire out.`));
 }
 
 // Setpoint control. Changes show at once and are sent together once the reader
@@ -327,7 +328,7 @@ function heldSetpoint(r) {
   return r.setpoint ?? r.target ?? null;
 }
 
-// A value from the number input: its steppers, its arrow keys or typing.
+// A new setpoint from the stepper.
 function setTo(id, raw) {
   const r = rooms.get(id);
   if (!r || !Number.isFinite(raw)) return;
@@ -365,6 +366,8 @@ async function sendSetpoint(id) {
       renderHouse();
     }
   }, PENDING_MAX_MS);
+  const r = rooms.get(id);
+  if (r && c.pending === value) toast(`${r.name} held at ${fmtT(value)}.`);
   refresh();
 }
 
@@ -384,6 +387,8 @@ async function resumeSchedule(id) {
     renderHouse();
     return;
   }
+  const r = rooms.get(id);
+  if (r) toast(`${r.name} follows its schedule again.`);
   refresh();
 }
 
@@ -448,29 +453,52 @@ function stuckText(r) {
     : "Valve may be stuck: radiator not warming.";
 }
 
-// ---------- rooms: the list and the selected room ----------
+// ---------- rooms: the list, the selected room and the hero ----------
 
-// One room is selected at a time, from the house model or the list. Its details sit in
-// the aside on a wide screen and in a drawer otherwise.
+// One room is selected at a time, from the house model, the list or "Needs you". On a
+// wide screen its details take the place of "The house now" beside the model; on a
+// narrower one they open in a drawer (a bottom sheet on a phone).
 let selected = null;
 const wide = matchMedia("(min-width: 75rem)");
 const narrow = matchMedia("(max-width: 40rem)");
 const drawer = $("room-drawer");
 let drawerFor = null;
+let panelFor = null;
+
+// Toasts confirm a change the server took. Errors stay inline under the control, where
+// the reader is looking, so a toast is never the only place something is said.
+const toaster = $("toast");
+const TOAST = { success: { icon: "circle-check" }, neutral: { icon: "circle-info" }, warning: { icon: "triangle-exclamation" } };
+function toast(message, variant = "success") {
+  try { toaster.create(message, { variant, duration: 5000, icon: TOAST[variant]?.icon }); } catch { /* no toast support */ }
+}
 
 function select(id, opener = null) {
-  selected = selected === id && wide.matches ? null : id;
+  const again = selected === id;
+  selected = again ? null : id;
   houseView.select(selected);
   renderHouse();
-  if (!selected) return;
+  if (!selected) {
+    if (wide.matches) panelFor?.focus?.();
+    panelFor = null;
+    return;
+  }
   if (wide.matches) {
-    // Bring the details into view and put focus on their heading.
-    requestAnimationFrame(() => $("room-aside").querySelector("h2")?.focus({ preventScroll: true }));
+    panelFor = opener;
+    // The details take the place of the overview; focus moves to the room's name.
+    requestAnimationFrame(() => $("room-panel").querySelector("h2")?.focus({ preventScroll: true }));
+    const panel = $("room-panel");
+    const top = panel.getBoundingClientRect().top;
+    if (top < 0 || top > innerHeight - 120) panel.scrollIntoView({ block: "nearest", behavior: reducedMotion.matches ? "auto" : "smooth" });
     return;
   }
   drawerFor = opener;
   drawer.placement = narrow.matches ? "bottom" : "end";
   drawer.open = true;
+}
+function closeRoom() {
+  if (!selected) return;
+  select(selected);
 }
 drawer.addEventListener("wa-after-hide", (e) => {
   if (e.target !== drawer) return;
@@ -484,34 +512,61 @@ drawer.addEventListener("wa-after-hide", (e) => {
 });
 wide.addEventListener("change", () => {
   if (wide.matches) drawer.open = false;
+  else if (selected) { drawer.placement = narrow.matches ? "bottom" : "end"; drawer.open = true; }
   renderHouse();
 });
 narrow.addEventListener("change", () => renderHouse());
+document.addEventListener("keydown", (e) => {
+  // Escape closes the room's details beside the model (the drawer handles its own).
+  if (e.key === "Escape" && selected && wide.matches && !e.defaultPrevented && $("room-panel").contains(document.activeElement)) closeRoom();
+});
+
+// Rooms that need the reader: an alert about the room (a valve offline or stuck, a
+// flat battery, no reading). Alerts arrive room name first ("Lounge: TRV battery low").
+function roomNeeds(s) {
+  const out = new Map();
+  for (const a of s.alert_details ?? []) {
+    if (!a.room_id) continue;
+    const r = s.rooms.find((x) => x.id === a.room_id);
+    if (!r) continue;
+    const text = a.message.startsWith(`${r.name}: `) ? a.message.slice(r.name.length + 2) : a.message;
+    if (!out.has(r.id)) out.set(r.id, { room: r, texts: [] });
+    out.get(r.id).texts.push(text);
+  }
+  for (const r of s.rooms) {
+    if (r.temperature == null && !out.has(r.id)) out.set(r.id, { room: r, texts: ["no reading"] });
+  }
+  return [...out.values()];
+}
+
+function roomRow(r, needs) {
+  const [label, kind] = badgeFor(r);
+  const canSet = controllable(r);
+  const sp = canSet ? heldSetpoint(r) : null;
+  const observed = OBSERVED_ONLY.has(r.role);
+  const on = r.id === selected;
+  const held = canSet && (control(r.id).pending != null || (r.override?.setpoint != null && !control(r.id).clearing));
+  const need = needs.get(r.id);
+  return { r, label, kind, sp, observed, on, held, need };
+}
 
 function roomsList(list) {
-  const rowFor = (r) => {
-    const [label, kind] = badgeFor(r);
-    const canSet = controllable(r);
-    const sp = canSet ? heldSetpoint(r) : null;
-    const observed = OBSERVED_ONLY.has(r.role);
-    const on = r.id === selected;
-    const held = canSet && (control(r.id).pending != null || (r.override?.setpoint != null && !control(r.id).clearing));
-    return { r, label, kind, sp, observed, on, held };
-  };
+  const needs = new Map(roomNeeds(last).map((n) => [n.room.id, n.texts]));
   const pick = (e, id) => select(id, e.currentTarget);
+  const flag = (x) => (x.need ? html`<wa-icon class="room-flag" name="triangle-exclamation" label="Needs attention: ${x.need.join(", ")}"></wa-icon>` : nothing);
   if (narrow.matches) {
     return html`<ul class="room-list" aria-labelledby="rooms-h">${list.map((r) => {
-      const x = rowFor(r);
+      const x = roomRow(r, needs);
       return html`<li>
         <button type="button" class="room-item" aria-pressed=${String(x.on)} @click=${(e) => pick(e, r.id)}>
-          <span class="wa-split wa-gap-xs">
-            <span class="wa-cluster wa-gap-xs"><span class="swatch" style="--swatch:${tempColour(r.temperature)}" aria-hidden="true"></span><strong>${r.name}</strong></span>
+          <span class="room-item-top">
+            <span class="room-name"><span class="swatch" style="--swatch:${tempColour(r.temperature)}" aria-hidden="true"></span><strong>${r.name}</strong>${flag(x)}</span>
             ${badge(x.label, x.kind)}
           </span>
-          <span class="wa-cluster wa-gap-m wa-caption-m wa-color-text-quiet">
-            <span>Now <strong class="readout">${fmtT(r.temperature)}</strong></span>
-            ${x.sp != null ? html`<span>${x.held ? "Held at" : "Set to"} <strong class="readout">${fmtT(x.sp)}</strong></span>` : nothing}
-            ${!x.observed && r.opening != null ? html`<span>Valve <strong class="readout">${r.opening}%</strong></span>` : nothing}
+          <span class="room-item-facts">
+            <span><span class="fact-label">Now</span> <strong class="readout">${fmtT(r.temperature)}</strong></span>
+            ${x.sp != null ? html`<span><span class="fact-label">${x.held ? "Held at" : "Set to"}</span> <strong class="readout">${fmtT(x.sp)}</strong></span>` : nothing}
+            ${!x.observed && r.opening != null ? html`<span><span class="fact-label">Valve</span> <strong class="readout">${r.opening}%</strong></span>` : nothing}
           </span>
         </button>
       </li>`;
@@ -521,14 +576,14 @@ function roomsList(list) {
     <table class="rooms-table" aria-labelledby="rooms-h">
       <thead><tr><th scope="col">Room</th><th scope="col" class="num">Now</th><th scope="col" class="num">Setpoint</th><th scope="col">Opening limit</th><th scope="col">State</th></tr></thead>
       <tbody>${list.map((r) => {
-        const x = rowFor(r);
+        const x = roomRow(r, needs);
         return html`<tr class=${x.on ? "selected" : ""} data-idle=${String(!(r.calling || r.topup))} @click=${(e) => { if (!e.target.closest("button")) select(r.id, e.currentTarget.querySelector("button")); }}>
           <th scope="row"><button type="button" class="room-btn" aria-pressed=${String(x.on)} @click=${(e) => pick(e, r.id)}>
-            <span class="swatch" style="--swatch:${tempColour(r.temperature)}" aria-hidden="true"></span>${r.name}</button></th>
+            <span class="swatch" style="--swatch:${tempColour(r.temperature)}" aria-hidden="true"></span><span class="room-btn-name">${r.name}</span>${flag(x)}</button></th>
           <td class="num readout">${fmtT(r.temperature)}</td>
-          <td class="num readout">${x.sp == null ? html`<span class="wa-color-text-quiet">–</span>` : html`${fmtT(x.sp)}${x.held ? html` <wa-icon name="hand" label="Held"></wa-icon>` : nothing}`}</td>
+          <td class="num readout">${x.sp == null ? html`<span class="wa-color-text-quiet">–</span>` : html`${x.held ? html`<wa-icon class="held-icon" name="hand" label="Held"></wa-icon> ` : nothing}${fmtT(x.sp)}`}</td>
           <td>${x.observed || r.opening == null ? html`<span class="wa-color-text-quiet">–</span>` : html`
-            <span class="valve wa-cluster wa-gap-xs"><wa-progress-bar value=${r.opening} label="${r.name} opening limit"></wa-progress-bar><span class="wa-caption-s readout">${r.opening}%</span></span>`}</td>
+            <span class="valve"><wa-progress-bar value=${r.opening} label="${r.name} opening limit"></wa-progress-bar><span class="wa-caption-s readout">${r.opening}%</span></span>`}</td>
           <td>${badge(x.label, x.kind)}</td>
         </tr>`;
       })}</tbody>
@@ -536,14 +591,39 @@ function roomsList(list) {
   </wa-scroller>`;
 }
 
+// The setpoint: minus and plus, each labelled with the room, and the value between
+// them. The value moves a few pixels the way it changed, so a press feels like it
+// turned a dial; never for a keyboard press or under reduced motion.
+function nudge(e, r, step) {
+  const before = heldSetpoint(r);
+  setTo(r.id, (before ?? 20) + step);
+  const fromPointer = e.detail > 0;
+  if (!fromPointer || reducedMotion.matches) return;
+  const value = e.currentTarget.parentElement.querySelector(".step-value");
+  value?.animate(
+    [{ transform: `translateY(${step > 0 ? 6 : -6}px)`, opacity: 0.4 }, { transform: "translateY(0)", opacity: 1 }],
+    { duration: 180, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+  );
+}
+
+function stepper(r, shown, locked) {
+  return html`<div class="stepper" role="group" aria-label="${r.name} setpoint">
+    <wa-button appearance="outlined" class="step" ?disabled=${locked || (shown != null && shown <= SETPOINT_MIN)} @click=${(e) => nudge(e, r, -0.5)}>
+      <wa-icon name="minus" label="Lower ${r.name} setpoint by 0.5°"></wa-icon></wa-button>
+    <output class="step-value readout" aria-live="polite" aria-atomic="true">${fmtT(shown)}</output>
+    <wa-button appearance="outlined" class="step" ?disabled=${locked || (shown != null && shown >= SETPOINT_MAX)} @click=${(e) => nudge(e, r, 0.5)}>
+      <wa-icon name="plus" label="Raise ${r.name} setpoint by 0.5°"></wa-icon></wa-button>
+  </div>`;
+}
+
 // The selected room: what it is doing, its setpoint, the fire switch and what Radiate
-// has learned. Drawn in the aside on a wide screen, in the drawer otherwise.
+// has learned. Drawn beside the model on a wide screen, in the drawer otherwise.
 function roomDetail(r, { inDrawer }) {
   const [label, kind] = badgeFor(r);
   const canSet = controllable(r);
   const c = control(r.id);
-  const locked = Boolean(lockText("household"));
   const why = lockText("household");
+  const locked = Boolean(why);
   const shown = canSet ? heldSetpoint(r) : null;
   const held = canSet && c.pending == null && !c.clearing && r.override?.setpoint != null;
   const changing = canSet && c.pending != null;
@@ -556,34 +636,50 @@ function roomDetail(r, { inDrawer }) {
   const learning = r.model ? stillLearning(r.model) : false;
   const stuck = stuckText(r);
   const reason = reasonFor(r);
+  const needs = roomNeeds(last).find((n) => n.room.id === r.id)?.texts.filter((t) => t !== "no reading") ?? [];
   const facts = [];
   if (r.humidity != null) facts.push(["Humidity", `${Math.round(r.humidity)}%`]);
   if (!canSet && r.setpoint != null && !observed) facts.push(["Setpoint", fmtT(r.setpoint)]);
+  const learn = learningLine(r);
+  if (r.model) {
+    const words = r.learning ? LEARNING[r.learning] || r.learning : "learning now";
+    facts.push(["Learning", (words[0].toUpperCase() + words.slice(1)).replace(/^Learning paused: /, "Paused: ")]);
+  }
   const hint = c.error ? "" : held ? holdText(r.override) : changing ? "Sending…" : "From the schedule";
   return html`
-    <div class="room-detail wa-stack wa-gap-l">
-      <div class="wa-stack wa-gap-xs">
-        ${inDrawer ? nothing : html`<h2 class="wa-heading-l" tabindex="-1">${r.name}</h2>`}
-        <div class="wa-cluster wa-gap-xs">
-          ${badge(label, kind)}
-          ${held ? html`<wa-tag size="s" class="radiate-cool">Held</wa-tag>` : nothing}
+    <div class="room-detail" data-room=${r.id}>
+      <div class="room-detail-head">
+        <div class="wa-stack wa-gap-2xs">
+          ${inDrawer ? nothing : html`<h2 class="wa-heading-l" id="room-panel-h" tabindex="-1">${r.name}</h2>`}
+          <div class="wa-cluster wa-gap-xs">
+            ${badge(label, kind)}
+            ${held ? html`<wa-tag size="s" class="radiate-cool">Held</wa-tag>` : nothing}
+          </div>
         </div>
+        ${inDrawer ? nothing : html`<wa-button appearance="plain" size="s" class="panel-close" @click=${closeRoom}><wa-icon name="xmark" label="Close ${r.name}"></wa-icon></wa-button>`}
       </div>
 
-      <div class="readouts wa-cluster wa-gap-xl">
-        <div class="wa-stack wa-gap-3xs"><span class="wa-caption-m wa-color-text-quiet">Now</span><span class="readout readout-xl">${fmtT(r.temperature)}</span></div>
-        ${r.target != null && !observed ? html`<div class="wa-stack wa-gap-3xs"><span class="wa-caption-m wa-color-text-quiet">Target</span><span class="readout readout-l">${fmtT(r.target)}</span></div>` : nothing}
-        ${!observed && r.opening != null ? html`<div class="wa-stack wa-gap-3xs"><span class="wa-caption-m wa-color-text-quiet">Opening limit</span><span class="readout readout-l">${r.opening}%</span></div>` : nothing}
+      ${reason ? html`<p class="reason">${reason}</p>` : nothing}
+
+      <div class="readouts">
+        <div class="readout-block"><span class="readout-label">Now</span><span class="readout readout-xl">${fmtT(r.temperature)}</span></div>
+        ${r.target != null && !observed ? html`<div class="readout-block"><span class="readout-label">Target</span><span class="readout readout-l">${fmtT(r.target)}</span></div>` : nothing}
+        ${!observed && r.opening != null ? html`<div class="readout-block"><span class="readout-label">Opening limit</span><span class="readout readout-l">${r.opening}%</span></div>` : nothing}
       </div>
       ${!observed && r.opening != null ? html`<wa-progress-bar class="opening" data-idle=${String(idle)} value=${r.opening} label="${r.name} opening limit, ${r.opening}%"></wa-progress-bar>` : nothing}
 
+      ${needs.length ? html`<wa-callout variant="warning" size="s"><wa-icon slot="icon" name="triangle-exclamation"></wa-icon>${needs.map((t) => t[0].toUpperCase() + t.slice(1)).join(". ")}.</wa-callout>` : nothing}
+      ${stuck ? html`<wa-callout variant="warning" size="s"><wa-icon slot="icon" name="triangle-exclamation"></wa-icon>${stuck}</wa-callout>` : nothing}
+
       ${canSet ? html`
-        <div class="setpoint wa-stack wa-gap-xs" data-held=${String(held || changing)}>
-          <wa-number-input label="Setpoint, °C" min=${SETPOINT_MIN} max=${SETPOINT_MAX} step="0.5" inputmode="decimal"
-            aria-label="${r.name} setpoint"
-            .value=${shown == null ? "" : String(shown)} ?disabled=${locked} hint=${hint}
-            @change=${(e) => setTo(r.id, Number(e.target.value))}></wa-number-input>
-          ${c.error ? html`<p class="error-line" role="alert">${c.error}</p>` : nothing}
+        <div class="setpoint" data-held=${String(held || changing)}>
+          <div class="setpoint-row">
+            <div class="wa-stack wa-gap-3xs">
+              <span class="setpoint-label">Setpoint</span>
+              <span class="setpoint-hint" aria-live="polite">${c.error ? html`<span class="error-line" role="alert">${c.error}</span>` : hint}</span>
+            </div>
+            ${stepper(r, shown, locked)}
+          </div>
           <div class="wa-cluster wa-gap-xs">
             ${held && !locked ? html`<wa-button size="s" appearance="outlined" @click=${() => resumeSchedule(r.id)}><wa-icon slot="start" name="rotate-left"></wa-icon>Resume schedule</wa-button>` : nothing}
             ${why ? html`<wa-tag size="s" class="lock-tag">${why}</wa-tag>` : nothing}
@@ -598,10 +694,8 @@ function roomDetail(r, { inDrawer }) {
           <p class="action-error fire-error" role="alert" ?hidden=${!fire.error}>${fire.error}</p>
         </div>` : nothing}
 
-      ${stuck ? html`<wa-callout variant="warning" size="s"><wa-icon slot="icon" name="triangle-exclamation"></wa-icon>${stuck}</wa-callout>` : nothing}
-      ${reason ? html`<p class="reason">${reason}</p>` : nothing}
-      ${facts.length ? html`<dl class="facts">${facts.map(([k, v]) => html`<dt>${k}</dt><dd class="readout">${v}</dd>`)}</dl>` : nothing}
-      ${learningLine(r) ? html`<p class="wa-caption-m wa-color-text-quiet">${learningLine(r)}</p>` : nothing}
+      ${facts.length ? html`<dl class="facts">${facts.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>` : nothing}
+      ${!r.model && learn ? html`<p class="wa-caption-m wa-color-text-quiet">${learn}</p>` : nothing}
 
       ${r.model ? html`
         <wa-details class="learned">
@@ -625,20 +719,98 @@ function renderRooms() {
 
 function renderRoomDetail() {
   const r = selected ? rooms.get(selected) : null;
-  const aside = $("room-aside");
-  if (wide.matches) {
-    draw(r ? roomDetail(r, { inDrawer: false }) : html`
-      <div class="aside-empty wa-stack wa-gap-s">
-        <wa-icon name="hand-pointer" class="empty-icon"></wa-icon>
-        <p class="wa-caption-m wa-color-text-quiet">Select a room in the house or the list to see what it is doing, change its temperature and read what Radiate has learned about it.</p>
-      </div>`, aside);
-    draw(nothing, drawer);
-    return;
+  const panel = $("room-panel");
+  const overview = $("hm-status");
+  const inPanel = Boolean(r && wide.matches);
+  if (panel.hidden === inPanel) {
+    // Swap the overview and the room's details in place: the new one fades and rises
+    // a few pixels, so the eye follows the selection from the model to its details.
+    panel.hidden = !inPanel;
+    overview.hidden = inPanel;
+    const shown = inPanel ? panel : overview;
+    if (!reducedMotion.matches) {
+      shown.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)" });
+    }
   }
-  draw(nothing, aside);
+  draw(inPanel ? roomDetail(r, { inDrawer: false }) : nothing, panel);
+  if (wide.matches) { draw(nothing, drawer); return; }
   drawer.label = r?.name ?? "Room";
   draw(r ? roomDetail(r, { inDrawer: true }) : nothing, drawer);
 }
+
+// The hero answers, in order: is the house all right, what is the boiler doing and
+// why, and which room needs the reader.
+const HERO = {
+  ok: { icon: "circle-check", tone: "success" },
+  heat: { icon: "fire-flame-curved", tone: "brand" },
+  attention: { icon: "triangle-exclamation", tone: "warning" },
+  frost: { icon: "snowflake", tone: "cool" },
+  off: { icon: "power-off", tone: "neutral" },
+  quiet: { icon: "moon", tone: "cool" },
+  stale: { icon: "plug-circle-xmark", tone: "warning" },
+  wait: { icon: "hourglass-half", tone: "neutral" },
+};
+
+function heroState(s) {
+  const active = s.rooms.filter((r) => !OBSERVED_ONLY.has(r.role));
+  const calling = active.filter((r) => r.calling).length;
+  const tel = s.telemetry ?? {};
+  if (relayLost(s)) return ["attention", "The boiler relay can't be reached"];
+  if ((s.alert_details ?? []).some((a) => a.code?.startsWith("safe_mode"))) return ["attention", "Safe mode: the boiler is stopping"];
+  if (s.mode === "off") return ["off", "Heating is off"];
+  if (s.mode === "frost") return ["frost", "Frost protection only"];
+  if (!tel.simulated && tel.boiler_linked === false) return calling ? ["wait", `${plural(calling, "room wants", "rooms want")} heat`] : ["ok", "Rooms are comfortable"];
+  if (s.boiler.state === "firing") return ["heat", calling ? `Heating ${plural(calling, "room", "rooms")}` : "Burner on"];
+  if (s.boiler.state === "lead") return ["heat", "Opening valves"];
+  if (s.quiet?.active) return ["quiet", `Quiet hours until ${s.quiet.until}`];
+  if (calling) return ["wait", `${plural(calling, "room wants", "rooms want")} heat`];
+  if (s.boiler.state === "rest") return ["ok", "Burner resting"];
+  return ["ok", "Rooms are comfortable"];
+}
+
+function nextChange(s) {
+  let best = null;
+  for (const r of s.rooms) {
+    if (OBSERVED_ONLY.has(r.role) || r.next_in_min == null || r.next_setpoint == null) continue;
+    if (!best || r.next_in_min < best.next_in_min) best = r;
+  }
+  return best ? clock((s.minute_of_day + best.next_in_min) % 1440) : null;
+}
+
+function renderHero(s, status) {
+  const [key, title] = document.body.dataset.link === "stale" ? ["stale", "Showing old data"] : heroState(s);
+  const h = HERO[key];
+  const hero = $("hero");
+  if (hero.dataset.tone !== h.tone) hero.dataset.tone = h.tone;
+  $("hero-icon").name = h.icon;
+  $("hero-title").textContent = title;
+  $("hero-why").textContent = status;
+  const facts = [];
+  if (s.outdoor != null) facts.push(["temperature-half", `Outside ${s.outdoor.toFixed(1)}°`]);
+  facts.push(["faucet-drip", s.store?.boost ? "Hot water boosted" : s.store?.relay ? "Hot water on" : "Hot water off"]);
+  const next = nextChange(s);
+  if (next) facts.push(["clock", `Next change ${next}`]);
+  draw(html`${facts.map(([icon, text]) => html`<li><wa-icon name=${icon}></wa-icon>${text}</li>`)}`, $("hero-facts"));
+  // One chip per room that needs the reader; a problem shared by three rooms or more
+  // (every valve offline, say) is one chip that leads to Devices.
+  const needs = roomNeeds(s);
+  const shared = new Map();
+  for (const n of needs) for (const t of n.texts) shared.set(t, (shared.get(t) ?? 0) + 1);
+  const big = new Set([...shared].filter(([, c]) => c >= 3).map(([t]) => t));
+  const chips = [];
+  for (const t of big) chips.push(html`<li><a class="need-chip" href="#devices"><strong>${t[0].toUpperCase() + t.slice(1)}</strong><span>${plural(shared.get(t), "room", "rooms")}</span></a></li>`);
+  for (const n of needs) {
+    const texts = n.texts.filter((t) => !big.has(t));
+    if (!texts.length) continue;
+    chips.push(html`<li><button type="button" class="need-chip" @click=${(e) => select(n.room.id, e.currentTarget)}>
+      <strong>${n.room.name}</strong><span>${texts.join(", ")}</span></button></li>`);
+  }
+  $("hero-needs").hidden = !chips.length;
+  draw(html`${chips}`, $("hero-needs-list"));
+}
+// Icon names drawn from data above, listed so the build ships them.
+const HERO_FACT_ICONS = [{ icon: "temperature-half" }, { icon: "faucet-drip" }, { icon: "clock" }];
+void HERO_FACT_ICONS;
 
 function renderHouse() {
   renderRooms();
@@ -848,6 +1020,7 @@ function renderPeople(away) {
     returnNote.textContent = `Warming up for ${whose} ${at(ret.at, away.today)}.`;
   }
   draw(html`${list.map((p) => personTemplate(p, away))}`, $("people-list"));
+  if (document.body.dataset.view === "schedules") schedulesView.show();
 }
 
 // ---------- schedules ----------
@@ -865,11 +1038,7 @@ const houseView = createHouse({
   transport,
   arrangeLock: () => lockText("admin"),
   onSelect: (id, opener) => select(id, opener),
-  onWeek: () => {
-    $("week").scrollIntoView({ block: "start", behavior: reducedMotion.matches ? "auto" : "smooth" });
-    $("week-h").setAttribute("tabindex", "-1");
-    $("week-h").focus({ preventScroll: true });
-  },
+  onWeek: () => { location.hash = "#schedules"; },
 });
 new MutationObserver(() => houseView.redraw()).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 if (document.fonts?.ready) document.fonts.ready.then(() => houseView.redraw());
@@ -979,13 +1148,15 @@ const CHIP = {
 
 function render(s) {
   last = s;
+  delete document.body.dataset.link;
   const b = s.boiler;
   const firing = b.state === "firing";
   const minBurn = house?.boiler.min_burn_s ?? 480;
   // Effective minimum off: raised for a day after short-cycling. Older servers only
   // report the configured value, in /house.
   const minOff = b.min_off_s ?? house?.boiler.min_off_s ?? 600;
-  $("status").textContent = statusLine(s, minBurn);
+  const status = statusLine(s, minBurn);
+  $("status").textContent = status;
   $("outdoor").textContent = s.outdoor != null ? `Outside ${s.outdoor.toFixed(1)}°` : "";
   renderMode(s.mode);
   renderDemand(s.settings);
@@ -1035,13 +1206,15 @@ function render(s) {
   }
   if (selected && !rooms.has(selected)) selected = null;
   renderHouse();
-  renderAlerts(s.alerts);
+  renderHero(s, status);
+  // Alerts about a room are under "Needs you" in the hero; the rest are listed here.
+  // Older servers send only the sentences, so every alert is listed.
+  renderAlerts(s.alert_details ? s.alert_details.filter((x) => !x.room_id || !s.rooms.some((r) => r.id === x.room_id)).map((x) => x.message) : s.alerts);
   renderDeviceCount(s.alert_details);
   houseView.update(s, house);
   syncWeek(s);
 
   lastAt = new Date();
-  delete document.body.dataset.link;
   if (!house) loadHouse();
 }
 
@@ -1172,7 +1345,7 @@ $("demand").addEventListener("change", (e) => {
   if (!settings || value === demand.shown(settings.demand_mode)) return;
   change(demand, value, "settings", { demand_mode: value === settings.demand_mode_default ? null : value }, () => {
     if (last?.settings) renderDemand(last.settings);
-  });
+  }).then((took) => took && toast(value === "eco" ? "Eco: fewer, longer burns." : "Comfort: every room held at its target."));
 });
 
 // Learning notes (ADR-0007): learned state Radiate dropped, carried over or reset in the
@@ -1219,7 +1392,7 @@ function renderDryRun(t) {
 // Alerts arrive as sentences, room name first ("Lounge: TRV not reachable"). When
 // several rooms share a problem, list it once with the rooms, so ten offline TRVs
 // read as one line. Past ALERTS_SHOWN lines, the rest sit behind a toggle.
-const ALERTS_SHOWN = 4;
+const ALERTS_SHOWN = 2;
 let alertsKey = "";
 function groupAlerts(alerts) {
   const groups = new Map();
@@ -1283,7 +1456,8 @@ function renderMode(mode) {
 $("mode").addEventListener("change", (e) => {
   const mode = e.target.value;
   if (!last || mode === heating.shown(last.mode)) return;
-  change(heating, mode, "mode", { mode }, () => last && renderMode(last.mode));
+  change(heating, mode, "mode", { mode }, () => last && renderMode(last.mode))
+    .then((took) => took && toast({ auto: "Heating: Auto. Rooms follow their schedules.", frost: "Heating: Frost protection only.", off: "Heating off. Rooms are still kept above frost." }[mode]));
 });
 
 const boost = pendingValue();
@@ -1297,7 +1471,8 @@ function renderBoost(on) {
 $("boost").addEventListener("change", () => {
   if (!last) return;
   const on = !boost.shown(last.store.boost);
-  change(boost, on, "store/boost", { minutes: on ? 60 : 0 }, () => last && renderBoost(last.store.boost));
+  change(boost, on, "store/boost", { minutes: on ? 60 : 0 }, () => last && renderBoost(last.store.boost))
+    .then((took) => took && toast(on ? "Hot water on for 60 minutes." : "Hot water boost stopped."));
 });
 
 // Connection state. While the live stream is down, poll once per reconnect attempt;
@@ -1306,11 +1481,16 @@ $("boost").addEventListener("change", () => {
 function markOffline() {
   if (!last) {
     $("status").textContent = "Cannot reach Radiate. Retrying…";
+    $("hero-title").textContent = "Cannot reach Radiate";
+    $("hero-why").textContent = "Retrying…";
+    $("hero").dataset.tone = "warning";
+    $("hero-icon").name = HERO.stale.icon;
     return;
   }
   document.body.dataset.link = "stale";
   const at = `${String(lastAt.getHours()).padStart(2, "0")}:${String(lastAt.getMinutes()).padStart(2, "0")}`;
   $("status").textContent = `Cannot reach Radiate. Retrying… Showing data from ${at}.`;
+  renderHero(last, $("status").textContent);
 }
 
 async function poll() {
@@ -1348,19 +1528,19 @@ let setupOpener = null;
 const setup = createSetup({
   transport,
   onOpen() {
-    $("house").hidden = true;
+    for (const el of document.querySelectorAll("main > .view, main > section[aria-labelledby]")) if (el.id !== "setup") el.hidden = true;
     document.body.dataset.setup = "open";
     window.scrollTo(0, 0);
   },
   onClose() {
     delete document.body.dataset.setup;
-    $("house").hidden = false;
+    route(false);
     if (setupOpener && !setupOpener.closest("[hidden]")) setupOpener.focus();
     setupOpener = null;
   },
   async onSaved(message) {
     delete document.body.dataset.setup;
-    $("house").hidden = false;
+    route(false);
     const note = $("setup-saved");
     note.textContent = message;
     note.hidden = false;
@@ -1522,15 +1702,7 @@ const settings = createSettings({
     route(false);
     openSetup(e);
   },
-  onShowSchedules: () => {
-    history.pushState(null, "", "#");
-    route(false);
-    const h = $("week-h");
-    if ($("week").hidden) return;
-    h.setAttribute("tabindex", "-1");
-    h.focus({ preventScroll: true });
-    h.scrollIntoView({ block: "start" });
-  },
+  onShowSchedules: () => { location.hash = "#schedules"; },
   moreSections: () => (security.offered ? [{ id: "security-log", title: "Security log" }] : []),
 });
 const settingsView = {
@@ -1540,7 +1712,15 @@ const settingsView = {
 let settingsOffered = null;
 
 // Each view besides the house: its element, whether the server offers it, and its module.
+const schedulesView = {
+  show() {
+    const empty = $("week").hidden && $("people").hidden && $("setup-cta").hidden;
+    $("schedules-empty").hidden = !empty;
+  },
+  hide() {},
+};
 const VIEWS = {
+  schedules: { offered: () => true, module: schedulesView },
   devices: { offered: () => devicesOffered === true, module: devices },
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
   savings: { offered: () => savingsOffered === true, module: savings },

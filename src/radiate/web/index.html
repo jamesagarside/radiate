@@ -52,6 +52,7 @@
 
     <nav slot="navigation" class="app-nav wa-stack wa-gap-3xs" id="views" aria-label="Views">
       <a href="#" class="view-tab" data-view="house" data-drawer="close" aria-current="page"><wa-icon name="house" fixed-width></wa-icon><span>House</span></a>
+      <a href="#schedules" class="view-tab" data-view="schedules" data-drawer="close"><wa-icon name="calendar-week" fixed-width></wa-icon><span>Schedules</span></a>
       <a href="#devices" class="view-tab" data-view="devices" data-drawer="close" hidden><wa-icon name="microchip" fixed-width></wa-icon><span>Devices</span><wa-badge class="view-count" id="devices-count" variant="warning" pill hidden></wa-badge></a>
       <a href="#suggestions" class="view-tab" data-view="suggestions" data-drawer="close" hidden><wa-icon name="lightbulb" fixed-width></wa-icon><span>Suggestions</span><wa-badge class="view-count" id="suggestions-count" variant="warning" pill hidden></wa-badge></a>
       <a href="#savings" class="view-tab" data-view="savings" data-drawer="close" hidden><wa-icon name="piggy-bank" fixed-width></wa-icon><span>Savings</span></a>
@@ -61,26 +62,25 @@
     </nav>
 
     <main id="app-main">
-      <div class="app-notes wa-stack wa-gap-s">
-        <wa-callout class="radiate-cool" id="banner" hidden>
+      <div class="app-notes wa-stack wa-gap-xs">
+        <wa-callout class="radiate-cool note-compact" size="s" id="banner" hidden>
           <wa-icon slot="icon" name="flask"></wa-icon>
           <p id="banner-text"></p>
         </wa-callout>
 
-        <wa-callout variant="warning" id="dryrun" hidden>
+        <wa-callout variant="warning" size="s" class="note-compact" id="dryrun" hidden>
           <wa-icon slot="icon" name="eye"></wa-icon>
-          <div class="wa-stack wa-gap-xs">
-            <p><strong id="dryrun-h">Dry run.</strong> Radiate is reading the house but not controlling valves or the boiler.</p>
-            <p id="dryrun-count"></p>
+          <div class="note-row">
+            <p><strong id="dryrun-h">Dry run.</strong> Radiate reads the house but doesn't switch the valves or the boiler. <span id="dryrun-count"></span></p>
             <wa-details id="dryrun-recent" summary="Latest held-back writes" appearance="plain" hidden>
               <ul class="code-list"></ul>
             </wa-details>
           </div>
         </wa-callout>
 
-        <wa-callout variant="neutral" id="learning-notes" hidden>
+        <wa-callout variant="neutral" size="s" class="note-compact" id="learning-notes" hidden>
           <wa-icon slot="icon" name="graduation-cap"></wa-icon>
-          <div class="wa-stack wa-gap-xs">
+          <div class="note-row">
             <p><strong id="learning-notes-h">Learning.</strong> <span id="learning-notes-lead"></span></p>
             <wa-details summary="What changed" appearance="plain">
               <ul class="code-list"></ul>
@@ -99,34 +99,132 @@
         </wa-card>
       </div>
 
-      <section id="house" class="view house-view wa-stack wa-gap-l" aria-labelledby="house-h">
-        <h1 class="wa-heading-xl" id="house-h" tabindex="-1">House</h1>
+      <section id="house" class="view house-view" aria-labelledby="house-h">
+        <h1 class="wa-visually-hidden" id="house-h" tabindex="-1">House</h1>
 
-        <wa-callout class="radiate-cool" id="guide-note" hidden>
-          <wa-icon slot="icon" name="book-open"></wa-icon>
-          <div class="wa-stack wa-gap-xs">
-            <p>The Guide explains what you see here and how to change it, from what the colours mean to keeping a room warmer for a while.</p>
-            <div class="wa-cluster wa-gap-m">
-              <a href="#guide" data-act="open">Open the guide</a>
-              <button type="button" class="wa-plain wa-size-s" data-act="dismiss">Hide this</button>
+        <wa-card class="hero" id="hero" data-tone="neutral">
+          <div class="hero-grid">
+            <div class="hero-main">
+              <span class="hero-icon" aria-hidden="true"><wa-icon id="hero-icon" name="house"></wa-icon></span>
+              <div class="hero-copy">
+                <h2 class="hero-title" id="hero-title">Connecting…</h2>
+                <p class="hero-why" id="hero-why" aria-live="polite"></p>
+                <ul class="hero-facts" id="hero-facts" aria-label="At a glance"></ul>
+              </div>
+            </div>
+            <div class="hero-controls">
+              <wa-radio-group label="Heating" orientation="horizontal" name="mode" size="s" id="mode" aria-describedby="controls-lock">
+                <wa-radio appearance="button" value="auto"><wa-icon slot="start" name="calendar-days"></wa-icon>Auto</wa-radio>
+                <wa-radio appearance="button" value="frost"><wa-icon slot="start" name="snowflake"></wa-icon>Frost</wa-radio>
+                <wa-radio appearance="button" value="off"><wa-icon slot="start" name="power-off"></wa-icon>Off</wa-radio>
+              </wa-radio-group>
+              <wa-radio-group label="Demand" orientation="horizontal" name="demand" size="s" id="demand" aria-describedby="controls-lock" hidden>
+                <wa-radio appearance="button" value="eco"><wa-icon slot="start" name="leaf"></wa-icon>Eco</wa-radio>
+                <wa-radio appearance="button" value="comfort"><wa-icon slot="start" name="mug-hot"></wa-icon>Comfort</wa-radio>
+                <span slot="hint" id="demand-note"></span>
+              </wa-radio-group>
+              <div class="hero-boost">
+                <wa-switch id="boost" size="s" aria-describedby="boost-lock" hint="On for 60 minutes.">Boost hot water</wa-switch>
+                <wa-tag size="s" class="lock-tag" id="boost-lock" hidden></wa-tag>
+              </div>
+              <div class="controls-foot">
+                <wa-tag size="s" class="lock-tag" id="controls-lock" hidden></wa-tag>
+                <p class="error-line" id="mode-error" role="alert" hidden></p>
+                <p class="error-line" id="boost-error" role="alert" hidden></p>
+              </div>
             </div>
           </div>
-        </wa-callout>
+          <div class="hero-needs" id="hero-needs" hidden>
+            <span class="hero-needs-label">Needs you</span>
+            <ul class="hero-needs-list" id="hero-needs-list"></ul>
+          </div>
+        </wa-card>
 
-        <wa-callout variant="warning" id="alerts" hidden>
-          <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
-          <div class="wa-stack wa-gap-xs">
-            <h2 class="wa-heading-s" id="alerts-h">Needs attention</h2>
-            <ul class="alerts-list" id="alerts-list"></ul>
-            <div class="wa-cluster wa-gap-m wa-align-items-center">
-              <button type="button" class="wa-outlined wa-size-s wa-warning" id="alerts-more" aria-expanded="false" aria-controls="alerts-list" hidden></button>
-              <a id="alerts-devices" href="#devices" hidden>See devices</a>
-              <a href="#guide/alerts">What these alerts mean</a>
+        <div class="house-notes wa-stack wa-gap-xs">
+          <wa-callout variant="warning" size="s" class="note-compact" id="alerts" hidden>
+            <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
+            <div class="note-row">
+              <h2 class="alerts-h" id="alerts-h">Needs attention</h2>
+              <ul class="alerts-list" id="alerts-list"></ul>
+              <div class="note-actions">
+                <button type="button" class="wa-plain wa-size-s" id="alerts-more" aria-expanded="false" aria-controls="alerts-list" hidden></button>
+                <a id="alerts-devices" href="#devices" hidden>See devices</a>
+                <a href="#guide/alerts">What these alerts mean</a>
+              </div>
+            </div>
+          </wa-callout>
+
+          <wa-callout class="radiate-cool note-compact" size="s" id="guide-note" hidden>
+            <wa-icon slot="icon" name="book-open"></wa-icon>
+            <div class="note-row note-inline">
+              <p>New to Radiate? The Guide explains what you see here and how to change it. <a href="#guide" data-act="open">Open the guide</a></p>
+              <wa-button appearance="plain" size="s" class="note-close" data-act="dismiss"><wa-icon name="xmark" label="Hide this"></wa-icon></wa-button>
+            </div>
+          </wa-callout>
+
+          <wa-callout class="radiate-cool note-compact" size="s" id="setup-saved" role="status" tabindex="-1" hidden></wa-callout>
+        </div>
+
+        <div class="house-stage" id="house-stage">
+          <wa-card class="hm-model" id="hm-model"></wa-card>
+          <div class="house-side" id="house-side">
+            <wa-card class="hm-status" id="hm-status"></wa-card>
+            <wa-card class="room-panel" id="room-panel" aria-labelledby="room-panel-h" hidden></wa-card>
+          </div>
+        </div>
+
+        <wa-card class="rooms-card" id="rooms-card">
+          <div slot="header" class="wa-split wa-gap-s">
+            <div class="wa-stack wa-gap-3xs">
+              <h2 class="wa-heading-m" id="rooms-h">Rooms</h2>
+              <p class="help-line">Select a room to see why it's doing what it does and to change its temperature. <a href="#guide/rooms">What the badges and bars mean</a></p>
             </div>
           </div>
-        </wa-callout>
+          <div id="rooms"></div>
+        </wa-card>
 
-        <wa-callout class="radiate-cool" id="setup-saved" role="status" tabindex="-1" hidden></wa-callout>
+        <div class="house-lower">
+          <wa-card class="boiler-card" id="boiler">
+            <div slot="header" class="wa-cluster wa-gap-xs wa-align-items-center">
+              <h2 class="wa-heading-m" id="boiler-h">Boiler</h2>
+              <wa-badge id="boiler-chip" variant="neutral" appearance="filled">–</wa-badge>
+            </div>
+            <div class="wa-stack wa-gap-m">
+              <div class="guard-row" id="guard-row">
+                <wa-progress-bar id="guard" value="0" label="Minimum burn or rest"></wa-progress-bar>
+                <span class="wa-caption-m wa-color-text-quiet" id="boiler-detail"></span>
+              </div>
+              <wa-callout variant="warning" size="s" id="short-cycle" hidden>
+                <wa-icon slot="icon" name="rotate"></wa-icon>
+                <p><strong>Short-cycling.</strong> <span id="short-cycle-text"></span></p>
+              </wa-callout>
+              <div class="timeline" id="timeline" role="img" aria-label="Last 24 hours of burns and hot-water windows">
+                <div class="lane burns"></div>
+                <div class="lane store"></div>
+                <div class="ticks" aria-hidden="true"><span>−24 h</span><span>−18 h</span><span>−12 h</span><span>−6 h</span><span>now</span></div>
+                <p class="lane-key wa-caption-s wa-color-text-quiet" aria-hidden="true"><span class="key burns"></span>Burns <span class="key store"></span>Hot water</p>
+              </div>
+              <dl class="stat-grid">
+                <div><dt id="s-today-label">Burner today</dt><dd><span class="stat-value" id="s-today">–</span><span class="stat-sub" id="s-today-sub"></span></dd></div>
+                <div><dt>Starts, last hour</dt><dd><span class="stat-value" id="s-starts">–</span></dd></div>
+                <div><dt>Predicted burn</dt><dd><span class="stat-value" id="s-pred">–</span></dd></div>
+                <div><dt>Balance, yesterday</dt><dd><span class="stat-value" id="s-balance">–</span><span class="stat-sub" id="s-balance-sub"></span></dd></div>
+                <div><dt>Supply factor</dt><dd><span class="stat-value" id="s-supply">–</span></dd></div>
+              </dl>
+            </div>
+          </wa-card>
+          <div class="wa-stack wa-gap-s">
+            <wa-card class="hm-plan" id="hm-plan" hidden></wa-card>
+            <p class="savings-line" id="savings-line" hidden><wa-icon name="piggy-bank"></wa-icon> <a href="#savings" id="savings-line-link"></a></p>
+          </div>
+        </div>
+      </section>
+
+      <section id="schedules" class="view schedules-view wa-stack wa-gap-l" aria-labelledby="schedules-h" hidden>
+        <div class="view-head">
+          <h1 class="wa-heading-xl" id="schedules-h" tabindex="-1">Schedules</h1>
+          <p class="view-lead">Who lives here, who's away, and the week each room follows.</p>
+        </div>
 
         <wa-card id="setup-cta" hidden>
           <h2 slot="header" class="wa-heading-m" id="setup-cta-h">Set up your household</h2>
@@ -139,83 +237,11 @@
           </div>
         </wa-card>
 
-        <wa-card class="controls-card" id="controls">
-          <div class="controls-grid">
-            <wa-radio-group label="Heating" orientation="horizontal" name="mode" id="mode" aria-describedby="controls-lock">
-              <wa-radio appearance="button" value="auto"><wa-icon slot="start" name="calendar-days"></wa-icon>Auto</wa-radio>
-              <wa-radio appearance="button" value="frost"><wa-icon slot="start" name="snowflake"></wa-icon>Frost</wa-radio>
-              <wa-radio appearance="button" value="off"><wa-icon slot="start" name="power-off"></wa-icon>Off</wa-radio>
-            </wa-radio-group>
-            <wa-radio-group label="Demand" orientation="horizontal" name="demand" id="demand" aria-describedby="controls-lock" hidden>
-              <wa-radio appearance="button" value="eco"><wa-icon slot="start" name="leaf"></wa-icon>Eco</wa-radio>
-              <wa-radio appearance="button" value="comfort"><wa-icon slot="start" name="mug-hot"></wa-icon>Comfort</wa-radio>
-              <span slot="hint" id="demand-note"></span>
-            </wa-radio-group>
-          </div>
-          <div class="wa-cluster wa-gap-s controls-foot">
-            <wa-tag size="s" class="lock-tag" id="controls-lock" hidden></wa-tag>
-            <p class="error-line" id="mode-error" role="alert" hidden></p>
-          </div>
-        </wa-card>
-
-        <div class="house-top">
-          <wa-card class="hm-model" id="hm-model"></wa-card>
-          <wa-card class="hm-status" id="hm-status"></wa-card>
-        </div>
-
-        <wa-card class="rooms-card" id="rooms-card">
-          <div slot="header" class="wa-stack wa-gap-3xs">
-            <h2 class="wa-heading-m" id="rooms-h">Rooms</h2>
-            <p class="help-line">Select a room to change its temperature until its next scheduled change. <a href="#guide/rooms">What the badges and bars mean</a></p>
-          </div>
-          <div id="rooms"></div>
-        </wa-card>
-
-        <wa-card class="hm-plan" id="hm-plan" hidden></wa-card>
-        <p class="savings-line" id="savings-line" hidden><wa-icon name="piggy-bank"></wa-icon> <a href="#savings" id="savings-line-link"></a></p>
-
-        <wa-card class="boiler-card" id="boiler">
-          <div slot="header" class="wa-split wa-align-items-center">
-            <div class="wa-cluster wa-gap-xs wa-align-items-center">
-              <h2 class="wa-heading-m" id="boiler-h">Boiler</h2>
-              <wa-badge id="boiler-chip" variant="neutral" appearance="filled">–</wa-badge>
-            </div>
-            <div class="wa-cluster wa-gap-xs wa-align-items-center">
-              <wa-tag size="s" class="lock-tag" id="boost-lock" hidden></wa-tag>
-              <wa-switch id="boost" aria-describedby="boost-lock" hint="On for 60 minutes. Switch off to stop early.">Boost hot water</wa-switch>
-            </div>
-          </div>
-          <div class="wa-stack wa-gap-m">
-            <p class="error-line" id="boost-error" role="alert" hidden></p>
-            <div class="guard-row" id="guard-row">
-              <wa-progress-bar id="guard" value="0" label="Minimum burn or rest"></wa-progress-bar>
-              <span class="wa-caption-m wa-color-text-quiet" id="boiler-detail"></span>
-            </div>
-            <wa-callout variant="warning" size="s" id="short-cycle" hidden>
-              <wa-icon slot="icon" name="rotate"></wa-icon>
-              <p><strong>Short-cycling.</strong> <span id="short-cycle-text"></span></p>
-            </wa-callout>
-            <div class="timeline" id="timeline" role="img" aria-label="Last 24 hours of burns and hot-water windows">
-              <div class="lane burns"></div>
-              <div class="lane store"></div>
-              <div class="ticks" aria-hidden="true"><span>−24 h</span><span>−18 h</span><span>−12 h</span><span>−6 h</span><span>now</span></div>
-              <p class="lane-key wa-caption-s wa-color-text-quiet" aria-hidden="true"><span class="key burns"></span>Burns <span class="key store"></span>Hot water</p>
-            </div>
-            <dl class="stat-grid">
-              <div><dt id="s-today-label">Burner today</dt><dd><span class="stat-value" id="s-today">–</span><span class="stat-sub" id="s-today-sub"></span></dd></div>
-              <div><dt>Starts, last hour</dt><dd><span class="stat-value" id="s-starts">–</span></dd></div>
-              <div><dt>Predicted burn</dt><dd><span class="stat-value" id="s-pred">–</span></dd></div>
-              <div><dt>Balance, yesterday</dt><dd><span class="stat-value" id="s-balance">–</span><span class="stat-sub" id="s-balance-sub"></span></dd></div>
-              <div><dt>Supply factor</dt><dd><span class="stat-value" id="s-supply">–</span></dd></div>
-            </dl>
-          </div>
-        </wa-card>
-
         <section id="people" class="wa-stack wa-gap-s" aria-labelledby="people-h" hidden>
           <div class="wa-split wa-align-items-center">
-            <h2 class="wa-heading-m" id="people-h">People</h2>
+            <h2 class="wa-heading-l" id="people-h">People</h2>
             <span class="wa-cluster wa-gap-xs wa-align-items-center" id="setup-change-row" hidden>
-              <wa-button appearance="plain" size="s" id="setup-change" aria-describedby="setup-change-lock"><wa-icon slot="start" name="pen"></wa-icon>Change household setup</wa-button>
+              <wa-button appearance="outlined" size="s" id="setup-change" aria-describedby="setup-change-lock"><wa-icon slot="start" name="pen"></wa-icon>Change household setup</wa-button>
               <wa-tag size="s" class="lock-tag" id="setup-change-lock" hidden></wa-tag>
             </span>
           </div>
@@ -225,15 +251,17 @@
         </section>
 
         <section id="week" class="wa-stack wa-gap-s" aria-labelledby="week-h" hidden>
-          <h2 class="wa-heading-m" id="week-h">Schedules</h2>
-          <div class="week-head">
-            <p class="help-line">The week each room follows. Blocks are warm periods, darker when warmer. <span id="week-hint" hidden>Drag the edge of a block, or use Adjust, to keep a room warm or cold for longer.</span> <span class="lock-tag" id="week-lock" hidden></span> <a href="#guide/schedules">Where schedules come from</a></p>
+          <h2 class="wa-heading-l" id="week-h">Weekly schedules</h2>
+          <div class="week-head wa-stack wa-gap-xs">
+            <p class="help-line">The week each room follows. Blocks are warm periods, darker when warmer. <span id="week-hint" hidden>Drag the edge of a block, or use Adjust, to keep a room warm or cold for longer.</span> <wa-tag size="s" class="lock-tag" id="week-lock" hidden></wa-tag> <a href="#guide/schedules">Where schedules come from</a></p>
             <p class="week-legend" id="week-legend" hidden></p>
           </div>
-          <p class="away-note week-saved" id="week-saved" role="status"></p>
-          <p class="away-note" id="week-frost" hidden>Everyone is away, so rooms are held at frost protection. These weeks apply again when someone is home or due back.</p>
+          <p class="week-saved" id="week-saved" role="status"></p>
+          <wa-callout class="radiate-cool" size="s" id="week-frost" hidden>Everyone is away, so rooms are held at frost protection. These weeks apply again when someone is home or due back.</wa-callout>
           <div class="weeks" id="week-list"></div>
         </section>
+
+        <p class="empty-note" id="schedules-empty" hidden>This server doesn't send schedules or a household setup, so there's nothing to show here.</p>
       </section>
 
       <section class="devices-view" id="devices" aria-labelledby="devices-h" hidden>
@@ -902,9 +930,9 @@
       </section>
     </main>
 
-    <aside slot="aside" class="room-aside" id="room-aside" aria-label="Selected room"></aside>
   </wa-page>
 
-  <wa-drawer id="room-drawer" placement="bottom" label="Room"></wa-drawer>
+  <wa-drawer id="room-drawer" placement="bottom" label="Room" light-dismiss></wa-drawer>
+  <wa-toast id="toast" placement="bottom-center"></wa-toast>
 </body>
 </html>

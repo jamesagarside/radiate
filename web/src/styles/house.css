@@ -10,7 +10,7 @@
 .hm-ramp { display: block; width: 6rem; height: 0.5rem; border-radius: var(--wa-border-radius-pill); }
 
 /* the model */
-.hm-iso { width: 100%; height: auto; min-height: 16rem; max-height: 32rem; display: block; overflow: visible; }
+.hm-iso { width: 100%; height: auto; min-height: 18rem; max-height: 42rem; display: block; overflow: visible; }
 .hm-room { cursor: pointer; }
 .hm-room:focus { outline: none; }
 .hm-room[aria-pressed="true"] .hm-top { stroke: var(--wa-color-text-normal); stroke-width: 3; }
