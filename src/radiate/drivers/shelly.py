@@ -54,6 +54,14 @@ class ShellyError(RuntimeError):
     pass
 
 
+class ShellyAuthError(ShellyError):
+    """The Shelly asked for a password Radiate doesn't have, or refused the one it has."""
+
+    def __init__(self, message: str, missing: bool):
+        super().__init__(message)
+        self.missing = missing
+
+
 # --- pure helpers ----------------------------------------------------------------------
 
 
@@ -256,9 +264,11 @@ class ShellyRpc:
             ) as resp:
                 if resp.status == 401:
                     if not self.password:
-                        raise ShellyError("Shelly requires a password (shelly.password)")
+                        raise ShellyAuthError(
+                            "Shelly requires a password (shelly.password)", missing=True
+                        )
                     if attempt:
-                        raise ShellyError("Shelly rejected the password")
+                        raise ShellyAuthError("Shelly rejected the password", missing=False)
                     self._chal = challenge(resp.headers.get("WWW-Authenticate", ""))
                     self._nc = 0
                     continue
@@ -285,6 +295,8 @@ class ShellyBoiler:
         self.heating: SwitchStatus | None = None
         self.store: SwitchStatus | None = None
         self.reachable = False
+        # Why the last read failed on a password: "missing", "rejected" or None.
+        self.auth_problem: str | None = None
         self.errors = 0
         # The burner firing on each channel, from its power reading (None: not metered).
         self.heating_burner: bool | None = None
@@ -314,6 +326,10 @@ class ShellyBoiler:
             s = await self.rpc.call("Switch.GetStatus", {"id": self.cfg.store_switch})
         except Exception as err:
             self.reachable = False
+            if isinstance(err, ShellyAuthError):
+                self.auth_problem = "missing" if err.missing else "rejected"
+            else:
+                self.auth_problem = None
             self.heating_burner = self.store_burner = None
             self.errors += 1
             LOG.warning("Shelly %s unreachable: %r", self.cfg.host, err)
@@ -321,6 +337,7 @@ class ShellyBoiler:
         self.heating = _switch(h)
         self.store = _switch(s)
         self.reachable = True
+        self.auth_problem = None
         if self._meters is not None:
             self.heating_burner = self._meters[0].update(self.heating)
             self.store_burner = self._meters[1].update(self.store)

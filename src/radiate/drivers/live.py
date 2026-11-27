@@ -487,7 +487,12 @@ class LiveDriver:
                     Reason("driver.write_failed", f"{rc.name}: TRV did not accept {keys}", rc.id)
                 )
         if self.boiler is not None and not self.boiler.reachable:
-            out.append(Reason("driver.shelly", "Boiler relay (Shelly) not reachable"))
+            problem = getattr(self.boiler, "auth_problem", None)
+            message = {
+                "missing": "Boiler relay (Shelly) needs a password. Add it in Settings, Boiler relay",
+                "rejected": "Boiler relay (Shelly) refused the password. Check it in Settings, Boiler relay",
+            }.get(problem, "Boiler relay (Shelly) not reachable")
+            out.append(Reason("driver.shelly", message))
         # Battery, signal and silent sensors. The relay has its own alert above, and
         # while the broker or Zigbee2MQTT is down every device would be listed.
         if self._zigbee_up():
