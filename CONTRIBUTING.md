@@ -46,6 +46,20 @@ CI fails on any ruff finding or unformatted file:
 
 Run `.venv/bin/ruff format src tests scripts` to fix formatting.
 
+## Change the web UI
+
+The web UI's sources are in `web/`, a Vite project of plain JavaScript modules on [Web Awesome](https://webawesome.com/) components. Vite builds it into `src/radiate/web`, which is committed, so the server and the tests need no Node. Read the [design standards](docs/standards/design.md) first.
+
+After any change under `web/`, rebuild with Node 20 or later and commit the result with your change:
+
+```bash
+cd web
+npm ci
+npm run build
+```
+
+CI rebuilds it and fails if the committed `src/radiate/web` differs. The tests that run the UI's modules under Node (`tests/server/test_*_js.py`) are skipped where Node isn't installed. For live reloading against a running server, see [Change the web UI](docs/deployment.md#change-the-web-ui) in the deployment guide.
+
 ## Check the simulator
 
 If you change `src/radiate/core` or the simulator, compare the simulator's results before and after your change:

@@ -22,7 +22,7 @@ from radiate.server.runtime import Runtime
 from radiate.server.setup import HouseholdSetup
 
 ROOT = Path(__file__).resolve().parents[2]
-HOUSEHOLD_JS = ROOT / "web" / "household.js"
+HOUSEHOLD_JS = ROOT / "web" / "src" / "household.js"
 EXAMPLE = ROOT / "examples" / "household.yaml"
 ENV = {"RADIATE_MQTT_PASSWORD": "m", "RADIATE_SHELLY_PASSWORD": "s"}
 NODE = shutil.which("node")

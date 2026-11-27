@@ -821,7 +821,8 @@ def test_request_text_is_cleaned_before_it_is_stored():
 def _view(html: str, cls: str) -> str:
     """The markup of one view in index.html, from its opening tag to the next view's."""
     start = html.index(f'<section class="{cls}"')
-    end = html.index('\n  <section class="', start + 1)
+    indent = html[html.rindex("\n", 0, start) + 1 : start]
+    end = html.index(f'\n{indent}<section class="', start + 1)
     return html[start:end]
 
 
@@ -830,6 +831,7 @@ def test_the_security_log_is_under_settings_not_raw_data():
 
     web = Path(__file__).resolve().parents[2] / "web"
     html = (web / "index.html").read_text()
+    web = web / "src"
     settings, data = _view(html, "settings-view"), _view(html, "data-view")
     assert 'id="s-security-log"' in settings and 'id="security-body"' in settings
     assert "security" not in data.lower()  # Raw data shows sensor data only

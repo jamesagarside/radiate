@@ -6,10 +6,14 @@ GitHub Pages under a sub-path, because every URL in it is relative.
 
     python scripts/build_demo.py [--out dist/demo]
 
+It packages the built web UI in src/radiate/web, which is committed, so it needs no
+Node. After changing web/, rebuild that first (cd web && npm run build).
+
 Output:
     index.html            the web UI, switched to the in-browser transport
-    static/*.js, *.css    web/ assets, including demo.js and demo-worker.js
-static/fonts/         the UI's fonts and their licences
+    static/assets/        the built scripts, styles and fonts, including demo.js
+    static/icons/         the Font Awesome Free icons the UI uses
+    static/demo-worker.js the worker that runs the engine
     static/radiate.zip    the Python modules the worker imports, and their imports
     .nojekyll             stop GitHub Pages running Jekyll over the site
 """
@@ -26,35 +30,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
-WEB = ROOT / "web"
+# The built web UI (Vite builds web/ into it) and the worker's source.
+WEB = SRC / "radiate" / "web"
+WORKER = ROOT / "web" / "public" / "demo-worker.js"
 DEFAULT_OUT = ROOT / "dist" / "demo"
-
-STATIC_FILES = (
-    "app.js",
-    "app.css",
-    "pending.js",
-    "learned.js",
-    "security.js",
-    "week.js",
-    "household.js",
-    "setup.js",
-    "devices.js",
-    "suggestions.js",
-    "savings.js",
-    "savings.css",
-    "data.js",
-    "data.css",
-    "house.js",
-    "house.css",
-    "guide.js",
-    "guide.css",
-    "settings.js",
-    "settings.css",
-    "demo.js",
-    "demo.css",
-    "demo-worker.js",
-)
-WORKER = WEB / "demo-worker.js"
+# Pages the server serves itself; the demo has no login.
+SERVER_PAGES = ("index.html", "login.html")
+HTML_OPEN = '<html lang="en-GB" class="wa-theme-awesome wa-palette-bright wa-brand-orange">'
 ZIP_NAME = "radiate.zip"
 # A fixed timestamp keeps the zip byte-for-byte reproducible.
 ZIP_DATE = (2026, 1, 1, 0, 0, 0)
@@ -130,32 +112,36 @@ def write_zip(modules: dict[str, Path], dest: Path) -> None:
 def demo_index(html: str) -> str:
     """The server's index.html, switched to the in-browser transport."""
     swaps = [
-        ('<html lang="en-GB">', '<html lang="en-GB" data-transport="demo">'),
-        ("<title>Radiate</title>", "<title>Radiate demo</title>"),
+        (HTML_OPEN, HTML_OPEN.replace("<html ", '<html data-transport="demo" ')),
         (
-            '<link rel="stylesheet" href="static/app.css">',
-            '<meta name="description" content="Try Radiate, local whole-house heating '
-            'balancing and boiler control, running against a simulated house in your browser.">\n'
-            '  <link rel="stylesheet" href="static/app.css">\n'
-            '  <link rel="stylesheet" href="static/demo.css">',
+            "<title>Radiate</title>",
+            "<title>Radiate demo</title>\n"
+            '  <meta name="description" content="Try Radiate, local whole-house heating '
+            'balancing and boiler control, running against a simulated house in your browser.">',
         ),
     ]
     for old, new in swaps:
         if html.count(old) != 1:
-            raise SystemExit(f"web/index.html: expected exactly one {old!r}")
+            raise SystemExit(f"{WEB / 'index.html'}: expected exactly one {old!r}")
         html = html.replace(old, new)
     return html
 
 
-def build(out: Path = DEFAULT_OUT) -> Path:
+def build(out: Path = DEFAULT_OUT, web: Path = WEB) -> Path:
+    if not (web / "index.html").is_file():
+        raise SystemExit(f"{web}: no built web UI. Run `npm ci && npm run build` in web/.")
     if out.exists():
         shutil.rmtree(out)
     static = out / "static"
     static.mkdir(parents=True)
-    for name in STATIC_FILES:
-        shutil.copyfile(WEB / name, static / name)
-    shutil.copytree(WEB / "fonts", static / "fonts")
-    (out / "index.html").write_text(demo_index((WEB / "index.html").read_text()))
+    # Everything the page loads sits under static/, as the server serves it.
+    for path in sorted(web.rglob("*")):
+        rel = path.relative_to(web)
+        if path.is_dir() or rel.as_posix() in SERVER_PAGES or "__pycache__" in rel.parts:
+            continue
+        (static / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, static / rel)
+    (out / "index.html").write_text(demo_index((web / "index.html").read_text()))
     write_zip(module_closure(worker_entry_modules()), static / ZIP_NAME)
     (out / ".nojekyll").write_text("")
     return out

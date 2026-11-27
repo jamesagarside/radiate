@@ -1,0 +1,134 @@
+/* Raw data view (#data): search, chart, table and download every recorded series, with
+   the OpenTelemetry export's health. Tokens come from app.css. The chart is inline SVG
+   drawn by data.js: the chosen series in ink, any others as thin muted lines, its range
+   in each step as a recessed band. Nothing in it animates. */
+
+.data-view { display: grid; gap: var(--wa-space-l); min-width: 0; }
+body[data-auth="needed"] .data-view { display: none; }
+.data-view { transition: opacity 200ms var(--radiate-ease-out); }
+body[data-link="stale"] .data-view { opacity: 0.55; }
+
+/* A flat band for indexing, refusals and errors. */
+.rd-note { padding: 8px 16px; background: var(--wa-color-surface-default); border-left: 4px solid var(--radiate-cool-on-quiet); font-size: 0.88rem; max-width: 100%; }
+.rd-note[data-kind="warn"] { border-left-color: var(--wa-color-warning-on-quiet); color: var(--wa-color-warning-on-quiet); }
+
+/* Controls and export on the left above 1100 px, the chart beside them. */
+.rd-body { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "query" "chart" "export"; }
+@media (min-width: 1100px) {
+  .rd-body {
+    grid-template-columns: 25rem minmax(0, 1fr); grid-template-rows: min-content 1fr;
+    grid-template-areas: "query chart" "export chart"; align-items: start;
+  }
+}
+.rd-query { grid-area: query; }
+.rd-chart-plate { grid-area: chart; }
+.rd-export { grid-area: export; }
+.rd-plate { padding: 14px 18px 16px; display: grid; gap: 14px; min-width: 0; align-content: start; }
+.rd-h { margin: 0; font-size: 1.05rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.rd-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.rd-toolbar .rd-h { margin-right: auto; }
+
+/* Fields: ink outlines on the plate, square, like the week editor. */
+.rd-field { display: grid; gap: 3px; min-width: 0; }
+.rd-field > label, .rd-label { font-size: 0.82rem; font-weight: 600; }
+.rd-field select, .rd-field input, .rd-search input {
+   min-width: 0; width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.rd-field select:disabled { color: var(--wa-color-text-quiet); border-color: var(--wa-color-surface-border); }
+.rd-search { display: grid; gap: 3px; }
+.rd-search > label { font-size: 0.82rem; font-weight: 600; }
+.rd-help { font-size: 0.8rem; color: var(--wa-color-text-quiet); }
+.rd-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; padding-top: 12px; border-top: 1px solid var(--wa-color-surface-border); }
+.rd-form .rd-wide { grid-column: 1 / -1; }
+.rd-range .seg { width: 100%; }
+.rd-range .seg button { flex: 1; padding-inline: 6px; white-space: nowrap; }
+
+/* Search results: a list of plain buttons, each a series. */
+.rd-results { list-style: none; margin: 4px 0 0; padding: 0; display: grid; border-top: 1px solid var(--wa-color-surface-border); }
+.rd-results li { border-bottom: 1px solid var(--wa-color-surface-border); }
+.rd-result {
+  width: 100%; text-align: left; font: inherit; font-size: 0.9rem; padding: 7px 4px; border: 0; border-radius: var(--wa-border-radius-s);
+  background: transparent; color: var(--wa-color-text-normal); cursor: pointer;
+  transition: transform 160ms var(--radiate-ease-out), background-color 150ms ease;
+}
+.rd-result:active { transform: scale(0.99); }
+.rd-none { padding: 7px 4px; font-size: 0.85rem; color: var(--wa-color-text-quiet); }
+
+.rd-meta { font-size: 0.84rem; color: var(--wa-color-text-quiet); font-variant-numeric: tabular-nums; }
+.rd-downloads { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rd-downloads p { flex-basis: 100%; font-size: 0.82rem; color: var(--wa-color-text-quiet); }
+.rd-downloads p:empty { display: none; }
+
+/* The chart. Text in the drawing uses the readout face with tabular figures. */
+.rd-stats { padding-top: 0; border-top: 0; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+/* The SVG is drawn at the box's width; min-width 0 lets the box shrink first, so a
+   narrower window redraws it instead of being pushed wider. */
+.rd-chart-wrap { display: grid; gap: 6px; min-width: 0; }
+.rd-chart { min-height: 200px; min-width: 0; overflow: hidden; outline: none; }
+.rd-chart:focus-visible { outline: 2px solid var(--radiate-cool-on-quiet); outline-offset: 2px; }
+.rd-chart svg { display: block; overflow: visible; touch-action: pan-y; }
+.rd-grid { stroke: var(--wa-color-surface-border); stroke-width: 1; }
+.rd-axis { stroke: var(--wa-color-text-normal); stroke-width: 1.5; }
+.rd-xmark { stroke: var(--wa-color-text-normal); stroke-width: 1.5; }
+.rd-ytick, .rd-xtick { fill: var(--wa-color-text-quiet); font-family: var(--wa-font-family-body); font-weight: 700; font-size: 11px; font-variant-numeric: tabular-nums; }
+.rd-line { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.rd-ink { stroke: var(--wa-color-text-normal); stroke-width: 2; }
+.rd-other { stroke: var(--wa-color-text-quiet); stroke-width: 1.25; opacity: 0.45; }
+.rd-band { fill: var(--wa-color-neutral-fill-quiet); }
+.rd-cursor { stroke: var(--radiate-cool-on-quiet); stroke-width: 1.5; }
+.rd-dot { fill: var(--radiate-cool-on-quiet); stroke: var(--wa-color-surface-default); stroke-width: 2; }
+.rd-hit { fill: transparent; cursor: crosshair; }
+.rd-readout { min-height: 2.9em; font-size: 0.88rem; font-variant-numeric: tabular-nums; max-width: 80ch; }
+
+/* The legend picks which series is in ink. */
+.rd-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.rd-key {
+  display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 0.84rem; padding: 4px 9px 4px 7px;
+  border: 1.5px solid var(--wa-color-surface-border); border-radius: var(--wa-border-radius-s); background: transparent; color: var(--wa-color-text-quiet); cursor: pointer;
+  transition: transform 160ms var(--radiate-ease-out), border-color 150ms ease, color 150ms ease;
+}
+.rd-key:active { transform: scale(0.97); }
+.rd-key[aria-pressed="true"] { border-color: var(--wa-color-text-normal); color: var(--wa-color-text-normal); font-weight: 600; }
+.rd-swatch { width: 16px; height: 0; border-top: 1.5px solid var(--wa-color-text-quiet); opacity: 0.6; }
+.rd-key[aria-pressed="true"] .rd-swatch { border-top: 2.5px solid var(--wa-color-text-normal); opacity: 1; }
+
+/* The table scrolls inside its own box on a phone, never the page. */
+.rd-table-wrap { overflow: auto; max-height: 480px; border-bottom: 1px solid var(--wa-color-surface-border); }
+.rd-table { border-collapse: collapse; width: 100%; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+.rd-table th, .rd-table td { padding: 5px 12px 5px 0; text-align: right; border-bottom: 1px solid var(--wa-color-surface-border); white-space: nowrap; }
+.rd-table thead th { font-weight: 600; color: var(--wa-color-text-quiet); border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border); position: sticky; top: 0; background: var(--wa-color-surface-default); }
+.rd-table caption { caption-side: top; text-align: left; padding-bottom: 6px; }
+.rd-table th:first-child, .rd-table :is(th, td):nth-child(2) { text-align: left; }
+.rd-table tbody th { font-weight: 500; }
+.rd-table-note { font-size: 0.8rem; color: var(--wa-color-text-quiet); }
+.rd-stats-for { font-size: 0.84rem; color: var(--wa-color-text-quiet); margin-bottom: -8px; }
+
+/* The export plate: a 4px rule on the left when it needs attention. */
+.rd-export[data-kind="attention"] { border-left: 4px solid var(--wa-color-warning-on-quiet); padding-left: 14px; }
+
+.rd-export p { font-size: 0.9rem; max-width: 70ch; }
+.rd-export-list { margin: 0; display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--wa-color-surface-border); }
+.rd-export-list div { display: grid; gap: 1px; min-width: 0; }
+.rd-export-list dt { font-size: 0.78rem; color: var(--wa-color-text-quiet); }
+.rd-export-list dd { margin: 0; font-size: 0.88rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.rd-export-list [data-kind="warn"] dd { color: var(--wa-color-warning-on-quiet); }
+
+@media (hover: hover) and (pointer: fine) {
+  .rd-result:hover { background: var(--wa-color-neutral-fill-quiet); }
+  .rd-key:not([aria-pressed="true"]):hover { color: var(--wa-color-text-normal); border-color: var(--wa-color-text-quiet); }
+}
+@media (pointer: coarse) {
+  .rd-field select, .rd-field input, .rd-search input, .rd-result, .rd-key { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rd-result, .rd-key { transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease; }
+  .rd-result:active, .rd-key:active { transform: none; }
+}
+@media (max-width: 520px) {
+  .rd-form { grid-template-columns: minmax(0, 1fr); }
+  .rd-plate { padding: 12px 14px 14px; }
+}
+
+#data-range::part(form-control-input) { flex-wrap: wrap; }
+wa-radio[appearance="button"] { white-space: nowrap; }

@@ -202,7 +202,7 @@ async def test_route_needs_the_token_and_follows_away(client):
 # --- web/week.js, under Node ------------------------------------------------------------
 # The pure helpers the week view and the wizard share, run against this API's output.
 
-WEEK_JS = Path(__file__).resolve().parents[2] / "web" / "week.js"
+WEEK_JS = Path(__file__).resolve().parents[2] / "web" / "src" / "week.js"
 NODE = shutil.which("node")
 
 SCRIPT = """

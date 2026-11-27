@@ -34,6 +34,8 @@ uv venv && uv pip install -e ".[server]"
 
 Use `".[dev]"` instead if you also want the tests and ruff. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+You don't need Node. The web UI is built from `web/` into `src/radiate/web`, and that build is committed, so the server, the wheel, the Docker image and the Home Assistant App all serve it as it is. You only need Node 20 to change the UI; see [Change the web UI](#change-the-web-ui).
+
 Run the demo, a simulated house at 60 times real time:
 
 ```bash
@@ -155,7 +157,7 @@ The container makes outbound connections to the MQTT broker and the Shelly, so t
 | `RADIATE_OTLP_ENDPOINT`, `RADIATE_OTLP_PROTOCOL` | Turn on the [OpenTelemetry export](#opentelemetry-export) when the house file has no `export.otlp` section (the App and the demo) |
 | `RADIATE_OTLP_API_KEY` | The OpenTelemetry export's API key, when `export.otlp` gives neither `api_key` nor `api_key_file` |
 | `RADIATE_INGRESS_IP` | Set by the Home Assistant App only. Requests from this address with an `X-Ingress-Path` header skip the token check and any login |
-| `RADIATE_WEB_DIR` | Serve the web UI from another folder, for UI development |
+| `RADIATE_WEB_DIR` | Serve the web UI from another folder, such as a build of a branch's `web/` |
 | Any name used as `${NAME}` in the configuration file | Substituted when the file loads |
 
 We recommend setting `RADIATE_TOKEN` on a standalone install. The built-in web UI then shows a sign-in card the first time you open it. Enter the token, and the browser keeps it in its local storage, so you sign in once per browser. The UI sends it as a Bearer header, and as the first message on the live WebSocket, because browsers cannot set headers there. The token never goes in a URL, so it stays out of access and proxy logs. To sign out, clear the site data for Radiate in your browser.
@@ -558,7 +560,7 @@ On the first visit your browser downloads about 5 MB of Python from jsDelivr, th
 
 ### How it is built and published
 
-`scripts/build_demo.py` (standard library only) writes a static site to `dist/demo/`: the same web UI as the server, a Web Worker that loads Pyodide, and a zip of the Python modules the worker imports. The page sets `data-transport="demo"`, so the UI talks to the worker instead of the HTTP API. Request validation lives in `src/radiate/server/bridge.py`, which the server also uses, so the demo and the server accept the same requests.
+`scripts/build_demo.py` (standard library only) writes a static site to `dist/demo/`: the same built web UI as the server (from `src/radiate/web`), a Web Worker that loads Pyodide, and a zip of the Python modules the worker imports. The page sets `data-transport="demo"`, so the UI talks to the worker instead of the HTTP API. Request validation lives in `src/radiate/server/bridge.py`, which the server also uses, so the demo and the server accept the same requests.
 
 The `Pages` workflow (`.github/workflows/pages.yml`) builds and deploys the site on every push to `main`, or when you run it by hand from the **Actions** tab. The repository's **Settings** > **Pages** > **Source** must be set to **GitHub Actions**.
 
@@ -571,4 +573,30 @@ python -m http.server -d dist
 
 Then open `http://localhost:8000/demo/`. The browser console shows load timings in `window.radiateDemoTimings`.
 
-To update Python, change `PYODIDE_VERSION` in `web/demo-worker.js` to an exact Pyodide release that is at least two weeks old. A test checks the version format.
+To update Python, change `PYODIDE_VERSION` in `web/public/demo-worker.js`, then rebuild the web UI, to an exact Pyodide release that is at least two weeks old. A test checks the version format.
+
+## Change the web UI
+
+The web UI is a [Vite](https://vite.dev/) project in `web/`: plain JavaScript modules in `web/src`, the pages in `web/index.html` and `web/login.html`, and the demo worker in `web/public`. It uses [Web Awesome](https://webawesome.com/) 3 components and its "awesome" theme. `npm run build` writes the result to `src/radiate/web`, which is committed, so nothing else in Radiate needs Node.
+
+You need Node 20 or later.
+
+```bash
+cd web
+npm ci
+npm run build
+```
+
+Commit the rebuilt `src/radiate/web` with your change to `web/`. The `Web UI build is current` CI job rebuilds it and fails if the committed copy differs.
+
+To work on the UI with live reloading, run a Radiate server on port 8099 and the Vite dev server beside it. The dev server sends `/api` to port 8099:
+
+```bash
+.venv/bin/radiate serve --demo --speed 60 &
+cd web && npm run dev
+```
+
+Set `RADIATE_API` to point the dev server at another Radiate, for example `RADIATE_API=http://127.0.0.1:8170 npm run dev`. Add `?fixture=<name>` to the dev server's address to see states the demo can't produce: `relay-lost`, `safe-mode`, `dry-run`, `quiet`, `frost`, `not-linked`, `viewer`, `offline` and `worst` (fifteen rooms, long names, missing readings). They're in `web/src/dev-fixtures.js` and never reach the build.
+
+Everything the page loads is served with it. The Quicksand font comes from Fontsource (SIL Open Font License 1.1) and the icons are Font Awesome Free (icons CC BY 4.0), copied at build time into `src/radiate/web/icons`, only those the UI names. The UI never loads anything from the internet; only the online demo's worker loads Pyodide from jsDelivr.
+

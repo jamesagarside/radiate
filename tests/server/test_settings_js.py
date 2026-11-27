@@ -12,7 +12,7 @@ import pytest
 from radiate.server.bridge import DemoSession
 
 ROOT = Path(__file__).resolve().parents[2]
-SETTINGS_JS = ROOT / "web" / "settings.js"
+SETTINGS_JS = ROOT / "web" / "src" / "settings.js"
 NODE = shutil.which("node")
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node is not installed")
