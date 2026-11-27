@@ -247,6 +247,11 @@ class Person:
     # `person.sam`. The integration uses it unless its own options map the person.
     ha_person: str | None = None
 
+    @property
+    def shown_name(self) -> str:
+        """The name clients show: `name`, or the ID in words ("early_riser" is "Early riser")."""
+        return self.name or self.id.replace("_", " ").capitalize()
+
     def routine(self, day_type: str) -> Routine:
         return self.weekend if day_type == "weekend" else self.weekdays
 
@@ -475,7 +480,7 @@ def household_view(household: Household) -> dict:
         people.append(
             {
                 "id": p.id,
-                "name": p.name or p.id.replace("_", " ").capitalize(),
+                "name": p.shown_name,
                 "weekdays": routine(p.weekdays),
                 "weekend": routine(p.weekend),
                 "getting_up_min": _or(p.getting_up_min, t.getting_up_min),

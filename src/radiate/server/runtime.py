@@ -1655,7 +1655,7 @@ class Runtime:
             "people": [
                 {
                     "id": p.id,
-                    "name": p.name or p.id.replace("_", " ").capitalize(),
+                    "name": p.shown_name,
                     "ha_person": p.ha_person,
                 }
                 for p in (self.household.people if self.household else ())

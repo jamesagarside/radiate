@@ -186,7 +186,7 @@ def _weekday(rt: Runtime) -> int:
 def _names(hh: Household | None) -> dict[str, str]:
     if hh is None:
         return {}
-    return {p.id: p.name or p.id.replace("_", " ").capitalize() for p in hh.people}
+    return {p.id: p.shown_name for p in hh.people}
 
 
 def _levels(hh: Household | None) -> dict | None:
