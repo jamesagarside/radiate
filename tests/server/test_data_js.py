@@ -13,7 +13,7 @@ from radiate.server.data import data_view, series_view
 from radiate.server.demo import demo_runtime
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA_JS = ROOT / "web" / "data.js"
+DATA_JS = ROOT / "web" / "src" / "data.js"
 NODE = shutil.which("node")
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node is not installed")

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en-GB" class="wa-theme-awesome wa-palette-bright wa-brand-orange">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Sign in to Radiate</title>
+  <script>
+    document.documentElement.classList.add(matchMedia("(prefers-color-scheme: dark)").matches ? "wa-dark" : "wa-light");
+  </script>
+  <script type="module" crossorigin src="static/assets/login.js"></script>
+  <link rel="modulepreload" crossorigin href="static/assets/app.js">
+  <link rel="stylesheet" crossorigin href="static/assets/app.css">
+  <link rel="stylesheet" crossorigin href="static/assets/login.css">
+</head>
+<body class="login-page">
+  <main class="login wa-stack wa-gap-l">
+    <div class="brand wa-cluster wa-gap-xs">
+      <wa-icon name="fire-flame-curved"></wa-icon>
+      <span class="wa-heading-l">Radiate</span>
+    </div>
+
+    <wa-card class="login-plate">
+      <div slot="header" class="wa-stack wa-gap-2xs">
+        <h1 class="wa-heading-l" id="login-h">Sign in</h1>
+        <p class="wa-color-text-quiet" id="login-intro">Sign in to see the house and change the heating.</p>
+      </div>
+      <div class="wa-stack wa-gap-m">
+        <wa-callout variant="warning" size="s" id="login-error" role="alert" hidden></wa-callout>
+
+        <form id="login-form" class="wa-stack wa-gap-m" hidden novalidate>
+          <wa-input id="login-user" name="username" label="Username" autocomplete="username" autocapitalize="off" spellcheck="false" required></wa-input>
+          <wa-input id="login-pass" name="password" type="password" label="Password" autocomplete="current-password" password-toggle required></wa-input>
+          <div><wa-button type="submit" variant="brand">Sign in</wa-button></div>
+        </form>
+
+        <wa-divider id="login-or" hidden></wa-divider>
+        <div class="wa-stack wa-gap-xs" id="login-sso" hidden></div>
+
+        <wa-callout class="radiate-cool" id="login-first" hidden>
+          <wa-icon slot="icon" name="user-plus"></wa-icon>
+          <div class="wa-stack wa-gap-xs">
+            <p><strong>No one can sign in yet.</strong> Add the first person where Radiate runs, with the same <code>--config</code> or <code>--data-dir</code> as the server:</p>
+            <pre><code>radiate users add NAME --role admin --config radiate.yaml</code></pre>
+            <p>This page never creates the first account, so whoever reaches it first can't take over the heating.</p>
+          </div>
+        </wa-callout>
+      </div>
+    </wa-card>
+
+    <p class="wa-caption-m wa-color-text-quiet" id="login-foot">Forgotten your password? Whoever runs Radiate can reset it with <code>radiate users reset-password</code>.</p>
+  </main>
+</body>
+</html>

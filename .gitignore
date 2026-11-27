@@ -225,3 +225,6 @@ __marimo__/
 
 # Radiate state from running the server in a source checkout (house.data_dir default)
 /data/
+
+# Web UI build (web/): dependencies only. The built UI in src/radiate/web is committed.
+web/node_modules/

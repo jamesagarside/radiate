@@ -20,68 +20,85 @@ def site(tmp_path_factory):
     return build_demo.build(tmp_path_factory.mktemp("site") / "demo")
 
 
+WEB = ROOT / "src" / "radiate" / "web"  # the built UI, committed
+
+
 def test_expected_files(site):
     files = {p.relative_to(site).as_posix() for p in site.rglob("*") if p.is_file()}
-    assert files == {
-        ".nojekyll",
-        "index.html",
-        "static/app.css",
-        "static/app.js",
-        "static/pending.js",
-        "static/learned.js",
-        "static/security.js",
-        "static/week.js",
-        "static/household.js",
-        "static/setup.js",
-        "static/devices.js",
-        "static/suggestions.js",
-        "static/savings.js",
-        "static/savings.css",
-        "static/data.js",
-        "static/data.css",
-        "static/house.js",
-        "static/house.css",
-        "static/guide.js",
-        "static/guide.css",
-        "static/settings.js",
-        "static/settings.css",
-        *(f"static/fonts/{p.name}" for p in (ROOT / "web" / "fonts").iterdir()),
-        "static/demo.css",
-        "static/demo.js",
-        "static/demo-worker.js",
-        "static/radiate.zip",
+    built = {
+        f"static/{p.relative_to(WEB).as_posix()}"
+        for p in WEB.rglob("*")
+        if p.is_file() and p.name not in ("index.html", "login.html")
     }
+    assert files == {".nojekyll", "index.html", "static/radiate.zip", *built}
+    for name in (
+        "static/assets/index.js",
+        "static/assets/demo.js",
+        "static/demo-worker.js",
+        "static/icons/house.svg",
+        "static/assets/quicksand-latin-400-normal.woff2",
+    ):
+        assert name in files, name
+    assert "static/login.html" not in files  # the demo has no login
 
 
 def test_index_uses_the_demo_transport_and_relative_urls(site):
     html = (site / "index.html").read_text()
-    assert '<html lang="en-GB" data-transport="demo">' in html
-    assert 'href="static/demo.css"' in html
-    for url in re.findall(r'(?:src|href)="([^"]+)"', html):
+    assert '<html data-transport="demo" lang="en-GB"' in html
+    assert "<title>Radiate demo</title>" in html
+    urls = re.findall(r'(?:src|href)="([^"]+)"', html)
+    assert "static/assets/index.js" in urls
+    for url in urls:
         assert not url.startswith(("/", "http:", "https:")), url
+        if url.startswith("static/"):
+            assert (site / url).is_file(), url
 
 
 def test_static_assets_have_no_root_relative_urls(site):
-    for name in (
-        "app.js",
-        "pending.js",
-        "learned.js",
-        "week.js",
-        "household.js",
-        "setup.js",
-        "devices.js",
-        "suggestions.js",
-        "savings.js",
-        "data.js",
-        "demo.js",
-        "demo-worker.js",
-    ):
-        text = (site / "static" / name).read_text()
-        assert not re.search(r"""["'`]/(?:static|api)/""", text), name
+    scripts = [*(site / "static" / "assets").glob("*.js"), site / "static" / "demo-worker.js"]
+    assert len(scripts) > 2
+    for path in scripts:
+        text = path.read_text()
+        assert not re.search(r"""["'`]/(?:static|api)/""", text), path.name
+
+
+def test_the_ui_loads_nothing_from_the_internet():
+    """Radiate runs on a LAN: fonts and icons are served with it, never from a CDN.
+    Only the demo worker loads Pyodide from jsDelivr."""
+    for page in ("index.html", "login.html"):
+        html = (WEB / page).read_text()
+        for url in re.findall(r'(?:src|href)="([^"]+)"', html):
+            assert not url.startswith(("/", "http:", "https:", "//")), (page, url)
+    for css in (WEB / "assets").glob("*.css"):
+        text = css.read_text()
+        assert "@import" not in text, css.name  # the theme's font CDN import is gone
+        for url in re.findall(r"url\(([^)]*)\)", text):
+            url = url.strip("'\"")
+            assert url.startswith(("data:", "./", "#")), (css.name, url[:60])
+    # The icon library points at the icons served with the UI.
+    scripts = "".join(p.read_text() for p in (WEB / "assets").glob("*.js"))
+    assert "static/icons/" in scripts
+
+
+def test_the_committed_build_matches_the_sources():
+    """Every icon the sources name was built, so a missing rebuild shows up here too.
+    CI rebuilds web/ and fails on any difference (.github/workflows/ci.yml)."""
+    sources = [
+        ROOT / "web" / "index.html",
+        ROOT / "web" / "login.html",
+        *(ROOT / "web" / "src").rglob("*.js"),
+    ]
+    names = set()
+    pattern = r'<wa-icon\b[^>]*?\sname="([a-z0-9-]+)"|\bicon: "([a-z0-9-]+)"|\btile\("([a-z0-9-]+)"'
+    for path in sources:
+        for m in re.finditer(pattern, path.read_text()):
+            names.add(next(g for g in m.groups() if g))
+    built = {p.stem for p in (WEB / "icons").glob("*.svg")}
+    assert names == built
 
 
 def test_pyodide_is_pinned_to_an_exact_version():
-    worker = (ROOT / "web" / "demo-worker.js").read_text()
+    worker = (ROOT / "web" / "public" / "demo-worker.js").read_text()
     assert re.search(r'PYODIDE_VERSION = "\d+\.\d+\.\d+"', worker)
     assert "cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/" in worker
 

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-WEB = ROOT / "web"
+WEB = ROOT / "web" / "src"
 NODE = shutil.which("node")
 
 needs_node = pytest.mark.skipif(NODE is None, reason="Node is not installed")
@@ -186,7 +186,8 @@ def test_app_sends_every_toggle_through_send_change():
 
 
 def test_controls_have_somewhere_to_say_not_saved():
-    html = (WEB / "index.html").read_text()
+    # The page's fixed controls are in index.html; a room's are drawn by app.js.
+    html = (WEB.parent / "index.html").read_text() + (WEB / "app.js").read_text()
     for marker in (
         'id="mode-error"',
         'id="boost-error"',

@@ -84,7 +84,7 @@ Code: `Household`, `compile_household` in `radiate.config.household`, config key
 
 **Household setup**:
 The web UI's wizard for the household: People, Routines, Rooms, Temperatures and the Result, the week each room will follow. It saves a saved household.
-Code: `web/setup.js`, `web/household.js` (the draft and `toSection`), `HouseholdSetup` in `radiate.server.setup`, API `GET`, `PUT` and `DELETE /api/v1/household` and `POST /api/v1/household/preview`.
+Code: `web/src/setup.js`, `web/src/household.js` (the draft and `toSection`), `HouseholdSetup` in `radiate.server.setup`, API `GET`, `PUT` and `DELETE /api/v1/household` and `POST /api/v1/household/preview`.
 
 **Saved household**:
 A household saved from the household setup, in `<data_dir>/household.yaml`. It replaces the house file's `household` section as a whole, away settings included, for the server, `check-config` and `radiate schedules` given the same data directory, so later edits to that section in the house file have no effect; `check-config` names them. Deleting it goes back to the house file's.
@@ -142,7 +142,7 @@ Code: `DroppedPeriod` (`room_id`, `day_type`, `days`, `start_min`, `end_min`, `s
 
 **Room adjustment**:
 A change to one household room's week that its routines don't give: keep it warm, or keep it cold, from one time to another on some days (`weekdays`, `weekend`, `daily` or named days). Adjustments apply in order after the routine rules, so a later one wins where two overlap. Their times are the live schedule's; the valve schedule adds the fixed preheat and is then fitted to the TRVZB. They don't apply while everyone who uses the room is away. Made by dragging the edge of a warm period in the week view, or with its Adjust form, and saved with the household, so they survive recompiling. At most 10 a room.
-Code: `Adjustment` (`days`, `keep`, `from_min`, `to_min`), `Keep`, `RoomLink.adjust`, `without_adjustments`, `CompiledHousehold.periods` and `CompiledHousehold.adjusted` in `radiate.config.household`; `LIMITS["rooms.adjust"]`; config key `household.rooms.<id>.adjust`; API `adjust`, `routine`, `days[].periods` and `days[].adjusted` in `GET /api/v1/schedules`; `addAdjustment` and `editRoom` in `web/week.js`.
+Code: `Adjustment` (`days`, `keep`, `from_min`, `to_min`), `Keep`, `RoomLink.adjust`, `without_adjustments`, `CompiledHousehold.periods` and `CompiledHousehold.adjusted` in `radiate.config.household`; `LIMITS["rooms.adjust"]`; config key `household.rooms.<id>.adjust`; API `adjust`, `routine`, `days[].periods` and `days[].adjusted` in `GET /api/v1/schedules`; `addAdjustment` and `editRoom` in `web/src/week.js`.
 _Avoid_: override (a temporary setpoint for a room, which ends by itself), exception, schedule edit.
 
 **Away**:
@@ -282,7 +282,7 @@ Code: `TrvOptions.schedule_mirror`, `WeekSchedule.trvzb_payload`, config key `tr
 
 **Room model**:
 The first-order model Radiate learns for each controllable room: `dT/dt = a * drive - b * (T - T_out) + d`.
-The web UI explains it per room under "What Radiate has learned" on the room card (`web/learned.js`), and for the house in the Guide's "What the room model is".
+The web UI explains it per room under "What Radiate has learned" on the room card (`web/src/learned.js`), and for the house in the Guide's "What the room model is".
 Code: `RoomEstimator` in `radiate.core.estimator`.
 
 **Heating gain**:
@@ -684,11 +684,11 @@ _Avoid_: DHW priority.
 
 ## Savings
 
-Built ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.9](spec.md#59-savings)): the core (`radiate.core.savings`), the API (`radiate.server.savings`) and the Savings view (`web/savings.js`).
+Built ([ADR-0004](adr/0004-efficiency-by-room-use.md), [spec 5.9](spec.md#59-savings)): the core (`radiate.core.savings`), the API (`radiate.server.savings`) and the Savings view (`web/src/savings.js`).
 
 **Savings**:
 The oil Radiate estimates it saved against the savings baseline, from measured temperatures and measured oil, with the comfort it cost shown beside it. In litres, per day and in total, and as a percentage of the baseline's litres. A day's saving can be negative.
-Code: `radiate.core.savings` (`SavingsMeter`, `report`), `radiate.server.savings` (`savings_view`), API `GET /api/v1/savings`, UI "Savings" tab (`web/savings.js`).
+Code: `radiate.core.savings` (`SavingsMeter`, `report`), `radiate.server.savings` (`savings_view`), API `GET /api/v1/savings`, UI "Savings" tab (`web/src/savings.js`).
 _Avoid_: "up to" figures, and "savings" for a simulated or projected figure.
 
 **Savings baseline**:
@@ -839,7 +839,7 @@ Code: `loss_confidence` in `radiate.core.suggestions`.
 
 **House model**:
 The drawing of the house at the top of the web UI's House page: each floor's rooms as blocks, floors stacked, each room coloured by its temperature. It shows the house; it never feeds the core.
-Code: `createHouse` and `isoMarkup` in `web/house.js`, UI "Your house".
+Code: `createHouse` and `isoMarkup` in `web/src/house.js`, UI "Your house".
 _Avoid_: "house model" for `HouseConfig`, the house as the configuration describes it, or for a room model. Section 2 of the spec is headed "House model" in that older sense (see Ambiguities).
 
 **House layout**:
@@ -849,7 +849,7 @@ _Avoid_: floor plan for the saved data; the floor plan is the editor's view of o
 
 **Guessed layout**:
 The house layout Radiate draws until one is saved: rooms whose names suggest an upper floor (bedroom, bathroom, landing and so on) on "First floor", the rest on "Ground floor".
-Code: `guessLayout` in `web/house.js`, UI "Rooms are placed by a guess from their names."
+Code: `guessLayout` in `web/src/house.js`, UI "Rooms are placed by a guess from their names."
 
 **Boiler linked**:
 Whether Radiate can switch the boiler: true when the configuration has a `shelly` section. Without it, the UI says the boiler switch isn't linked and never calls the boiler idle.
@@ -895,7 +895,7 @@ Code: `ROLES`, `role_at_least`, `Identity.role`, `RoleMap`, `radiate.server.perm
 
 **Security log**:
 The record of every security event: sign-ins and refused sign-ins, sign-outs, sessions that ended, refused requests, lockouts, user changes and changes to how Radiate runs, each with who and from where and never a secret. Kept in `radiate.db` for `auth.audit_days`, written to the process log, and sent over the OpenTelemetry export as `radiate.security.*` events unless `export.otlp.security` is `false`. A username that matches no account is recorded as its keyed hash, OpenTelemetry's `user.hash`, shown as `unknown:` and 16 hex digits. With `auth.audit_controls` on (the default), day-to-day controls are recorded too. Admins read it in the Security log section of the web UI's Settings view. See ADR-0008. Avoid: audit trail, access log.
-Code: `radiate.server.security.SecurityLog`, `SecurityLog.pseudonym`, key file `<data_dir>/audit.key`, table `audit_log`, logger `radiate.security`, `telemetry.SECURITY_EVENTS`, API `GET /api/v1/audit`, `web/security.js`.
+Code: `radiate.server.security.SecurityLog`, `SecurityLog.pseudonym`, key file `<data_dir>/audit.key`, table `audit_log`, logger `radiate.security`, `telemetry.SECURITY_EVENTS`, API `GET /api/v1/audit`, `web/src/security.js`.
 
 **Security event**:
 One entry in the security log, such as `radiate.security.login.failed`. Carries ECS's `event.category`, `event.type` and `event.outcome`, and a reason code in `error.type` for a refusal (`bad_password`, `bad_token`, `forbidden` and so on). Refusals of one kind from one address within a minute are folded into one, with `radiate.security.count`.
@@ -928,7 +928,7 @@ _Avoid_: "recorder" for this, which means the Home Assistant recorder.
 
 **Raw data**:
 The tick history read as series, to search, chart and download in the web UI's Raw data view and `GET /api/v1/data`.
-Code: `radiate.core.series`, `radiate.server.data`, `web/data.js`.
+Code: `radiate.core.series`, `radiate.server.data`, `web/src/data.js`.
 
 **Series**:
 One metric for one room, or for the house, over time: `room.temperature@lounge`, `boiler.relay`. The key is the metric ID, then `@` and the room ID for a room metric.
@@ -1007,7 +1007,7 @@ Code: `SECTIONS`, `Section`, `Setting`, `register_section` in `radiate.config.se
 
 **Saved settings**:
 Settings changed in the web UI's Settings view, in `<data_dir>/settings.yaml`. Each one replaces the house file's value for its key, for the server and the CLI given the same data directory; the house file is never written. Saved settings that would not load are not used, and the view says why.
-Code: `read_settings`, `write_settings` in `radiate.config.saved`, `merge_settings` in `radiate.config.settings`, `apply_saved_settings` and `parse_with_settings` in `radiate.config.site`, `SiteConfig.saved_settings`, `SiteConfig.settings_problems`, `SettingsEditor` in `radiate.server.settings`, API `GET`, `PUT` and `DELETE /api/v1/settings/config`, `web/settings.js`.
+Code: `read_settings`, `write_settings` in `radiate.config.saved`, `merge_settings` in `radiate.config.settings`, `apply_saved_settings` and `parse_with_settings` in `radiate.config.site`, `SiteConfig.saved_settings`, `SiteConfig.settings_problems`, `SettingsEditor` in `radiate.server.settings`, API `GET`, `PUT` and `DELETE /api/v1/settings/config`, `web/src/settings.js`.
 _Avoid_: overrides (that is a held setpoint), config overlay.
 
 **Setting source**:

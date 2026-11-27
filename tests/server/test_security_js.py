@@ -13,7 +13,7 @@ from radiate.export import telemetry
 from radiate.server.security import SecurityLog
 
 ROOT = Path(__file__).resolve().parents[2]
-SECURITY_JS = ROOT / "web" / "security.js"
+SECURITY_JS = ROOT / "web" / "src" / "security.js"
 NODE = shutil.which("node")
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node is not installed")

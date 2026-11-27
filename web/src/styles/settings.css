@@ -1,0 +1,138 @@
+/* Settings view (#settings). Tokens come from app.css. The layout is the Guide's: a
+   contents plate beside one column, here wider, since each setting is a row of label,
+   help and control. Each section is a plate under a section heading; each room is a
+   plate that opens to show its settings. Square corners, one cut corner per plate,
+   ink rules, no shadows. */
+
+.settings-view { display: grid; gap: var(--wa-space-l); min-width: 0; }
+body[data-auth="needed"] .settings-view { display: none; }
+.settings-view .notice { margin: 0; }
+.settings-view .notice p { display: flex; flex-wrap: wrap; gap: 2px 0; align-items: baseline; }
+.settings-body { display: grid; grid-template-columns: 250px minmax(0, 52rem); gap: 20px 36px; align-items: start; }
+.settings-sections { display: grid; gap: 20px; min-width: 0; }
+.settings-list { display: grid; gap: 28px; min-width: 0; }
+
+.st-all { display: grid; gap: 8px; justify-items: start; font-size: 0.9rem; }
+.st-sec { display: grid; gap: 10px; min-width: 0; }
+.st-sec .section-h { margin: 0; scroll-margin-top: 8rem; }
+.st-sec .section-h:focus { outline: none; }
+.st-sec .section-h:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
+.st-help { margin: 0; }
+
+.st-plate { padding: 4px 18px 16px; min-width: 0; }
+.st-linked { padding: 14px 18px; }
+.st-form { display: grid; }
+
+/* A setting: label and source on the left, the control on the right on wide plates;
+   stacked on a phone. Thin rules between rows. */
+.st-field {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 18rem); gap: 4px 20px;
+  grid-template-areas: "head control" "help control" "file control" "error error";
+  padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start;
+}
+.st-head { grid-area: head; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.st-label { font-weight: 600; font-size: 0.92rem; }
+.st-field .field-help { grid-area: help; max-width: 62ch; }
+.st-control { grid-area: control; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.st-file { grid-area: file; font-size: 0.8rem; color: var(--muted); }
+.st-field .field-error { grid-area: error; }
+.st-fixed { font-size: 0.85rem; color: var(--muted); }
+.st-fixed code { font-size: 0.82rem; color: var(--text); overflow-wrap: anywhere; }
+
+/* Where the value comes from. Set here is cobalt, as a held setpoint is: the reader
+   chose it over the house file. The house file and the default are neutral. */
+.st-src {
+  font-size: 0.72rem; font-weight: 600; padding: 1px 7px; white-space: nowrap;
+  background: var(--surface-2); color: var(--muted);
+}
+.st-src[data-source="app"] { background: var(--cool-soft); color: var(--cool); }
+.st-src[data-source="default"] { background: transparent; padding-inline: 0; font-weight: 500; }
+.st-field[data-source="app"] { box-shadow: inset 3px 0 0 var(--cool); padding-left: 12px; margin-left: -12px; }
+.st-head .tag { margin: 0; }
+
+.st-control input, .st-control select {
+   max-width: 100%; min-width: 0;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.st-control input[type="text"], .st-control input[type="password"] { width: 100%; }
+.st-control input.num { width: 6.5em; font-variant-numeric: tabular-nums; }
+.st-control select { width: 100%; }
+.st-control [aria-invalid="true"] { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+.st-control .unit input { flex: none; }
+.st-control .seg button { padding: 6px 14px; }
+.st-use { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; width: 100%; }
+.st-use-part { display: grid; gap: 2px; min-width: 0; }
+.st-use-part label { font-size: 0.78rem; color: var(--muted); }
+
+/* Save, cancel and go back to the house file, then the result in words. */
+.st-foot { display: grid; gap: 8px; padding-top: 14px; }
+.st-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.st-actions .link { font-size: 0.85rem; }
+.st-status { font-size: 0.85rem; color: var(--cool); max-width: 70ch; }
+.st-status:empty { display: none; }
+.st-status:focus { outline: none; }
+.st-status:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
+.st-status[data-kind="error"] { color: var(--warn); }
+
+/* The question before a change that can write to the boiler or valves: a flat band
+   with the amber rule, as the dry run notice. */
+.st-confirm {
+  display: grid; gap: 8px; padding: 10px 14px; background: var(--surface-2);
+  border-left: 4px solid var(--warn); font-size: 0.88rem;
+}
+.st-confirm-text { max-width: 70ch; }
+
+/* A room: a plate that opens. The summary is the room name, with what is set here. */
+.st-room { padding: 0 18px; }
+.st-room > summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 12px 0; cursor: pointer;
+  list-style: none; font-family: var(--display); font-weight: 600; font-size: 1rem;
+}
+.st-room > summary::-webkit-details-marker { display: none; }
+.st-room > summary::before {
+  content: ""; width: 8px; height: 8px; border-right: 2px solid var(--text); border-bottom: 2px solid var(--text);
+  transform: rotate(-45deg); transition: transform 160ms var(--ease-out); flex: none;
+}
+.st-room[open] > summary::before { transform: rotate(45deg); }
+.st-room[open] > summary { border-bottom: 2px solid var(--text); }
+.st-room > summary:focus-visible { outline: 2px solid var(--cool); outline-offset: -2px; }
+.st-room .st-form { padding-bottom: 16px; }
+.st-room-name { min-width: 0; overflow-wrap: anywhere; }
+.badge[data-kind="set"] { background: var(--cool-soft); color: var(--cool); }
+.badge[data-kind="restart"] { background: var(--warn-soft); color: var(--warn); }
+#s-rooms .st-room + .st-room { margin-top: 8px; }
+
+/* The security log (admins only), the last section: filters and Refresh above a table
+   of events, refusals tagged in amber. Fields and the table are the Raw data view's
+   (data.css). */
+.sl-plate { padding: 14px 18px 16px; display: grid; gap: 14px; }
+.sl-toolbar { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 10px 16px; }
+.sl-filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
+.sl-filters .rd-field { min-width: 180px; }
+.sl-table th, .sl-table td { text-align: left; vertical-align: top; }
+.sl-table .sl-detail { white-space: normal; min-width: 24ch; max-width: 60ch; overflow-wrap: anywhere; }
+.sl-table tr[data-kind="warn"] th { box-shadow: inset 4px 0 0 var(--warn); padding-left: 8px; }
+.badge[data-kind="refused"] { background: var(--warn-soft); color: var(--warn); }
+
+@media (pointer: coarse) {
+  .st-control input, .st-control select { min-height: 44px; }
+  .st-room > summary { min-height: 44px; }
+  .st-actions .link, .st-file .link { padding-block: 13px; margin-block: -13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .st-room > summary::before { transition: none; }
+}
+
+@media (max-width: 980px) {
+  .settings-body { grid-template-columns: minmax(0, 1fr); }
+  /* Twelve short names: two or more columns, so the contents don't fill a phone. */
+  .settings-toc ul { grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); column-gap: 20px; }
+}
+@media (max-width: 640px) {
+  .st-field {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "head" "help" "control" "file" "error";
+  }
+  .st-plate, .st-room, .sl-plate { padding-inline: 14px; }
+  .st-field[data-source="app"] { padding-left: 10px; margin-left: -10px; }
+}

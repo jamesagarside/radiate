@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node is not installed")
 
 def run(script: str, data: dict, tmp_path: Path, name: str = "week") -> dict:
     module = tmp_path / f"{name}.mjs"
-    shutil.copyfile(ROOT / "web" / f"{name}.js", module)
+    shutil.copyfile(ROOT / "web" / "src" / f"{name}.js", module)
     out = subprocess.run(
         [NODE, "--input-type=module", "-e", script, module.as_uri()],
         input=json.dumps(data),

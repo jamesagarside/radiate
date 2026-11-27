@@ -1,0 +1,83 @@
+/* The house model, the house now and today's plan (src/house.js). The plates are
+   <wa-card>; this styles only the drawings inside them, on Web Awesome tokens. */
+
+.hm-model, .hm-status, .hm-plan { min-width: 0; }
+.hm-model p, .hm-status p, .hm-plan p { margin: 0; }
+
+/* temperature key */
+.hm-scale { display: inline-flex; align-items: center; gap: var(--wa-space-2xs); }
+.hm-lab { font-size: var(--wa-font-size-xs); font-weight: var(--wa-font-weight-bold); color: var(--wa-color-text-quiet); font-variant-numeric: tabular-nums; }
+.hm-ramp { display: block; width: 6rem; height: 0.5rem; border-radius: var(--wa-border-radius-pill); }
+
+/* the model */
+.hm-iso { width: 100%; height: auto; min-height: 16rem; max-height: 32rem; display: block; overflow: visible; }
+.hm-room { cursor: pointer; }
+.hm-room:focus { outline: none; }
+.hm-room[aria-pressed="true"] .hm-top { stroke: var(--wa-color-text-normal); stroke-width: 3; }
+.hm-room:focus-visible .hm-top { stroke: var(--wa-color-focus); stroke-width: 4; }
+.hm-t { font-family: var(--wa-font-family-body); font-weight: var(--wa-font-weight-bold); font-size: 17px; font-variant-numeric: tabular-nums; }
+.hm-n { font-family: var(--wa-font-family-body); font-weight: var(--wa-font-weight-semibold); font-size: 9.5px; }
+.hm-ftag { font-family: var(--wa-font-family-body); font-size: 11px; font-weight: var(--wa-font-weight-semibold); fill: var(--wa-color-text-quiet); }
+@media (hover: hover) and (pointer: fine) {
+  .hm-room:hover .hm-top { filter: brightness(1.06); }
+}
+/* A radiator taking heat blinks: a hard on and off, no fade, no movement. */
+@media (prefers-reduced-motion: no-preference) {
+  .hm-rad { animation: hm-glow 1.8s steps(2, jump-none) infinite; }
+  @keyframes hm-glow { 50% { opacity: 0.25; } }
+}
+
+/* the house now */
+.hm-hero { display: grid; grid-template-columns: auto 1fr; gap: var(--wa-space-2xs) var(--wa-space-m); align-items: end; }
+.hm-big { font-size: var(--wa-font-size-4xl); line-height: 0.95; letter-spacing: -0.02em; }
+.hm-big small { font-size: 0.45em; color: var(--wa-color-text-quiet); }
+.hm-hero p { max-width: 26ch; }
+.hm-spread svg { width: 100%; height: 4rem; display: block; overflow: visible; }
+.hm-axisline { stroke: var(--wa-color-surface-border); stroke-width: 2; }
+.hm-target { fill: var(--wa-color-text-normal); }
+.hm-axis { font-family: var(--wa-font-family-body); font-weight: var(--wa-font-weight-bold); font-size: 11px; fill: var(--wa-color-text-quiet); }
+.hm-cells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--wa-space-s); }
+.hm-cell {
+  display: grid; gap: var(--wa-space-3xs); align-content: start; min-width: 0;
+  padding: var(--wa-space-s); border-radius: var(--wa-border-radius-m);
+  background: var(--wa-color-neutral-fill-quiet);
+}
+.hm-cell[data-variant="warning"] { background: var(--wa-color-warning-fill-quiet); }
+.hm-cell[data-variant="warning"] .hm-value { color: var(--wa-color-warning-on-quiet); }
+.hm-cell[data-variant="brand"] { background: var(--wa-color-brand-fill-quiet); }
+.hm-cell[data-variant="brand"] .hm-value { color: var(--wa-color-brand-on-quiet); }
+.hm-value { font-size: var(--wa-font-size-xl); font-weight: var(--wa-font-weight-bold); line-height: 1.1; }
+.hm-value.hm-word { font-size: var(--wa-font-size-l); }
+.hm-next ul { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--wa-space-2xs); }
+.hm-next li { display: grid; grid-template-columns: 3.25rem 1fr; gap: var(--wa-space-s); font-size: var(--wa-font-size-s); }
+
+/* today's plan */
+.hm-tl { display: grid; grid-template-columns: 7.5rem 1fr; gap: var(--wa-space-xs) var(--wa-space-s); align-items: center; }
+.hm-pname { font-size: var(--wa-font-size-s); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-strip { position: relative; height: 1rem; display: flex; border-radius: var(--wa-border-radius-s); overflow: visible; background: var(--wa-color-neutral-fill-quiet); }
+.hm-strip span { height: 100%; }
+.hm-strip span:first-child { border-start-start-radius: var(--wa-border-radius-s); border-end-start-radius: var(--wa-border-radius-s); }
+.hm-now { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--wa-color-text-normal); box-shadow: 0 0 0 1px var(--wa-color-surface-default); }
+.hm-hrs { display: flex; justify-content: space-between; font-size: var(--wa-font-size-xs); font-weight: var(--wa-font-weight-bold); color: var(--wa-color-text-quiet); font-variant-numeric: tabular-nums; }
+
+/* editor */
+.hm-plan2d { width: 100%; height: auto; display: block; border-radius: var(--wa-border-radius-m); background: var(--wa-color-neutral-fill-quiet); touch-action: none; user-select: none; }
+.hm-g1 { stroke: var(--wa-color-neutral-border-quiet); stroke-width: 1; }
+.hm-g2 { stroke: var(--wa-color-surface-border); stroke-width: 0.5; }
+.hm-r2 { cursor: grab; }
+.hm-body { stroke: var(--wa-color-neutral-fill-quiet); stroke-width: 2; }
+.hm-r2:active { cursor: grabbing; }
+.hm-r2:focus { outline: none; }
+.hm-r2.sel .hm-body { stroke: var(--wa-color-text-normal); stroke-width: 2.5; }
+.hm-r2:focus-visible .hm-body { stroke: var(--wa-color-focus); stroke-width: 3; }
+.hm-r2n { font-family: var(--wa-font-family-body); font-weight: var(--wa-font-weight-semibold); font-size: 12px; }
+.hm-r2s { font-family: var(--wa-font-family-body); font-size: 11px; }
+.hm-handle { fill: var(--wa-color-text-normal); cursor: nwse-resize; }
+.hm-chip { border-style: dashed; }
+.hm-save { min-height: 1.2em; }
+
+@media (max-width: 32rem) {
+  .hm-tl { grid-template-columns: 5.25rem 1fr; }
+  .hm-hero { grid-template-columns: 1fr; }
+  .hm-big { font-size: var(--wa-font-size-3xl); }
+}

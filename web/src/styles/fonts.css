@@ -1,0 +1,10 @@
+/* Quicksand, the "awesome" theme's typeface, served with the UI (SIL Open Font
+   License 1.1, from Fontsource). Latin and Latin Extended, the weights the theme uses. */
+@import "@fontsource/quicksand/latin-400.css";
+@import "@fontsource/quicksand/latin-500.css";
+@import "@fontsource/quicksand/latin-600.css";
+@import "@fontsource/quicksand/latin-700.css";
+@import "@fontsource/quicksand/latin-ext-400.css";
+@import "@fontsource/quicksand/latin-ext-500.css";
+@import "@fontsource/quicksand/latin-ext-600.css";
+@import "@fontsource/quicksand/latin-ext-700.css";

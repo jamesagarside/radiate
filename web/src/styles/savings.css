@@ -1,0 +1,105 @@
+/* Savings view (#savings): the oil saved against the baseline, with comfort beside it.
+   Tokens come from app.css. The chart is inline SVG drawn by savings.js: oil used is a
+   solid --heat bar (it was burned), the baseline an ink outline, a day not counted a
+   hatched slot. Outline against fill, never colour alone. Nothing in it animates. */
+
+.savings-view { display: grid; gap: var(--wa-space-l); min-width: 0; }
+body[data-auth="needed"] .savings-view { display: none; }
+.savings-view { transition: opacity 200ms var(--ease-out); }
+body[data-link="stale"] .savings-view { opacity: 0.55; }
+
+/* The headline carries the number for people who skip the chart. */
+.sv-headline {
+  font-family: var(--display); font-weight: 600; font-size: 1.2rem; line-height: 1.3; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums; max-width: 60ch;
+}
+.savings-view[data-state="learning"] .sv-headline { color: var(--cool); }
+.sv-missing { padding: 14px 16px; display: grid; gap: 12px; justify-items: start; font-size: 0.9rem; }
+.sv-missing p { max-width: 70ch; }
+
+.sv-body { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1100px) {
+  .sv-body:has(> .sv-side > :not([hidden])) { grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
+}
+.sv-side { display: grid; gap: 20px; min-width: 0; }
+.sv-plate { padding: 14px 18px 16px; display: grid; gap: 14px; min-width: 0; }
+
+.sv-progress { display: grid; gap: 6px; }
+.sv-meter { width: 100%; max-width: 360px; height: 6px; }
+.sv-meter .meter-fill { background: var(--cool); }
+.sv-progress p { font-size: 0.9rem; max-width: 70ch; }
+.sv-about { display: grid; gap: 2px; font-size: 0.9rem; max-width: 80ch; }
+.sv-about p:empty { display: none; }
+.sv-stats { padding-top: 12px; }
+
+.sv-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sv-chart-h { margin: 0; font-size: 1.05rem; font-weight: 600; }
+.sv-toolbar .sv-chart-h { margin-right: auto; }
+.sv-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: -4px 0 0; font-size: 0.8rem; color: var(--muted); }
+.sv-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sv-legend svg { flex: none; }
+
+.sv-chart-wrap { display: grid; gap: 6px; }
+.sv-chart { min-height: 180px; }
+.sv-chart svg, .sv-line-chart svg { display: block; overflow: visible; }
+.sv-readout { min-height: 2.9em; font-size: 0.88rem; font-variant-numeric: tabular-nums; max-width: 80ch; }
+
+/* Marks. Text in the drawing uses the readout face with tabular figures. */
+.sv-act { fill: var(--heat); }
+.sv-base { fill: none; stroke: var(--text); stroke-width: 1.5; }
+.sv-empty { fill: url(#sv-hatch); stroke: var(--line); stroke-width: 1; }
+.sv-legend .sv-empty { fill: none; stroke: var(--muted); stroke-dasharray: 2 2; }
+.sv-hatch-line { stroke: var(--line); stroke-width: 2; }
+.sv-zero { stroke: var(--text); stroke-width: 1.5; }
+.sv-grid { stroke: var(--line); stroke-width: 1; }
+.sv-ytick, .sv-xtick { fill: var(--muted); font-family: var(--readout); font-weight: 700; font-size: 11px; font-variant-numeric: tabular-nums; }
+.sv-hit { fill: transparent; }
+.sv-ring { fill: none; stroke: transparent; stroke-width: 2; }
+.sv-slot { cursor: pointer; outline: none; }
+.sv-slot:focus-visible .sv-ring { stroke: var(--cool); }
+.sv-line { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; }
+.sv-dot { fill: var(--text); }
+@media (hover: hover) and (pointer: fine) {
+  .sv-slot:hover .sv-hit { fill: var(--surface-2); }
+}
+
+.sv-skipped h4 { margin: 0 0 4px; font-size: 0.84rem; font-weight: 600; }
+.sv-skipped ul { margin: 0; padding-left: 1.2em; display: grid; gap: 2px; font-size: 0.84rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The table: the same numbers as the chart. It scrolls inside its own box on a phone,
+   so the page never scrolls sideways. */
+.sv-table-wrap { overflow-x: auto; }
+.sv-table { border-collapse: collapse; width: 100%; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+.sv-table caption { caption-side: top; text-align: left; padding-bottom: 6px; color: var(--muted); font-size: 0.8rem; }
+.sv-table th, .sv-table td { padding: 5px 10px 5px 0; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.sv-table thead th { font-weight: 600; color: var(--muted); border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border); vertical-align: bottom; }
+.sv-table th:first-child, .sv-table td:nth-child(2) { text-align: left; }
+.sv-table tbody th { font-weight: 500; }
+.sv-table td:nth-child(2) { white-space: normal; min-width: 12ch; }
+
+.sv-running-text { font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+.sv-note { font-size: 0.82rem; margin-top: -8px; }
+
+/* Rooms' shares: a bar from zero, right for a saving, left for oil over the baseline. */
+.sv-rooms { list-style: none; margin: 0; padding: 0; display: grid; }
+.sv-room {
+  display: grid; grid-template-columns: minmax(0, 7.5rem) minmax(60px, 1fr) 4.5rem; gap: 2px 10px; align-items: center;
+  padding: 7px 0; border-top: 1px solid var(--line);
+}
+.sv-room-name { font-size: 0.88rem; font-weight: 600; overflow-wrap: anywhere; }
+.sv-room-track { position: relative; height: 10px; background: var(--surface-2); }
+.sv-room-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; background: var(--text); transform-origin: left; }
+.sv-rooms[data-negative="true"] .sv-room-fill { left: 50%; width: 50%; }
+.sv-rooms[data-negative="true"] .sv-room-fill[data-sign="minus"] { left: 0; transform-origin: right; }
+.sv-rooms[data-negative="true"] .sv-room-track::after { content: ""; position: absolute; left: calc(50% - 0.75px); top: -3px; bottom: -3px; width: 1.5px; background: var(--text); }
+.sv-room-value { text-align: right; font-family: var(--readout); font-weight: 700; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+.sv-room-sub { grid-column: 1 / -1; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The House view's one line, once there are figures. */
+.sv-house-line { font-size: 0.95rem; }
+
+@media (max-width: 560px) {
+  .sv-plate { padding: 12px 14px 14px; }
+  .sv-headline { font-size: 1.1rem; }
+  .sv-room { grid-template-columns: minmax(0, 6rem) minmax(40px, 1fr) 4rem; }
+}
