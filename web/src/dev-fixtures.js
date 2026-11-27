@@ -8,6 +8,8 @@
 //   quiet        quiet hours
 //   frost        the heating mode on Frost
 //   not-linked   no boiler relay configured
+//   fire-spotted a fire detected in the lounge, its switch still off
+//   alerts       several alerts about no room, beyond what the hero shows
 //   viewer       signed in with the viewer role
 //   offline      the stream lost and the last poll failed
 //   worst        fifteen rooms, long names and missing readings
@@ -56,6 +58,15 @@ const FIXTURES = {
     for (const r of s.rooms) { r.calling = false; r.topup = false; }
   },
   frost: (s) => { s.mode = "frost"; },
+  "fire-spotted": (s) => {
+    const r = s.rooms.find((x) => x.heat_source === "episodic") ?? s.rooms[0];
+    Object.assign(r, { fire: true, fire_switch: false, learning: "fire", calling: false, topup: false, opening: 0 });
+  },
+  alerts: (s) => {
+    alert(s, "device.offline", "plug_landing: router not reachable");
+    alert(s, "device.low_battery", "remote_hall: battery low");
+    alert(s, "driver.mqtt", "MQTT broker not reachable");
+  },
   "not-linked": (s) => { s.telemetry = { ...s.telemetry, simulated: false, boiler_linked: false }; },
   worst: (s) => {
     const base = s.rooms[0];

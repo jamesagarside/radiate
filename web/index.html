@@ -50,6 +50,7 @@
     <nav slot="navigation" class="app-nav wa-stack wa-gap-3xs" id="views" aria-label="Views">
       <a href="#" class="view-tab" data-view="house" data-drawer="close" aria-current="page"><wa-icon name="house" fixed-width></wa-icon><span>House</span></a>
       <a href="#schedules" class="view-tab" data-view="schedules" data-drawer="close"><wa-icon name="calendar-week" fixed-width></wa-icon><span>Schedules</span></a>
+      <a href="#people" class="view-tab" data-view="people" data-drawer="close"><wa-icon name="users" fixed-width></wa-icon><span>People</span></a>
       <a href="#devices" class="view-tab" data-view="devices" data-drawer="close" hidden><wa-icon name="microchip" fixed-width></wa-icon><span>Devices</span><wa-badge class="view-count" id="devices-count" variant="warning" pill hidden></wa-badge></a>
       <a href="#suggestions" class="view-tab" data-view="suggestions" data-drawer="close" hidden><wa-icon name="lightbulb" fixed-width></wa-icon><span>Suggestions</span><wa-badge class="view-count" id="suggestions-count" variant="warning" pill hidden></wa-badge></a>
       <a href="#savings" class="view-tab" data-view="savings" data-drawer="close" hidden><wa-icon name="piggy-bank" fixed-width></wa-icon><span>Savings</span></a>
@@ -109,7 +110,11 @@
                 <ul class="hero-facts" id="hero-facts" aria-label="At a glance"></ul>
               </div>
             </div>
-            <div class="hero-controls">
+            <button type="button" class="hero-summary" id="hero-summary" aria-expanded="false" aria-controls="hero-controls">
+              <span class="hero-summary-text" id="hero-summary-text">Controls</span>
+              <span class="hero-summary-act"><span id="hero-summary-act">Change</span><wa-icon name="chevron-down"></wa-icon></span>
+            </button>
+            <div class="hero-controls" id="hero-controls">
               <wa-radio-group label="Heating" orientation="horizontal" name="mode" size="s" id="mode" aria-describedby="controls-lock">
                 <wa-radio appearance="button" value="auto"><wa-icon slot="start" name="calendar-days"></wa-icon>Auto</wa-radio>
                 <wa-radio appearance="button" value="frost"><wa-icon slot="start" name="snowflake"></wa-icon>Frost</wa-radio>
@@ -138,23 +143,10 @@
         </wa-card>
 
         <div class="house-notes wa-stack wa-gap-xs">
-          <wa-callout variant="warning" size="s" class="note-compact" id="alerts" hidden>
-            <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
-            <div class="note-row">
-              <h2 class="alerts-h" id="alerts-h">Needs attention</h2>
-              <ul class="alerts-list" id="alerts-list"></ul>
-              <div class="note-actions">
-                <button type="button" class="wa-plain wa-size-s" id="alerts-more" aria-expanded="false" aria-controls="alerts-list" hidden></button>
-                <a id="alerts-devices" href="#devices" hidden>See devices</a>
-                <a href="#guide/alerts">What these alerts mean</a>
-              </div>
-            </div>
-          </wa-callout>
-
           <wa-callout class="radiate-cool note-compact" size="s" id="guide-note" hidden>
             <wa-icon slot="icon" name="book-open"></wa-icon>
             <div class="note-row note-inline">
-              <p>New to Radiate? The Guide explains what you see here and how to change it. <a href="#guide" data-act="open">Open the guide</a></p>
+              <p>New to Radiate? <span class="note-long">The Guide explains what you see here and how to change it.</span> <a href="#guide" data-act="open">Open the guide</a></p>
               <wa-button appearance="plain" size="s" class="note-close" data-act="dismiss"><wa-icon name="xmark" label="Hide this"></wa-icon></wa-button>
             </div>
           </wa-callout>
@@ -220,7 +212,7 @@
       <section id="schedules" class="view schedules-view wa-stack wa-gap-l" aria-labelledby="schedules-h" hidden>
         <div class="view-head">
           <h1 class="wa-heading-xl" id="schedules-h" tabindex="-1">Schedules</h1>
-          <p class="view-lead">Who lives here, who's away, and the week each room follows.</p>
+          <p class="view-lead">The week each room follows, and where it comes from.</p>
         </div>
 
         <wa-card id="setup-cta" hidden>
@@ -234,19 +226,6 @@
           </div>
         </wa-card>
 
-        <section id="people" class="wa-stack wa-gap-s" aria-labelledby="people-h" hidden>
-          <div class="wa-split wa-align-items-center">
-            <h2 class="wa-heading-l" id="people-h">People</h2>
-            <span class="wa-cluster wa-gap-xs wa-align-items-center" id="setup-change-row" hidden>
-              <wa-button appearance="outlined" size="s" id="setup-change" aria-describedby="setup-change-lock"><wa-icon slot="start" name="pen"></wa-icon>Change household setup</wa-button>
-              <wa-tag size="s" class="lock-tag" id="setup-change-lock" hidden></wa-tag>
-            </span>
-          </div>
-          <wa-callout class="radiate-cool" size="s" id="away-note" hidden>Everyone is away until a set time. Rooms are held at frost protection, apart from any held temperature, until someone is home or due back.</wa-callout>
-          <wa-callout class="radiate-cool" size="s" id="return-note" hidden></wa-callout>
-          <div class="people" id="people-list"></div>
-        </section>
-
         <section id="week" class="wa-stack wa-gap-s" aria-labelledby="week-h" hidden>
           <h2 class="wa-heading-l" id="week-h">Weekly schedules</h2>
           <div class="week-head wa-stack wa-gap-xs">
@@ -259,6 +238,23 @@
         </section>
 
         <p class="empty-note" id="schedules-empty" hidden>This server doesn't send schedules or a household setup, so there's nothing to show here.</p>
+      </section>
+
+      <section id="people" class="view people-view wa-stack wa-gap-l" aria-labelledby="people-h" hidden>
+        <div class="view-head">
+          <div class="wa-split wa-align-items-center wa-gap-s">
+            <h1 class="wa-heading-xl" id="people-h" tabindex="-1">People</h1>
+            <span class="wa-cluster wa-gap-xs wa-align-items-center" id="setup-change-row" hidden>
+              <wa-button appearance="outlined" size="s" id="setup-change" aria-describedby="setup-change-lock"><wa-icon slot="start" name="pen"></wa-icon>Change household setup</wa-button>
+              <wa-tag size="s" class="lock-tag" id="setup-change-lock" hidden></wa-tag>
+            </span>
+          </div>
+          <p class="view-lead">Who lives here and who's away. Rooms follow the people who use them.</p>
+        </div>
+        <wa-callout class="radiate-cool" size="s" id="away-note" hidden>Everyone is away until a set time. Rooms are held at frost protection, apart from any held temperature, until someone is home or due back.</wa-callout>
+        <wa-callout class="radiate-cool" size="s" id="return-note" hidden></wa-callout>
+        <div class="people" id="people-list"></div>
+        <p class="empty-note" id="people-empty" hidden>No one is set up yet. People come from the household setup: <a href="#schedules">Set up your household</a> on the Schedules page.</p>
       </section>
 
       <section class="devices-view" id="devices" aria-labelledby="devices-h" hidden>
@@ -609,6 +605,7 @@
             <section class="g-sec" id="g-now" aria-labelledby="g-now-h">
               <h3 class="wa-heading-l g-h" id="g-now-h" tabindex="-1">What the house is doing</h3>
               <p>The card at the top of the House page says, in order, whether the house is all right, what the boiler is doing and why, for example "Burner on for 12 min. Heating Lounge and Bedroom 3.", and which rooms need you. On the other pages the same line about the boiler sits under the header. Select a room under "Needs you" to see what's wrong with it.</p>
+              <p>On a phone, the heating controls fold into one line that says how they're set, such as "Auto, Eco, hot water off". Tap it to change them, and tap Done to fold them away again.</p>
               <p>The house now, beside the model, starts with how many rooms want heat out of the rooms Radiate controls, such as 3/8. Where every room sits puts each room on the temperature scale, with a line at the temperature most rooms are aiming for. Its four boxes show the boiler, the heating mode, devices that need attention and how far learning has got. Coming up lists the next times a room's temperature changes.</p>
               <p>The boiler moves through four states:</p>
               <dl class="g-terms">
@@ -631,6 +628,7 @@
                 <div><dt><wa-badge variant="brand" appearance="filled-outlined">Topping up</wa-badge></dt><dd>Not calling, but given a little more heat while the burner is on, so it won't need a burn of its own soon after.</dd></div>
                 <div><dt><wa-badge class="radiate-cool" appearance="filled-outlined">Heat sink</wa-badge></dt><dd>Opened only so the burner's heat has somewhere to go when too few radiators are open.</dd></div>
                 <div><dt><wa-badge variant="brand" appearance="filled-outlined">Fire lit</wa-badge></dt><dd>The open fire is lit, so the radiator is closed.</dd></div>
+                <div><dt><wa-badge variant="brand" appearance="filled-outlined">Fire detected</wa-badge></dt><dd>Radiate spotted a fire from how fast the room warmed, and nobody has switched Fire lit on yet. The radiator is closed all the same.</dd></div>
                 <div><dt><wa-badge variant="success" appearance="filled-outlined">Comfortable</wa-badge></dt><dd>At or above its target, or less than 0.3° below it.</dd></div>
                 <div><dt><wa-badge variant="neutral" appearance="outlined">Waiting</wa-badge></dt><dd>A little below its target but not calling. The room's details say why.</dd></div>
                 <div><dt><wa-badge variant="neutral" appearance="outlined">Bypass, not controlled</wa-badge></dt><dd>A radiator with a manual valve that stays open. Radiate counts on it as a path the water can always take.</dd></div>
@@ -668,7 +666,7 @@
                 <div><dt><wa-badge variant="neutral" appearance="outlined">Hand-written</wa-badge></dt><dd>Written as times and temperatures in Radiate's house file. The app shows these weeks but can't change them. Someone has to edit the house file and restart Radiate.</dd></div>
               </dl>
               <p>To change a household room's week, drag the start or end of a warm block, or select Adjust, to keep the room warm or cold for longer on some days. Days with the same routine move together. You see the week as it would be, and nothing changes until you select Save. Remove, or Reset to routine, takes an adjustment away again.</p>
-              <p>To change the routine itself, such as when someone gets up, select Change household setup beside People on the Schedules page. If there's no household yet, Set up your household, at the top of that page, builds one from a few questions.</p>
+              <p>To change the routine itself, such as when someone gets up, select Change household setup on the People page. If there's no household yet, Set up your household, at the top of the Schedules page, builds one from a few questions.</p>
               <p>A warm block is when the room should be warm. Radiate starts heating early so the room is warm by then, and each valve keeps its own copy of the week in case Radiate stops.</p>
               <p>For a one-off change, hold a temperature instead: see <a href="#guide/warmer">Make a room warmer for a while</a>. Hot-water times are set elsewhere: see <a href="#guide/hot-water">Hot water</a>.</p>
             </section>
@@ -698,7 +696,7 @@
 
             <section class="g-sec" id="g-away" aria-labelledby="g-away-h">
               <h3 class="wa-heading-l g-h" id="g-away-h" tabindex="-1">When someone is away</h3>
-              <p>Away needs a household, as Radiate has to know whose rooms are whose. Each person then has a card under People, on the Schedules page.</p>
+              <p>Away needs a household, as Radiate has to know whose rooms are whose. Each person then has a card on the People page.</p>
               <p>Select Set away and pick the day they're back, and a time if you know it. Without a time, they count as back from the start of that day. Back now cancels it. It also shows while Home Assistant says someone is out, and counts them as home until Home Assistant sees them come or go.</p>
               <p>If a person is linked to Home Assistant, Radiate also counts them as away once Home Assistant has reported them out for an hour (the default), and as home when they're back.</p>
               <p>When Radiate isn't sure, it counts them as home. That happens when their phone or tracker hasn't reported for four hours (a flat battery, say), when someone holds a temperature, boosts the hot water, lights the fire or showers, or when anyone selects Back now. A wifi or Bluetooth tracker waits four hours before it counts as away, as a phone asleep at home can look like one that has left.</p>
@@ -708,9 +706,9 @@
             <section class="g-sec" id="g-fire" aria-labelledby="g-fire-h">
               <h3 class="wa-heading-l g-h" id="g-fire-h" tabindex="-1">Open fires and range cookers</h3>
               <p>A room with an open fire has a Fire lit switch in its details. Switch it on when you light the fire, and off when it's out.</p>
-              <p>While the fire is lit, Radiate closes that room's radiator, leaves the room out when deciding whether to fire the boiler, and pauses its learning, so the fire's heat isn't mistaken for the radiator's. It also spots a fire by itself when the room warms quickly with the radiator off.</p>
-              <p>Once there has been no sign of the fire for 30 minutes, learning stays paused for another 4 hours while the chimney breast gives off its heat ("learning paused: fire cooling"). If Radiate restarts, the switch is cleared, so switch it on again if the fire is still lit.</p>
-              <p>A range cooker, such as an Aga, is learned as steady background heat. The kitchen keeps learning, and a burst of heat from cooking pauses it for an hour ("learning paused: cooking").</p>
+              <p>While the fire is lit, Radiate closes that room's radiator, leaves the room out when deciding whether to fire the boiler, and pauses its learning, so the fire's heat isn't mistaken for the radiator's. It also spots a fire by itself when the room warms quickly with the radiator off. The room's badge then reads Fire detected, and its details say "Radiate spotted the fire. Switch on to confirm." Switching on tells Radiate it was right.</p>
+              <p>Once there has been no sign of the fire for 30 minutes, learning stays paused for another 4 hours while the chimney breast gives off its heat ("Paused until the room cools after the fire", on the room's Learning line). If Radiate restarts, the switch is cleared, so switch it on again if the fire is still lit.</p>
+              <p>A range cooker, such as an Aga, is learned as steady background heat. The kitchen keeps learning, and a burst of heat from cooking pauses it for an hour ("Paused while cooking warms the room").</p>
             </section>
 
             <section class="g-sec" id="g-room-model" aria-labelledby="g-room-model-h">
@@ -842,7 +840,7 @@
 
             <section class="g-sec" id="g-alerts" aria-labelledby="g-alerts-h">
               <h3 class="wa-heading-l g-h" id="g-alerts-h" tabindex="-1">Alerts</h3>
-              <p>Problems with a room are under "Needs you" at the top of the House page, room name first; the rest are listed under Needs attention, just below it. An alert clears by itself once the problem has gone. Ones you might see:</p>
+              <p>Every alert is under "Needs you" at the top of the House page. Problems with a room come first, room name first, and open that room. Alerts about something else, such as a smart plug or the boiler relay, follow. Past two of those, one chip such as "3 more alerts" leads to Devices. An alert clears by itself once the problem has gone. Ones you might see:</p>
               <dl class="g-terms g-words g-wide">
                 <div><dt>No heat: check oil and boiler lockout</dt><dd>The boiler has been asked for heat for 30 minutes and no radiator has warmed. Check the oil and the boiler's lockout. Radiate keeps asking in case the boiler recovers.</dd></div>
                 <div><dt>Lounge radiator not warming: check the valve</dt><dd>That radiator stayed cold for 3 burns while others warmed. The valve may be stuck.</dd></div>

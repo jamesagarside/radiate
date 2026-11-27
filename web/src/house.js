@@ -205,12 +205,12 @@ export function createHouse({ modelEl, statusEl, planEl, transport, onSelect, on
           <h2 class="wa-heading-m" id="hm-model-h">Your house</h2>
           <div class="wa-cluster wa-gap-s wa-align-items-center">
             <span class="hm-scale" aria-hidden="true"><span class="hm-lab">12°</span><span class="hm-ramp"></span><span class="hm-lab">22°</span></span>
-            <wa-button size="s" appearance="outlined" data-act="arrange" aria-describedby="hm-arrange-lock"><wa-icon slot="start" name="pen-ruler"></wa-icon>Arrange rooms</wa-button>
+            <wa-button size="s" appearance="outlined" data-act="arrange" aria-describedby="hm-arrange-lock"><wa-icon slot="start" name="pen-ruler"></wa-icon><span class="hm-arrange-text">Arrange rooms</span></wa-button>
             <wa-tag size="s" class="lock-tag" id="hm-arrange-lock" hidden></wa-tag>
           </div>
         </div>
         <div class="wa-stack wa-gap-s">
-          <p class="help-line">Each block is a room in its temperature colour. A blinking bar is a radiator taking heat. Select a room to see it and change its temperature. <span class="hm-guess" hidden>Rooms are placed by a guess from their names. Arrange them to match your house.</span> <a href="#guide/model">How to read the model</a></p>
+          <p class="help-line hm-intro">Each block is a room in its temperature colour. A blinking bar is a radiator taking heat. Select a room to see it and change its temperature. <span class="hm-guess" hidden>Rooms are placed by a guess from their names. Arrange them to match your house.</span> <a href="#guide/model">How to read the model</a></p>
           <svg class="hm-iso" role="group" aria-labelledby="hm-model-h"></svg>
         </div>`;
       modelEl.querySelector("[data-act=arrange]").addEventListener("click", () => {

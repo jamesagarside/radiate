@@ -148,9 +148,6 @@ wa-callout p { margin: 0; }
 .note-inline { align-items: center; flex-wrap: nowrap; }
 .note-close { margin-block: calc(-1 * var(--wa-space-xs)); margin-inline-end: calc(-1 * var(--wa-space-xs)); }
 .note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--wa-space-2xs) var(--wa-space-m); }
-.alerts-h { margin: 0; font-size: var(--wa-font-size-s); font-weight: var(--wa-font-weight-bold); }
-.alerts-list { margin: 0; padding-inline-start: 1.1em; flex-basis: 100%; display: grid; gap: var(--wa-space-3xs); }
-.alerts-list:not([data-expanded="true"]) li[data-extra="true"] { display: none; }
 .house-notes:not(:has(> :not([hidden]))) { display: none; }
 
 /* The hero: is the house all right, what is the boiler doing and why, who needs you. */
@@ -191,6 +188,7 @@ wa-radio-group::part(form-control-input) { flex-wrap: nowrap; }
 }
 .hero-needs-label { font-size: var(--wa-font-size-s); font-weight: var(--wa-font-weight-bold); color: var(--wa-color-warning-on-quiet); }
 .hero-needs-list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: var(--wa-space-xs); }
+.hero-needs-list > li { margin: 0; padding: 0; }
 .need-chip {
   all: unset; text-decoration: none; box-sizing: border-box; cursor: pointer; display: inline-flex; gap: var(--wa-space-2xs); align-items: baseline;
   max-width: 100%; padding: var(--wa-space-2xs) var(--wa-space-s); border-radius: var(--wa-border-radius-pill);
@@ -202,6 +200,45 @@ wa-radio-group::part(form-control-input) { flex-wrap: nowrap; }
 .need-chip:active { transform: scale(0.97); }
 .need-chip:focus-visible { outline: var(--wa-focus-ring); outline-offset: var(--wa-focus-ring-offset); }
 @media (hover: hover) and (pointer: fine) { .need-chip:hover { background: var(--wa-color-warning-fill-normal); } }
+
+/* On a phone, the controls fold into one line saying how they are set. */
+.hero-summary { display: none; }
+@media (max-width: 37.5rem) {
+  .hero-grid { gap: var(--wa-space-s); }
+  .hero-facts { display: none; }
+  .hero-summary {
+    all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: var(--wa-space-s);
+    min-height: 2.75rem; padding: var(--wa-space-xs) var(--wa-space-s); border-radius: var(--wa-border-radius-m);
+    background: var(--wa-color-neutral-fill-quiet); font-size: var(--wa-font-size-s);
+    transition: transform 160ms var(--radiate-ease-out), background-color 150ms ease;
+  }
+  .hero-summary:active { transform: scale(0.98); }
+  .hero-summary:focus-visible { outline: var(--wa-focus-ring); outline-offset: var(--wa-focus-ring-offset); }
+  .hero-summary-text { font-weight: var(--wa-font-weight-semibold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hero-summary-act { flex: none; display: inline-flex; align-items: center; gap: var(--wa-space-2xs); color: var(--wa-color-brand-on-quiet); font-weight: var(--wa-font-weight-semibold); }
+  .hero-summary-act wa-icon { transition: rotate 200ms var(--radiate-ease-out); }
+  .hero-summary[aria-expanded="true"] .hero-summary-act wa-icon { rotate: 180deg; }
+  .hero[data-controls="closed"] .hero-controls { display: none; }
+  .hero-controls { padding-block-start: 0; border-block-start: 0; }
+  .hero-needs { margin-block-start: var(--wa-space-s); padding-block-start: var(--wa-space-s); }
+  /* So the house model starts on the first screen: the guide note is one line, the
+     model's explanation follows the model, and Arrange rooms is its icon. */
+  .note-long { display: none; }
+  .hm-intro { order: 2; }
+  .house-view { gap: var(--wa-space-m); }
+  .hero, .hm-model { --spacing: var(--wa-space-m); }
+  .hm-model > [slot="header"] { flex-wrap: nowrap; }
+  .hm-model .hm-ramp { width: 3.5rem; }
+  .note-compact > wa-icon[slot="icon"] { display: none; }
+  .hm-arrange-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+@media (max-width: 37.5rem) and (prefers-reduced-motion: reduce) {
+  .hero-summary { transition: background-color 150ms ease; }
+  .hero-summary:active { transform: none; }
+}
+
+/* A fire Radiate spotted, before anyone switched it on. */
+.fire-spotted { margin: 0; display: flex; align-items: center; gap: var(--wa-space-2xs); font-size: var(--wa-font-size-s); color: var(--wa-color-brand-on-quiet); }
 
 /* The stage: the house model is the hero picture and the room picker. Beside it, the
    house now, or the selected room's details in its place. */
@@ -353,3 +390,7 @@ wa-progress-bar.opening[data-idle="true"] { opacity: 0.45; }
   .header-end .outdoor { font-size: var(--wa-font-size-s); }
   .note-row > p { flex-basis: 100%; }
 }
+
+/* Badges in sentence case: in a dense table, capitals read as shouting. The theme's
+   other badge styling stays. */
+wa-badge { text-transform: none; }

@@ -268,7 +268,9 @@ const pooled = (r) => r.reason_code === "demand.pooled";
 function badgeFor(r) {
   if (r.role === "passive") return ["Bypass, not controlled", ""];
   if (r.role === "unheated") return ["No radiator", ""];
-  if (r.fire) return ["Fire lit", "fire"];
+  // A fire Radiate spotted from the room's warming, with nobody's switch on yet.
+  // Older servers send only `fire`, so it reads as lit.
+  if (r.fire) return r.fire_switch === false ? ["Fire detected", "fire"] : ["Fire lit", "fire"];
   if (r.preheating) return ["Preheating", "preheat"];
   if (pooled(r)) return ["Waiting for a burn", "pooled"];
   if (r.calling) return ["Heating", "calling"];
@@ -296,19 +298,32 @@ function badge(label, kind) {
     : html`<wa-badge variant=${v} appearance=${v === "neutral" ? "outlined" : "filled-outlined"}>${label}</wa-badge>`;
 }
 
+// Why learning is paused for a room (state `rooms[].learning`), as what Radiate is
+// waiting for. Null: learning now.
 const LEARNING = {
-  fire: "learning paused: fire",
-  fire_holdoff: "learning paused: fire cooling",
-  window: "learning paused: window",
-  shower: "learning paused: shower",
-  cooker_spike: "learning paused: cooking",
-  unexplained_heat: "learning paused: extra heat (sun or guests?)",
-  store_recovery: "learning paused: hot water",
-  heat_unknown: "learning paused: no boiler reading",
-  setpoint_change: "settling",
-  no_data: "gathering data",
-  trv_offline: "TRV offline",
+  fire: "Paused while the fire warms the room",
+  fire_holdoff: "Paused until the room cools after the fire",
+  window: "Paused while a window is open",
+  shower: "Paused after a shower",
+  cooker_spike: "Paused while cooking warms the room",
+  unexplained_heat: "Paused: extra heat from somewhere, the sun or guests perhaps",
+  store_recovery: "Paused while the boiler heats the hot water",
+  heat_unknown: "Paused until the boiler's state is known",
+  setpoint_change: "Waiting for the room to settle at its new temperature",
+  no_data: "Waiting for enough readings",
+  trv_offline: "Waiting for the TRV to come back",
 };
+
+// The Learning line of a room's details: what learning waits for, else how sure the
+// room model is.
+function learningFact(r) {
+  if (r.learning) return LEARNING[r.learning] ?? `Paused: ${r.learning.replaceAll("_", " ")}`;
+  const m = r.model;
+  if (!m.samples) return "Just started, using typical values for now";
+  const pct = `${Math.round(m.confidence * 100)}% sure`;
+  if (stillLearning(m)) return `Still learning this room, ${pct}`;
+  return m.confidence < 0.75 ? `Fairly sure of this room, ${pct}` : `Sure of this room, ${pct}`;
+}
 
 // The fire switch: the manual flag a person sets, `fire_switch`. `fire` is also true
 // for a detected fire, which this switch cannot clear, so the switch shows the switch.
@@ -459,10 +474,7 @@ function reasonFor(r) {
 }
 
 function learningLine(r) {
-  if (r.model) {
-    const learn = r.learning ? LEARNING[r.learning] || r.learning : "learning";
-    return learn[0].toUpperCase() + learn.slice(1);
-  }
+  if (r.model) return learningFact(r);
   return r.humidity != null ? `${r.humidity}% RH` : "";
 }
 
@@ -661,10 +673,7 @@ function roomDetail(r, { inDrawer }) {
   if (r.humidity != null) facts.push(["Humidity", `${Math.round(r.humidity)}%`]);
   if (!canSet && r.setpoint != null && !observed) facts.push(["Setpoint", fmtT(r.setpoint)]);
   const learn = learningLine(r);
-  if (r.model) {
-    const words = r.learning ? LEARNING[r.learning] || r.learning : "learning now";
-    facts.push(["Learning", (words[0].toUpperCase() + words.slice(1)).replace(/^Learning paused: /, "Paused: ")]);
-  }
+  if (r.model) facts.push(["Learning", learningFact(r)]);
   const hint = c.error ? "" : held ? holdText(r.override) : changing ? "Sending…" : "From the schedule";
   // On a phone the details are a bottom sheet, and the room's quick control comes
   // first, under its name; beside the model it follows what the room is doing.
@@ -715,6 +724,7 @@ function roomDetail(r, { inDrawer }) {
           <wa-switch .checked=${Boolean(fire.shown(fireOn(r)))} ?disabled=${locked} aria-busy=${String(fire.busy)}
             hint="Radiate closes this radiator and pauses learning while the fire warms the room."
             @change=${() => toggleFire(r)}>Fire lit</wa-switch>
+          ${r.fire && r.fire_switch === false && !fire.busy ? html`<p class="fire-spotted"><wa-icon name="eye"></wa-icon>Radiate spotted the fire. Switch on to confirm.</p>` : nothing}
           <p class="action-error fire-error" role="alert" ?hidden=${!fire.error}>${fire.error}</p>
         </div>` : nothing}
 
@@ -843,9 +853,50 @@ function renderHero(s, status) {
     chips.push(html`<li><button type="button" class="need-chip" @click=${(e) => select(n.room.id, e.currentTarget)}>
       <strong>${n.room.name}</strong><span>${texts.join(", ")}</span></button></li>`);
   }
+  // Alerts about no room (a plug, the boiler relay) follow, at most HOUSE_CHIPS of
+  // them; the rest are one chip to Devices. Older servers send only the sentences, so
+  // every alert is one of these.
+  const house = houseAlerts(s);
+  const toDevices = devicesOffered === true;
+  for (const a of house.slice(0, HOUSE_CHIPS)) {
+    const at = a.message.indexOf(": ");
+    const [what, text] = at > 0 ? [a.message.slice(0, at), a.message.slice(at + 2)] : [a.message, ""];
+    const href = toDevices && (!a.code || DEVICE_ALERTS.test(a.code)) ? "#devices" : "#guide/alerts";
+    chips.push(html`<li><a class="need-chip" href=${href}><strong>${what}</strong>${text ? html`<span>${text}</span>` : nothing}</a></li>`);
+  }
+  const rest = house.length - HOUSE_CHIPS;
+  if (rest > 0) chips.push(html`<li><a class="need-chip need-more" href=${toDevices ? "#devices" : "#guide/alerts"}><strong>${rest} more ${rest === 1 ? "alert" : "alerts"}</strong></a></li>`);
   $("hero-needs").hidden = !chips.length;
   draw(html`${chips}`, $("hero-needs-list"));
+  renderHeroSummary(s);
 }
+
+// Alerts that name no room this state knows, as { code, message }.
+function houseAlerts(s) {
+  if (!s.alert_details) return (s.alerts ?? []).map((message) => ({ code: null, message }));
+  return s.alert_details.filter((a) => !a.room_id || !s.rooms.some((r) => r.id === a.room_id));
+}
+const HOUSE_CHIPS = 2;
+
+// On a phone the hero's controls fold into one line saying how they are set; a press
+// opens them.
+const MODE_WORDS = { auto: "Auto", frost: "Frost", off: "Off" };
+function renderHeroSummary(s) {
+  const mode = heating.shown(s.mode);
+  const parts = [MODE_WORDS[mode] ?? mode];
+  const dm = s.settings?.demand_mode;
+  if (DEMAND_NOTE[dm]) parts.push(demand.shown(dm) === "comfort" ? "Comfort" : "Eco");
+  parts.push(boost.shown(s.store?.boost) ? "hot water boosted" : s.store?.relay ? "hot water on" : "hot water off");
+  $("hero-summary-text").textContent = parts.join(", ");
+}
+function setHeroControls(open) {
+  const btn = $("hero-summary");
+  btn.setAttribute("aria-expanded", String(open));
+  $("hero-summary-act").textContent = open ? "Done" : "Change";
+  $("hero").dataset.controls = open ? "open" : "closed";
+}
+$("hero-summary").addEventListener("click", () => setHeroControls($("hero-summary").getAttribute("aria-expanded") !== "true"));
+setHeroControls(false);
 // Icon names drawn from data above, listed so the build ships them.
 const HERO_FACT_ICONS = [{ icon: "temperature-half" }, { icon: "faucet-drip" }, { icon: "clock" }];
 void HERO_FACT_ICONS;
@@ -1047,7 +1098,7 @@ function personTemplate(p, away) {
 
 function renderPeople(away) {
   const list = away?.people ?? [];
-  $("people").hidden = !list.length;
+  $("people-empty").hidden = list.length > 0;
   $("away-note").hidden = !away?.frost;
   // A known return within the return warm-up: rooms may already be warming for it.
   const ret = away?.return;
@@ -1062,6 +1113,7 @@ function renderPeople(away) {
   draw(html`${list.map((p) => personTemplate(p, away))}`, $("people-list"));
   if (document.body.dataset.view === "schedules") schedulesView.show();
 }
+const peopleView = { show() {}, hide() {} };
 
 // ---------- schedules ----------
 
@@ -1235,7 +1287,7 @@ function render(s) {
   const banner = $("banner");
   if (s.telemetry?.simulated) {
     banner.hidden = false;
-    $("banner-text").textContent = `Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time. Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.`;
+    draw(html`Demo: simulated reference house, ${clock(s.minute_of_day)} simulated time.<span class="note-long"> Boiler water ${s.telemetry.boiler_water_c}°, store ${s.telemetry.store_c}°, stairs ${s.telemetry.stairs_c}°.</span>`, $("banner-text"));
   }
   renderDryRun(s.telemetry);
   renderLearningNotes(s.learning_notes);
@@ -1248,9 +1300,6 @@ function render(s) {
   if (selected && !rooms.has(selected)) selected = null;
   renderHouse();
   renderHero(s, status);
-  // Alerts about a room are under "Needs you" in the hero; the rest are listed here.
-  // Older servers send only the sentences, so every alert is listed.
-  renderAlerts(s.alert_details ? s.alert_details.filter((x) => !x.room_id || !s.rooms.some((r) => r.id === x.room_id)).map((x) => x.message) : s.alerts);
   renderDeviceCount(s.alert_details);
   houseView.update(s, house);
   syncWeek(s);
@@ -1367,6 +1416,7 @@ function renderDemand(settings) {
   const note = $("demand-note");
   const known = settings && DEMAND_NOTE[settings.demand_mode];
   group.hidden = !known;
+  if (last) renderHeroSummary(last);
   if (!known) return;
   const shown = demand.shown(settings.demand_mode);
   if (group.value !== shown) group.value = shown;
@@ -1430,60 +1480,6 @@ function renderDryRun(t) {
   draw(html`${[...recent].reverse().map((w) => html`<li><code>${w.topic}</code> <code class="payload">${typeof w.payload === "string" ? w.payload : JSON.stringify(w.payload)}</code></li>`)}`, details.querySelector("ul"));
 }
 
-// Alerts arrive as sentences, room name first ("Lounge: TRV not reachable"). When
-// several rooms share a problem, list it once with the rooms, so ten offline TRVs
-// read as one line. Past ALERTS_SHOWN lines, the rest sit behind a toggle.
-const ALERTS_SHOWN = 2;
-let alertsKey = "";
-function groupAlerts(alerts) {
-  const groups = new Map();
-  for (const text of alerts) {
-    const at = text.indexOf(": ");
-    const problem = at > 0 ? text.slice(at + 2) : text;
-    const g = groups.get(problem) ?? { problem, first: text, rooms: [] };
-    if (at > 0) g.rooms.push(text.slice(0, at));
-    groups.set(problem, g);
-  }
-  return [...groups.values()].map((g) => {
-    if (g.rooms.length < 2) return g.first;
-    const problem = g.problem[0].toUpperCase() + g.problem.slice(1);
-    return `${problem} (${plural(g.rooms.length, "room", "rooms")}): ${g.rooms.join(", ")}`;
-  });
-}
-
-function renderAlerts(alerts) {
-  const key = JSON.stringify(alerts);
-  if (key === alertsKey) return;
-  alertsKey = key;
-  const box = $("alerts");
-  box.hidden = !alerts.length;
-  const lines = groupAlerts(alerts);
-  const list = $("alerts-list");
-  list.textContent = "";
-  lines.forEach((line, i) => {
-    const li = document.createElement("li");
-    li.textContent = line;
-    li.dataset.extra = String(i >= ALERTS_SHOWN);
-    list.appendChild(li);
-  });
-  const more = $("alerts-more");
-  const extra = lines.length - ALERTS_SHOWN;
-  more.hidden = extra <= 0;
-  more.dataset.extra = String(Math.max(0, extra));
-  setAlertsExpanded(more.getAttribute("aria-expanded") === "true");
-}
-
-function setAlertsExpanded(open) {
-  const more = $("alerts-more");
-  more.setAttribute("aria-expanded", String(open));
-  more.textContent = open ? "Show fewer" : `Show ${more.dataset.extra} more`;
-  $("alerts-list").dataset.expanded = String(open);
-}
-
-$("alerts-more").addEventListener("click", () => {
-  setAlertsExpanded($("alerts-more").getAttribute("aria-expanded") !== "true");
-});
-
 // The heating mode and the hot-water boost. A press shows at once (pending.js), and
 // the server's state follows straight after, not at the next tick.
 const heating = pendingValue();
@@ -1493,6 +1489,7 @@ function renderMode(mode) {
   if (group.value !== shown) group.value = shown;
   group.setAttribute("aria-busy", String(heating.busy));
   showError($("mode-error"), heating.error);
+  if (last) renderHeroSummary(last);
 }
 $("mode").addEventListener("change", (e) => {
   const mode = e.target.value;
@@ -1508,6 +1505,7 @@ function renderBoost(on) {
   if (sw.checked !== shown) sw.checked = shown;
   sw.setAttribute("aria-busy", String(boost.busy));
   showError($("boost-error"), boost.error);
+  if (last) renderHeroSummary(last);
 }
 $("boost").addEventListener("change", () => {
   if (!last) return;
@@ -1652,7 +1650,6 @@ function renderDeviceCount(details) {
   const tab = document.querySelector('.view-tab[data-view="devices"]');
   if (n) tab.setAttribute("aria-label", `Devices, ${n} ${n === 1 ? "needs" : "need"} attention`);
   else tab.removeAttribute("aria-label");
-  $("alerts-devices").hidden = !n || devicesOffered !== true;
 }
 
 // Suggestions view (suggestions.js): advice from what Radiate has learned, at
@@ -1755,13 +1752,14 @@ let settingsOffered = null;
 // Each view besides the house: its element, whether the server offers it, and its module.
 const schedulesView = {
   show() {
-    const empty = $("week").hidden && $("people").hidden && $("setup-cta").hidden;
+    const empty = $("week").hidden && $("setup-cta").hidden;
     $("schedules-empty").hidden = !empty;
   },
   hide() {},
 };
 const VIEWS = {
   schedules: { offered: () => true, module: schedulesView },
+  people: { offered: () => true, module: peopleView },
   devices: { offered: () => devicesOffered === true, module: devices },
   suggestions: { offered: () => suggestionsOffered === true, module: suggestions },
   savings: { offered: () => savingsOffered === true, module: savings },
