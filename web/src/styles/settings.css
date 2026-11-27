@@ -16,7 +16,7 @@ body[data-auth="needed"] .settings-view { display: none; }
 .st-sec { display: grid; gap: 10px; min-width: 0; }
 .st-sec .section-h { margin: 0; scroll-margin-top: 8rem; }
 .st-sec .section-h:focus { outline: none; }
-.st-sec .section-h:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
+.st-sec .section-h:focus-visible { outline: 2px solid var(--radiate-cool-on-quiet); outline-offset: 2px; }
 .st-help { margin: 0; }
 
 .st-plate { padding: 4px 18px 16px; min-width: 0; }
@@ -28,26 +28,26 @@ body[data-auth="needed"] .settings-view { display: none; }
 .st-field {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 18rem); gap: 4px 20px;
   grid-template-areas: "head control" "help control" "file control" "error error";
-  padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start;
+  padding: 12px 0; border-bottom: 1px solid var(--wa-color-surface-border); align-items: start;
 }
 .st-head { grid-area: head; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
 .st-label { font-weight: 600; font-size: 0.92rem; }
 .st-field .field-help { grid-area: help; max-width: 62ch; }
 .st-control { grid-area: control; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.st-file { grid-area: file; font-size: 0.8rem; color: var(--muted); }
+.st-file { grid-area: file; font-size: 0.8rem; color: var(--wa-color-text-quiet); }
 .st-field .field-error { grid-area: error; }
-.st-fixed { font-size: 0.85rem; color: var(--muted); }
-.st-fixed code { font-size: 0.82rem; color: var(--text); overflow-wrap: anywhere; }
+.st-fixed { font-size: 0.85rem; color: var(--wa-color-text-quiet); }
+.st-fixed code { font-size: 0.82rem; color: var(--wa-color-text-normal); overflow-wrap: anywhere; }
 
 /* Where the value comes from. Set here is cobalt, as a held setpoint is: the reader
    chose it over the house file. The house file and the default are neutral. */
 .st-src {
   font-size: 0.72rem; font-weight: 600; padding: 1px 7px; white-space: nowrap;
-  background: var(--surface-2); color: var(--muted);
+  background: var(--wa-color-neutral-fill-quiet); color: var(--wa-color-text-quiet);
 }
-.st-src[data-source="app"] { background: var(--cool-soft); color: var(--cool); }
+.st-src[data-source="app"] { background: var(--radiate-cool-fill-quiet); color: var(--radiate-cool-on-quiet); }
 .st-src[data-source="default"] { background: transparent; padding-inline: 0; font-weight: 500; }
-.st-field[data-source="app"] { box-shadow: inset 3px 0 0 var(--cool); padding-left: 12px; margin-left: -12px; }
+.st-field[data-source="app"] { box-shadow: inset 3px 0 0 var(--radiate-cool-on-quiet); padding-left: 12px; margin-left: -12px; }
 .st-head .tag { margin: 0; }
 
 .st-control input, .st-control select {
@@ -57,28 +57,28 @@ body[data-auth="needed"] .settings-view { display: none; }
 .st-control input[type="text"], .st-control input[type="password"] { width: 100%; }
 .st-control input.num { width: 6.5em; font-variant-numeric: tabular-nums; }
 .st-control select { width: 100%; }
-.st-control [aria-invalid="true"] { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+.st-control [aria-invalid="true"] { border-color: var(--wa-color-warning-on-quiet); box-shadow: 0 0 0 1px var(--wa-color-warning-on-quiet); }
 .st-control .unit input { flex: none; }
 .st-control .seg button { padding: 6px 14px; }
 .st-use { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; width: 100%; }
 .st-use-part { display: grid; gap: 2px; min-width: 0; }
-.st-use-part label { font-size: 0.78rem; color: var(--muted); }
+.st-use-part label { font-size: 0.78rem; color: var(--wa-color-text-quiet); }
 
 /* Save, cancel and go back to the house file, then the result in words. */
 .st-foot { display: grid; gap: 8px; padding-top: 14px; }
 .st-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
 .st-actions .link { font-size: 0.85rem; }
-.st-status { font-size: 0.85rem; color: var(--cool); max-width: 70ch; }
+.st-status { font-size: 0.85rem; color: var(--radiate-cool-on-quiet); max-width: 70ch; }
 .st-status:empty { display: none; }
 .st-status:focus { outline: none; }
-.st-status:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
-.st-status[data-kind="error"] { color: var(--warn); }
+.st-status:focus-visible { outline: 2px solid var(--radiate-cool-on-quiet); outline-offset: 2px; }
+.st-status[data-kind="error"] { color: var(--wa-color-warning-on-quiet); }
 
 /* The question before a change that can write to the boiler or valves: a flat band
    with the amber rule, as the dry run notice. */
 .st-confirm {
-  display: grid; gap: 8px; padding: 10px 14px; background: var(--surface-2);
-  border-left: 4px solid var(--warn); font-size: 0.88rem;
+  display: grid; gap: 8px; padding: 10px 14px; background: var(--wa-color-neutral-fill-quiet);
+  border-left: 4px solid var(--wa-color-warning-on-quiet); font-size: 0.88rem;
 }
 .st-confirm-text { max-width: 70ch; }
 
@@ -86,20 +86,20 @@ body[data-auth="needed"] .settings-view { display: none; }
 .st-room { padding: 0 18px; }
 .st-room > summary {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 12px 0; cursor: pointer;
-  list-style: none; font-family: var(--display); font-weight: 600; font-size: 1rem;
+  list-style: none; font-family: var(--wa-font-family-heading); font-weight: 600; font-size: 1rem;
 }
 .st-room > summary::-webkit-details-marker { display: none; }
 .st-room > summary::before {
-  content: ""; width: 8px; height: 8px; border-right: 2px solid var(--text); border-bottom: 2px solid var(--text);
-  transform: rotate(-45deg); transition: transform 160ms var(--ease-out); flex: none;
+  content: ""; width: 8px; height: 8px; border-right: 2px solid var(--wa-color-text-normal); border-bottom: 2px solid var(--wa-color-text-normal);
+  transform: rotate(-45deg); transition: transform 160ms var(--radiate-ease-out); flex: none;
 }
 .st-room[open] > summary::before { transform: rotate(45deg); }
-.st-room[open] > summary { border-bottom: 2px solid var(--text); }
-.st-room > summary:focus-visible { outline: 2px solid var(--cool); outline-offset: -2px; }
+.st-room[open] > summary { border-bottom: 2px solid var(--wa-color-text-normal); }
+.st-room > summary:focus-visible { outline: 2px solid var(--radiate-cool-on-quiet); outline-offset: -2px; }
 .st-room .st-form { padding-bottom: 16px; }
 .st-room-name { min-width: 0; overflow-wrap: anywhere; }
-.badge[data-kind="set"] { background: var(--cool-soft); color: var(--cool); }
-.badge[data-kind="restart"] { background: var(--warn-soft); color: var(--warn); }
+
+
 #s-rooms .st-room + .st-room { margin-top: 8px; }
 
 /* The security log (admins only), the last section: filters and Refresh above a table
@@ -111,8 +111,8 @@ body[data-auth="needed"] .settings-view { display: none; }
 .sl-filters .rd-field { min-width: 180px; }
 .sl-table th, .sl-table td { text-align: left; vertical-align: top; }
 .sl-table .sl-detail { white-space: normal; min-width: 24ch; max-width: 60ch; overflow-wrap: anywhere; }
-.sl-table tr[data-kind="warn"] th { box-shadow: inset 4px 0 0 var(--warn); padding-left: 8px; }
-.badge[data-kind="refused"] { background: var(--warn-soft); color: var(--warn); }
+.sl-table tr[data-kind="warn"] th { box-shadow: inset 4px 0 0 var(--wa-color-warning-on-quiet); padding-left: 8px; }
+
 
 @media (pointer: coarse) {
   .st-control input, .st-control select { min-height: 44px; }

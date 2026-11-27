@@ -14,9 +14,41 @@ import { weekView } from "./week.js";
 const DRAFT_KEY = "radiate.householdDraft";
 const $ = (id) => document.getElementById(id);
 
+// The parts as Web Awesome components: a "btn" button is an outlined <wa-button>
+// ("btn-primary" the brand one), a "link" button a plain small one, a "card" a
+// <wa-card> and a "badge" a neutral <wa-badge>. Their classes stay, so the code that
+// finds them by class still does.
+function upgrade(tag, cls = "", aria = false) {
+  const c = ` ${cls} `;
+  if (tag === "button" && !aria && /\s(btn|link)\s/.test(c)) {
+    const b = document.createElement("wa-button");
+    if (c.includes(" btn-primary ")) b.setAttribute("variant", "brand");
+    else if (c.includes(" link ")) { b.setAttribute("appearance", "plain"); b.setAttribute("size", "s"); }
+    else b.setAttribute("appearance", "outlined");
+    if (!c.includes(" link ")) b.setAttribute("size", "s");
+    return b;
+  }
+  if (c.includes(" card ")) return document.createElement("wa-card");
+  if (c.includes(" badge ")) {
+    const b = document.createElement("wa-badge");
+    b.setAttribute("variant", "neutral");
+    b.setAttribute("appearance", "outlined");
+    return b;
+  }
+  return document.createElement(tag);
+}
+
 // h("p", { class: "x", text: "y" }, child, ...): a small element builder.
+// A button that needs its own ARIA (a label naming the room, aria-expanded) stays a
+// native <button>: <wa-button> doesn't pass those to its inner button. Web Awesome's
+// native styles draw it as the same outlined, brand or plain button.
+const nativeLook = (cls) =>
+  ` ${cls} `.includes(" btn-primary ") ? "wa-brand wa-size-s" : ` ${cls} `.includes(" link ") ? "wa-plain wa-size-s" : "wa-outlined wa-size-s";
+
 function h(tag, attrs = {}, ...children) {
-  const n = document.createElement(tag);
+  const aria = Object.keys(attrs).some((k) => k.startsWith("aria-"));
+  const n = upgrade(tag, attrs.class, aria);
+  if (n.localName === "button" && /\b(btn|link)\b/.test(attrs.class ?? "")) attrs = { ...attrs, class: `${attrs.class} ${nativeLook(attrs.class)}` };
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
     if (k === "text") n.textContent = v;

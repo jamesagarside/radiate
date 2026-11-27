@@ -531,7 +531,7 @@ export function createSavings({ transport, isAuthError, onAuth, onView }) {
     $("savings-progress").hidden = !learning;
     if (learning) {
       const p = v.progress;
-      $("savings-meter").style.transform = `scaleX(${Math.max(0, Math.min(1, p.eligible_days / Math.max(1, p.needed_days)))})`;
+      $("savings-meter").value = Math.round(100 * Math.max(0, Math.min(1, p.eligible_days / Math.max(1, p.needed_days))));
       setText("savings-learning", learningDetail(v));
     }
     renderStats(v);
@@ -581,21 +581,16 @@ export function createSavings({ transport, isAuthError, onAuth, onView }) {
   }
 
   // Days or weeks, and the table.
-  for (const b of document.querySelectorAll("#savings-modes [data-mode]")) {
-    b.addEventListener("click", () => {
-      if (b.dataset.mode === mode) return;
-      mode = b.dataset.mode;
-      for (const o of document.querySelectorAll("#savings-modes [data-mode]")) o.setAttribute("aria-checked", String(o === b));
-      active = null;
-      if (view) { list = slots(view, mode); drawChart(); }
-    });
-  }
+  $("savings-modes").addEventListener("change", (e) => {
+    const next = e.target.value;
+    if (!next || next === mode) return;
+    mode = next;
+    active = null;
+    if (view) { list = slots(view, mode); drawChart(); }
+  });
   const tableBtn = $("savings-table-toggle");
-  tableBtn.addEventListener("click", () => {
-    const on = tableBtn.getAttribute("aria-pressed") !== "true";
-    tableBtn.setAttribute("aria-pressed", String(on));
-    tableBtn.textContent = on ? "Hide table" : "Show as table";
-    $("savings-table-wrap").hidden = !on;
+  tableBtn.addEventListener("change", () => {
+    $("savings-table-wrap").hidden = !tableBtn.checked;
   });
   wireChart();
 

@@ -4,6 +4,17 @@
 // starts (POST /api/v1/devices/scan). Cards are created once and updated in place.
 
 const $ = (id) => document.getElementById(id);
+
+// A state word to a Web Awesome variant, with Radiate's cool blue (class radiate-cool)
+// for calm states. Paints a <wa-badge>: quiet outline for neutral, filled otherwise.
+const VARIANTS = { ok: "success", attention: "warning", offline: "warning" };
+function paint(el, kind) {
+  const v = VARIANTS[kind] ?? "neutral";
+  el.classList.toggle("radiate-cool", v === "cool");
+  if (v === "cool") el.removeAttribute("variant");
+  else el.setAttribute("variant", v);
+  el.setAttribute("appearance", v === "neutral" ? "outlined" : "filled-outlined");
+}
 const REFRESH_MS = 10000;
 const SCANNING_MS = 2000;
 
@@ -106,7 +117,7 @@ export function createDevices({ transport, isAuthError, onAuth, scanLock = () =>
     const [text, kind] = badge(d);
     const b = node.querySelector(".badge");
     b.textContent = text;
-    b.dataset.kind = kind;
+    paint(b, kind);
 
     const flags = node.querySelector(".device-flags");
     const lines = d.problems.map((p) => problemText(d, p.code));
@@ -131,7 +142,7 @@ export function createDevices({ transport, isAuthError, onAuth, scanLock = () =>
       batVal.textContent = `${d.battery_pct}%`;
       meter.hidden = false;
       meter.dataset.low = String(d.battery_low);
-      meter.firstElementChild.style.transform = `scaleX(${Math.max(0, Math.min(100, d.battery_pct)) / 100})`;
+      meter.value = Math.max(0, Math.min(100, d.battery_pct));
     } else {
       batVal.textContent = d.power === "mains" ? "Mains" : "–";
       meter.hidden = true;
@@ -304,7 +315,8 @@ export function createDevices({ transport, isAuthError, onAuth, scanLock = () =>
     $("mesh-lock").hidden = !why || !s.available;
     $("mesh-lock").textContent = why;
     btn.setAttribute("aria-busy", String(scanning));
-    btn.textContent = scanning ? "Scanning…" : "Scan network";
+    btn.loading = scanning;
+    btn.lastChild.textContent = scanning ? "Scanning…" : "Scan network";
     status.dataset.error = String(s.state === "failed" || Boolean(scanError));
     let text;
     if (scanError) text = scanError;

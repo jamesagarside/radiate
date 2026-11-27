@@ -80,8 +80,10 @@ export function createSecurity({ transport, isAuthError, onAuth }) {
     when.scope = "row";
     const what = cell("td", whatText(e));
     if (e.outcome === "failure") {
-      const tag = cell("span", "Refused", "badge");
-      tag.dataset.kind = "refused";
+      const tag = document.createElement("wa-badge");
+      tag.textContent = "Refused";
+      tag.setAttribute("variant", "warning");
+      tag.setAttribute("appearance", "filled-outlined");
       what.append(" ", tag);
     }
     tr.append(when, what, cell("td", whoText(e)), cell("td", e.source ?? NONE), cell("td", e.message, "sl-detail"));
@@ -126,14 +128,12 @@ export function createSecurity({ transport, isAuthError, onAuth }) {
     }
   }
 
-  for (const btn of $("security-outcome").querySelectorAll("button")) {
-    btn.addEventListener("click", () => {
-      if (btn.getAttribute("aria-checked") === "true") return;
-      for (const b of $("security-outcome").querySelectorAll("button")) b.setAttribute("aria-checked", String(b === btn));
-      filters.outcome = btn.dataset.outcome;
-      load();
-    });
-  }
+  $("security-outcome").addEventListener("change", (e) => {
+    const outcome = e.target.value === "all" ? "" : e.target.value;
+    if (outcome === filters.outcome) return;
+    filters.outcome = outcome;
+    load();
+  });
   $("security-user").addEventListener("change", (e) => {
     filters.user = e.target.value;
     load();

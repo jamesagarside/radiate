@@ -262,97 +262,107 @@
       </section>
 
       <section class="devices-view" id="devices" aria-labelledby="devices-h" hidden>
-        <div class="devices-head">
-          <h2 id="devices-h" tabindex="-1">Devices</h2>
-          <p class="devices-summary" id="devices-summary" aria-live="polite">Loading devices…</p>
-          <p class="muted devices-network" id="devices-network"></p>
-          <p class="help-line">Devices with a problem come first. <a class="help-link" href="#guide/devices">What battery, signal and offline mean</a></p>
+        <div class="view-head">
+          <h1 class="wa-heading-xl" id="devices-h" tabindex="-1">Devices</h1>
+          <p class="view-summary" id="devices-summary" aria-live="polite">Loading devices…</p>
+          <p class="view-lead devices-network" id="devices-network"></p>
+          <p class="help-line">Devices with a problem come first. <a href="#guide/devices">What battery, signal and offline mean</a></p>
         </div>
-        <section class="alerts devices-attention" id="devices-attention" aria-labelledby="devices-attention-h" hidden>
-          <h3 id="devices-attention-h">Needs attention</h3>
-          <ul id="devices-attention-list"></ul>
-        </section>
+        <wa-callout variant="warning" class="devices-attention" id="devices-attention" hidden>
+          <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
+          <div class="wa-stack wa-gap-2xs">
+            <h2 class="callout-h" id="devices-attention-h">Needs attention</h2>
+            <ul class="callout-list" id="devices-attention-list"></ul>
+          </div>
+        </wa-callout>
         <section aria-labelledby="devices-rooms-h">
-          <h3 id="devices-rooms-h" class="section-h">Valves and sensors</h3>
+          <h2 class="wa-heading-l" id="devices-rooms-h">Valves and sensors</h2>
           <div class="device-grid" id="devices-rooms"></div>
         </section>
         <section aria-labelledby="devices-mesh-h" id="devices-mesh-section">
-          <h3 id="devices-mesh-h" class="section-h">Zigbee network</h3>
-          <div class="card mesh">
-            <div class="mesh-head">
-              <div class="mesh-copy">
-                <p>See which router each device talks through.</p>
-                <p class="muted mesh-note">A scan slows the Zigbee network for up to 2 minutes, so it runs only when you ask, and at most every 10 minutes.</p>
+          <h2 class="wa-heading-l" id="devices-mesh-h">Zigbee network</h2>
+          <wa-card class="mesh">
+            <div class="wa-stack wa-gap-s">
+              <div class="mesh-head">
+                <div class="mesh-copy">
+                  <p>See which router each device talks through.</p>
+                  <p class="wa-caption-m wa-color-text-quiet">A scan slows the Zigbee network for up to 2 minutes, so it runs only when you ask, and at most every 10 minutes.</p>
+                </div>
+                <div class="wa-cluster wa-gap-xs wa-align-items-center">
+                  <wa-button appearance="outlined" id="mesh-scan" aria-describedby="mesh-status mesh-lock"><wa-icon slot="start" name="satellite-dish"></wa-icon>Scan network</wa-button>
+                  <wa-tag size="s" class="lock-tag" id="mesh-lock" hidden></wa-tag>
+                </div>
               </div>
-              <div class="lock-row">
-                <button type="button" class="btn" id="mesh-scan" aria-describedby="mesh-status mesh-lock">Scan network</button>
-                <span class="lock-tag" id="mesh-lock" hidden></span>
-              </div>
+              <p class="mesh-status" id="mesh-status" role="status"></p>
+              <ul class="tree" id="mesh-tree" aria-label="Routes" hidden></ul>
             </div>
-            <p class="mesh-status" id="mesh-status" role="status"></p>
-            <ul class="tree" id="mesh-tree" aria-label="Routes" hidden></ul>
-          </div>
+          </wa-card>
           <div class="device-grid" id="devices-routers"></div>
         </section>
         <section aria-labelledby="devices-boiler-h" id="devices-boiler-section" hidden>
-          <h3 id="devices-boiler-h" class="section-h">Boiler</h3>
+          <h2 class="wa-heading-l" id="devices-boiler-h">Boiler</h2>
           <div class="device-grid" id="devices-boiler"></div>
         </section>
       </section>
 
       <section class="suggestions-view" id="suggestions" aria-labelledby="suggestions-h" hidden>
-        <div class="devices-head">
-          <h2 id="suggestions-h" tabindex="-1">Suggestions</h2>
-          <p class="devices-summary" id="suggestions-summary" aria-live="polite">Loading suggestions…</p>
-          <p class="muted devices-network">From what Radiate has measured and learned about the house. Each one says what it is based on and how sure Radiate is. <a class="help-link" href="#guide/suggestions">How suggestions work</a></p>
+        <div class="view-head">
+          <h1 class="wa-heading-xl" id="suggestions-h" tabindex="-1">Suggestions</h1>
+          <p class="view-summary" id="suggestions-summary" aria-live="polite">Loading suggestions…</p>
+          <p class="view-lead devices-network">From what Radiate has measured and learned about the house. Each one says what it is based on and how sure Radiate is. <a href="#guide/suggestions">How suggestions work</a></p>
         </div>
         <div class="suggestion-list" id="suggestions-list"></div>
-        <section class="card suggestions-empty" id="suggestions-empty" aria-labelledby="suggestions-empty-h" hidden>
-          <h3 id="suggestions-empty-h">Still learning</h3>
-          <p id="suggestions-empty-text"></p>
-        </section>
-        <section aria-labelledby="learning-h" id="learning-section" hidden>
-          <h3 id="learning-h" class="section-h">Learning</h3>
-          <div class="card learning">
-            <p class="muted learning-compare" id="learning-compare" hidden></p>
-            <ul class="learning-list" id="learning-list"></ul>
+        <wa-callout class="radiate-cool suggestions-empty" id="suggestions-empty" hidden>
+          <wa-icon slot="icon" name="graduation-cap"></wa-icon>
+          <div class="wa-stack wa-gap-2xs">
+            <h2 class="callout-h" id="suggestions-empty-h">Still learning</h2>
+            <p id="suggestions-empty-text"></p>
           </div>
+        </wa-callout>
+        <section aria-labelledby="learning-h" id="learning-section" hidden>
+          <h2 class="wa-heading-l" id="learning-h">Learning</h2>
+          <wa-card class="learning">
+            <p class="wa-caption-m wa-color-text-quiet learning-compare" id="learning-compare" hidden></p>
+            <ul class="learning-list" id="learning-list"></ul>
+          </wa-card>
         </section>
       </section>
 
       <section class="savings-view" id="savings" aria-labelledby="savings-h" hidden>
-        <div class="devices-head">
-          <h2 id="savings-h" tabindex="-1">Savings</h2>
+        <div class="view-head">
+          <h1 class="wa-heading-xl" id="savings-h" tabindex="-1">Savings</h1>
           <p class="sv-headline" id="savings-headline" aria-live="polite">Loading savings…</p>
-          <p class="help-line">An estimate from measured temperatures and the oil Radiate measured, with comfort beside it. <a class="help-link" href="#guide/savings">How savings are worked out</a></p>
+          <p class="help-line">An estimate from measured temperatures and the oil Radiate measured, with comfort beside it. <a href="#guide/savings">How savings are worked out</a></p>
         </div>
 
-        <section class="card sv-missing" id="savings-missing" aria-label="What savings need" hidden>
-          <p id="savings-missing-text"></p>
-          <div class="lock-row" id="savings-setup-row" hidden>
-            <button type="button" class="btn btn-primary" id="savings-setup" aria-describedby="savings-setup-lock">Set up your household</button>
-            <span class="lock-tag" id="savings-setup-lock" hidden></span>
+        <wa-card class="sv-missing" id="savings-missing" aria-label="What savings need" hidden>
+          <div class="wa-stack wa-gap-m">
+            <p id="savings-missing-text"></p>
+            <div class="wa-cluster wa-gap-xs wa-align-items-center" id="savings-setup-row" hidden>
+              <wa-button variant="brand" id="savings-setup" aria-describedby="savings-setup-lock">Set up your household</wa-button>
+              <wa-tag size="s" class="lock-tag" id="savings-setup-lock" hidden></wa-tag>
+            </div>
           </div>
-        </section>
+        </wa-card>
 
         <div class="sv-body" id="savings-body" hidden>
-          <section class="card sv-plate" aria-labelledby="savings-chart-h">
+          <wa-card class="sv-plate" aria-labelledby="savings-chart-h">
             <div class="sv-progress" id="savings-progress" hidden>
-              <span class="meter sv-meter" aria-hidden="true"><span class="meter-fill" id="savings-meter"></span></span>
+              <wa-progress-bar class="sv-meter" id="savings-meter" value="0" label="Days counted"></wa-progress-bar>
               <p id="savings-learning"></p>
             </div>
             <div class="sv-about">
               <p id="savings-baseline"></p>
-              <p class="muted" id="savings-basis"></p>
+              <p class="wa-caption-m wa-color-text-quiet" id="savings-basis"></p>
             </div>
             <dl class="stats sv-stats" id="savings-stats"></dl>
             <div class="sv-toolbar">
               <h3 class="sv-chart-h" id="savings-chart-h">Oil used against the baseline</h3>
-              <div class="seg" role="radiogroup" aria-label="Show by" id="savings-modes" hidden>
-                <button type="button" role="radio" data-mode="days" aria-checked="true">Days</button>
-                <button type="button" role="radio" data-mode="weeks" aria-checked="false">Weeks</button>
-              </div>
-              <button type="button" class="btn" id="savings-table-toggle" aria-pressed="false" aria-controls="savings-table-wrap">Show as table</button>
+              <wa-radio-group label="Show by" class="label-hidden" orientation="horizontal" size="s" id="savings-modes" value="days" hidden>
+                <wa-radio appearance="button" value="days">Days</wa-radio>
+                <wa-radio appearance="button" value="weeks">Weeks</wa-radio>
+              </wa-radio-group>
+              <wa-switch size="s" id="savings-table-toggle" aria-controls="savings-table-wrap">Show as table</wa-switch>
             </div>
             <p class="sv-legend" aria-hidden="true">
               <span><svg width="12" height="12" viewBox="0 0 12 12"><rect class="sv-act" x="2" y="0" width="8" height="12"/></svg>Oil used</span>
@@ -363,7 +373,7 @@
               <div class="sv-chart" id="savings-chart" role="group"></div>
               <p class="sv-readout" id="savings-readout"></p>
             </div>
-            <p class="muted" id="savings-chart-empty" hidden>No full day yet. The first bar appears after midnight.</p>
+            <p class="wa-color-text-quiet" id="savings-chart-empty" hidden>No full day yet. The first bar appears after midnight.</p>
             <div class="sv-skipped" id="savings-skipped-section" hidden>
               <h4>Days not counted</h4>
               <ul id="savings-skipped"></ul>
@@ -374,86 +384,85 @@
                 <thead><tr><th scope="col">Day</th><th scope="col">Counted</th><th scope="col">Oil used (L)</th><th scope="col">Baseline (L)</th><th scope="col">Saved (L)</th><th scope="col">Outdoor</th><th scope="col">Rooms in use warm</th><th scope="col">Short (degree-hours)</th></tr></thead>
                 <tbody id="savings-table-body"></tbody>
               </table>
-              <p class="muted" id="savings-table-empty" hidden>No full day yet.</p>
+              <p class="wa-color-text-quiet" id="savings-table-empty" hidden>No full day yet.</p>
             </div>
-          </section>
+          </wa-card>
 
           <div class="sv-side">
-            <section class="card sv-plate" id="savings-running" aria-labelledby="savings-running-h" hidden>
+            <wa-card class="sv-plate" id="savings-running" aria-labelledby="savings-running-h" hidden>
               <h3 class="sv-chart-h" id="savings-running-h">Saved so far</h3>
               <div class="sv-line-chart" id="savings-line-chart"></div>
               <p class="sv-running-text" id="savings-running-text"></p>
-            </section>
-            <section class="card sv-plate" id="savings-rooms-section" aria-labelledby="savings-rooms-h" hidden>
+            </wa-card>
+            <wa-card class="sv-plate" id="savings-rooms-section" aria-labelledby="savings-rooms-h" hidden>
               <h3 class="sv-chart-h" id="savings-rooms-h">Estimated share, last 30 days</h3>
-              <p class="muted sv-note">How the saving splits between rooms, in litres. An attribution from each room's temperatures, not a measurement.</p>
+              <p class="wa-caption-m wa-color-text-quiet sv-note">How the saving splits between rooms, in litres. An attribution from each room's temperatures, not a measurement.</p>
               <ul class="sv-rooms" id="savings-rooms"></ul>
-            </section>
+            </wa-card>
           </div>
         </div>
       </section>
 
       <section class="settings-view" id="settings" aria-labelledby="settings-h" hidden>
-        <div class="devices-head">
-          <h2 id="settings-h" tabindex="-1">Settings</h2>
-          <p class="devices-summary" id="settings-summary" aria-live="polite">Loading settings…</p>
-          <p class="muted devices-network"><span id="settings-where"></span> <a class="help-link" href="#guide/settings">How settings work</a></p>
+        <div class="view-head">
+          <h1 class="wa-heading-xl" id="settings-h" tabindex="-1">Settings</h1>
+          <p class="view-summary" id="settings-summary" aria-live="polite">Loading settings…</p>
+          <p class="view-lead devices-network"><span id="settings-where"></span> <a href="#guide/settings">How settings work</a></p>
         </div>
-        <section class="notice" id="settings-restart" aria-label="Restart needed" hidden>
-          <p><strong class="notice-tag">Restart needed</strong><span id="settings-restart-text"></span></p>
-        </section>
-        <section class="notice" id="settings-problems" aria-label="Saved settings not used" role="alert" hidden>
-          <p><strong class="notice-tag">Not used</strong><span id="settings-problems-text"></span></p>
-        </section>
+        <wa-callout variant="warning" size="s" id="settings-restart" aria-label="Restart needed" hidden>
+          <wa-icon slot="icon" name="rotate"></wa-icon>
+          <p><strong>Restart needed.</strong> <span id="settings-restart-text"></span></p>
+        </wa-callout>
+        <wa-callout variant="warning" size="s" id="settings-problems" aria-label="Saved settings not used" role="alert" hidden>
+          <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
+          <p><strong>Not used.</strong> <span id="settings-problems-text"></span></p>
+        </wa-callout>
         <div class="settings-body">
-          <nav class="card guide-toc settings-toc" aria-label="Settings sections"><ul id="settings-toc"></ul></nav>
+          <nav class="toc settings-toc" aria-label="Settings sections"><wa-card><ul id="settings-toc"></ul></wa-card></nav>
           <div class="settings-sections">
             <div class="st-all" id="settings-all" hidden></div>
             <div class="settings-list" id="settings-sections"></div>
             <section class="st-sec sl-sec" id="s-security-log" aria-labelledby="s-security-log-h" hidden>
-              <h3 class="section-h" id="s-security-log-h" tabindex="-1">Security log</h3>
-              <p class="help-line st-help">Who signed in, from where, what was refused and who changed what. Only admins see this. <a class="help-link" href="#guide/security-log">About the security log</a></p>
-              <div class="card st-plate sl-plate" id="security">
+              <h2 class="wa-heading-l st-h" id="s-security-log-h" tabindex="-1">Security log</h2>
+              <p class="help-line st-help">Who signed in, from where, what was refused and who changed what. Only admins see this. <a href="#guide/security-log">About the security log</a></p>
+              <wa-card class="st-plate sl-plate" id="security">
                 <div class="sl-toolbar">
                   <div class="sl-filters">
-                    <div class="rd-field">
-                      <span class="rd-label" id="security-outcome-l">Show</span>
-                      <div class="seg" role="radiogroup" aria-labelledby="security-outcome-l" id="security-outcome">
-                        <button type="button" role="radio" data-outcome="" aria-checked="true">Everything</button>
-                        <button type="button" role="radio" data-outcome="failure" aria-checked="false">Refused</button>
-                        <button type="button" role="radio" data-outcome="success" aria-checked="false">Allowed</button>
-                      </div>
-                    </div>
+                    <wa-radio-group label="Show" orientation="horizontal" size="s" id="security-outcome" value="all">
+                      <wa-radio appearance="button" value="all">Everything</wa-radio>
+                      <wa-radio appearance="button" value="failure">Refused</wa-radio>
+                      <wa-radio appearance="button" value="success">Allowed</wa-radio>
+                    </wa-radio-group>
                     <div class="rd-field"><label for="security-user">User</label><select id="security-user"><option value="">Everyone</option></select></div>
                   </div>
-                  <button type="button" class="btn" id="security-refresh">Refresh</button>
+                  <wa-button appearance="outlined" size="s" id="security-refresh"><wa-icon slot="start" name="rotate"></wa-icon>Refresh</wa-button>
                 </div>
                 <p class="rd-meta" id="security-summary" aria-live="polite"></p>
-                <p class="rd-note" id="security-error" data-kind="warn" role="status" hidden>Couldn't load the security log. Try Refresh.</p>
+                <wa-callout variant="warning" size="s" id="security-error" role="status" hidden>Couldn't load the security log. Try Refresh.</wa-callout>
                 <div class="rd-table-wrap sl-wrap" id="security-table" hidden>
                   <table class="rd-table sl-table">
                     <thead><tr><th scope="col">Time</th><th scope="col">What</th><th scope="col">Who</th><th scope="col">From</th><th scope="col">Detail</th></tr></thead>
                     <tbody id="security-body"></tbody>
                   </table>
                 </div>
-                <div><button type="button" class="btn" id="security-more" hidden>Show older</button></div>
-              </div>
+                <div><wa-button appearance="outlined" size="s" id="security-more" hidden>Show older</wa-button></div>
+              </wa-card>
             </section>
           </div>
         </div>
       </section>
 
       <section class="data-view" id="data" aria-labelledby="data-h" hidden>
-        <div class="devices-head">
-          <h2 id="data-h" tabindex="-1">Raw data</h2>
-          <p class="devices-summary" id="data-summary" aria-live="polite">Loading raw data…</p>
-          <p class="help-line">Every reading Radiate records, a minute apart, to search, chart and download. <a class="help-link" href="#guide/raw-data">What each reading means</a></p>
+        <div class="view-head">
+          <h1 class="wa-heading-xl" id="data-h" tabindex="-1">Raw data</h1>
+          <p class="view-summary" id="data-summary" aria-live="polite">Loading raw data…</p>
+          <p class="help-line">Every reading Radiate records, a minute apart, to search, chart and download. <a href="#guide/raw-data">What each reading means</a></p>
         </div>
-        <p class="rd-note" id="data-note" role="status" hidden></p>
+        <wa-callout size="s" id="data-note" role="status" hidden></wa-callout>
 
         <div class="rd-body" id="data-body" hidden>
-          <section class="card rd-plate rd-query" aria-labelledby="data-query-h">
-            <h3 class="rd-h" id="data-query-h">Find a reading</h3>
+          <wa-card class="rd-plate rd-query" aria-labelledby="data-query-h">
+            <h2 class="wa-heading-m rd-h" id="data-query-h">Find a reading</h2>
             <div class="rd-search">
               <label for="data-search">Search</label>
               <input id="data-search" type="search" autocomplete="off" spellcheck="false" placeholder="Lounge humidity, burner, outdoor" aria-describedby="data-search-help" aria-controls="data-results">
@@ -464,13 +473,12 @@
               <div class="rd-field"><label for="data-metric">Reading</label><select id="data-metric"></select></div>
               <div class="rd-field"><label for="data-room">Room</label><select id="data-room"></select></div>
               <div class="rd-field rd-range rd-wide">
-                <span class="rd-label" id="data-range-l">Time</span>
-                <div class="seg" role="radiogroup" aria-labelledby="data-range-l" id="data-range">
-                  <button type="button" role="radio" data-range="6h" aria-checked="false">6 h</button>
-                  <button type="button" role="radio" data-range="24h" aria-checked="true">24 h</button>
-                  <button type="button" role="radio" data-range="7d" aria-checked="false">7 days</button>
-                  <button type="button" role="radio" data-range="30d" aria-checked="false">30 days</button>
-                </div>
+                <wa-radio-group label="Time" orientation="horizontal" size="s" id="data-range" value="24h">
+                  <wa-radio appearance="button" value="6h">6 h</wa-radio>
+                  <wa-radio appearance="button" value="24h">24 h</wa-radio>
+                  <wa-radio appearance="button" value="7d">7 days</wa-radio>
+                  <wa-radio appearance="button" value="30d">30 days</wa-radio>
+                </wa-radio-group>
               </div>
               <div class="rd-field rd-wide"><label for="data-from">From</label><input id="data-from" type="datetime-local"></div>
               <div class="rd-field rd-wide"><label for="data-to">To</label><input id="data-to" type="datetime-local"></div>
@@ -489,16 +497,16 @@
             </form>
             <p class="rd-meta" id="data-meta" aria-live="polite"></p>
             <div class="rd-downloads" id="data-downloads" hidden>
-              <button type="button" class="btn" id="data-csv">Download CSV</button>
-              <button type="button" class="btn" id="data-json">Download JSON</button>
+              <wa-button appearance="outlined" size="s" id="data-csv"><wa-icon slot="start" name="download"></wa-icon>Download CSV</wa-button>
+              <wa-button appearance="outlined" size="s" id="data-json"><wa-icon slot="start" name="download"></wa-icon>Download JSON</wa-button>
               <p id="data-dl-status" role="status"></p>
             </div>
-          </section>
+          </wa-card>
 
-          <section class="card rd-plate rd-chart-plate" aria-labelledby="data-chart-h">
+          <wa-card class="rd-plate rd-chart-plate" aria-labelledby="data-chart-h">
             <div class="rd-toolbar">
-              <h3 class="rd-h" id="data-chart-h">Raw data</h3>
-              <button type="button" class="btn" id="data-table-toggle" aria-pressed="false" aria-controls="data-table-wrap">Show as table</button>
+              <h2 class="wa-heading-m rd-h" id="data-chart-h">Raw data</h2>
+              <wa-switch size="s" id="data-table-toggle" aria-controls="data-table-wrap">Show as table</wa-switch>
             </div>
             <p class="rd-stats-for" id="data-stats-for" hidden></p>
             <dl class="stats rd-stats" id="data-stats"></dl>
@@ -507,7 +515,7 @@
               <p class="rd-readout" id="data-readout" aria-live="polite"></p>
             </div>
             <ul class="rd-legend" id="data-legend" aria-label="Show in ink" hidden></ul>
-            <p class="muted" id="data-empty" hidden>Nothing recorded for this in the time chosen. Try a longer time or another reading.</p>
+            <p class="wa-color-text-quiet" id="data-empty" hidden>Nothing recorded for this in the time chosen. Try a longer time or another reading.</p>
             <div class="rd-table-wrap" id="data-table-wrap" hidden>
               <table class="rd-table">
                 <caption class="rd-table-note" id="data-table-note"></caption>
@@ -515,26 +523,27 @@
                 <tbody id="data-table-body"></tbody>
               </table>
             </div>
-          </section>
+          </wa-card>
 
-          <section class="card rd-plate rd-export" id="data-export" aria-labelledby="data-export-h">
+          <wa-card class="rd-plate rd-export" id="data-export" aria-labelledby="data-export-h">
             <div class="rd-toolbar">
-              <h3 class="rd-h" id="data-export-h">OpenTelemetry export</h3>
-              <span class="badge" id="data-export-badge"></span>
+              <h2 class="wa-heading-m rd-h" id="data-export-h">OpenTelemetry export</h2>
+              <wa-badge class="badge" appearance="outlined" variant="neutral" id="data-export-badge"></wa-badge>
             </div>
             <p id="data-export-line" aria-live="polite"></p>
             <dl class="rd-export-list" id="data-export-list" hidden></dl>
-          </section>
+          </wa-card>
         </div>
       </section>
 
       <section class="guide-view" id="guide" aria-labelledby="guide-h" hidden>
-        <div class="devices-head">
-          <h2 id="guide-h" tabindex="-1">Guide</h2>
-          <p class="devices-summary">What you see in Radiate, and how to change what it does.</p>
+        <div class="view-head">
+          <h1 class="wa-heading-xl" id="guide-h" tabindex="-1">Guide</h1>
+          <p class="view-summary">What you see in Radiate, and how to change what it does.</p>
         </div>
         <div class="guide-body">
-          <nav class="card guide-toc" aria-label="Guide contents">
+          <nav class="toc guide-toc" aria-label="Guide contents">
+            <wa-card>
             <ul>
               <li><a href="#guide/colours">What the colours mean</a></li>
               <li><a href="#guide/model">Read the house model</a></li>
@@ -559,13 +568,14 @@
               <li><a href="#guide/problems">When something goes wrong</a></li>
               <li><a href="#guide/home-assistant">Home Assistant</a></li>
             </ul>
+            </wa-card>
           </nav>
 
           <div class="guide-text">
             <section class="g-sec" id="g-colours" aria-labelledby="g-colours-h">
-              <h3 class="section-h" id="g-colours-h" tabindex="-1">What the colours mean</h3>
+              <h3 class="wa-heading-l g-h" id="g-colours-h" tabindex="-1">What the colours mean</h3>
               <p>Rooms are coloured by their temperature, on one scale for the whole house. 12° and colder is cobalt blue, 17° is a neutral stone, 19° is amber and 22° or warmer is red.</p>
-              <div class="card g-fig g-scale" aria-hidden="true">
+              <div class="g-fig g-scale" aria-hidden="true">
                 <span class="g-ramp"></span>
                 <span class="g-ticks"><span>12°</span><span>15°</span><span>17°</span><span>19°</span><span>22°</span></span>
               </div>
@@ -580,9 +590,9 @@
             </section>
 
             <section class="g-sec" id="g-model" aria-labelledby="g-model-h">
-              <h3 class="section-h" id="g-model-h" tabindex="-1">Read the house model</h3>
+              <h3 class="wa-heading-l g-h" id="g-model-h" tabindex="-1">Read the house model</h3>
               <p>The top of the House page draws your house as a model. Each block is a room, with the floors stacked and pulled apart so you can see every room. The number on a block is the room's temperature.</p>
-              <div class="card g-fig g-model" aria-hidden="true">
+              <div class="g-fig g-model" aria-hidden="true">
                 <svg viewBox="-84 -22 184 124" width="184" height="124">
                   <polygon class="g-side-r" points="88.3,51 14.7,93.5 14.7,81.9 88.3,39.4"/>
                   <polygon class="g-side-f" points="-73.6,42.5 14.7,93.5 14.7,81.9 -73.6,30.9"/>
@@ -597,7 +607,7 @@
             </section>
 
             <section class="g-sec" id="g-now" aria-labelledby="g-now-h">
-              <h3 class="section-h" id="g-now-h" tabindex="-1">What the house is doing</h3>
+              <h3 class="wa-heading-l g-h" id="g-now-h" tabindex="-1">What the house is doing</h3>
               <p>The line under the header, on every page, says what the boiler is doing and why, for example "Burner on for 12 min. Heating Lounge and Bedroom 3."</p>
               <p>The house now, beside the model, starts with how many rooms want heat out of the rooms Radiate controls, such as 3/8. Where every room sits puts each room on the temperature scale, with a line at the temperature most rooms are aiming for. Its four boxes show the boiler, the heating mode, devices that need attention and how far learning has got. Coming up lists the next times a room's temperature changes.</p>
               <p>The boiler moves through four states:</p>
@@ -611,7 +621,7 @@
             </section>
 
             <section class="g-sec" id="g-rooms" aria-labelledby="g-rooms-h">
-              <h3 class="section-h" id="g-rooms-h" tabindex="-1">Read a room</h3>
+              <h3 class="wa-heading-l g-h" id="g-rooms-h" tabindex="-1">Read a room</h3>
               <p>Rooms lists every room: the temperature now, its setpoint, how far its valve may open and a badge for what it is doing. Select a room to see its target, a line saying why it is doing what it does, and its controls.</p>
               <p>A room calls for heat when it is below its target, and calling rooms are what make Radiate fire the boiler. Other rooms can take heat while the burner is on, but they never start it.</p>
               <dl class="g-terms">
@@ -626,20 +636,20 @@
                 <div><dt><wa-badge variant="neutral" appearance="outlined">Bypass, not controlled</wa-badge></dt><dd>A radiator with a manual valve that stays open. Radiate counts on it as a path the water can always take.</dd></div>
                 <div><dt><wa-badge variant="neutral" appearance="outlined">No radiator</wa-badge></dt><dd>The room has a sensor but no radiator. Radiate records its temperature and nothing more.</dd></div>
               </dl>
-              <div class="card g-fig g-valve" aria-hidden="true" inert>
+              <div class="g-fig g-valve" aria-hidden="true" inert>
                 <div class="wa-stack wa-gap-2xs">
                   <span class="wa-split wa-caption-m"><span>Opening limit</span><span>35%</span></span>
                   <wa-progress-bar class="opening" value="35" label="Opening limit"></wa-progress-bar>
                 </div>
               </div>
               <p>The Opening limit bar, in Rooms and in a room's details, is the most the room's valve may open. Radiate sets it so that rooms warming together get their heat at about the same time, instead of the radiators nearest the boiler taking most of it. The valve's own thermostat still opens and closes within that limit. The bar is faded while the room isn't taking heat.</p>
-              <p>In a room's details, the small print says whether Radiate is learning the room right now, or why not. Under it, "What Radiate has learned" opens to show what Radiate knows about the room, in words. See <a class="help-link" href="#guide/room-model">What the room model is</a>.</p>
+              <p>In a room's details, the small print says whether Radiate is learning the room right now, or why not. Under it, "What Radiate has learned" opens to show what Radiate knows about the room, in words. See <a href="#guide/room-model">What the room model is</a>.</p>
             </section>
 
             <section class="g-sec" id="g-warmer" aria-labelledby="g-warmer-h">
-              <h3 class="section-h" id="g-warmer-h" tabindex="-1">Make a room warmer for a while</h3>
+              <h3 class="wa-heading-l g-h" id="g-warmer-h" tabindex="-1">Make a room warmer for a while</h3>
               <p>Select the room, then use minus and plus on its Setpoint, or type a temperature. Each press changes it by 0.5°, between 5° and 28°. Radiate sends the new temperature once you stop pressing.</p>
-              <div class="card g-fig g-hold setpoint" data-held="true" aria-hidden="true" inert>
+              <div class="g-fig g-hold setpoint" data-held="true" aria-hidden="true" inert>
                 <div class="wa-stack wa-gap-xs">
                   <wa-number-input label="Setpoint, °C" value="21.5" min="5" max="28" step="0.5" hint="Held until 22:30"></wa-number-input>
                   <div><wa-button size="s" appearance="outlined"><wa-icon slot="start" name="rotate-left"></wa-icon>Resume schedule</wa-button></div>
@@ -651,7 +661,7 @@
             </section>
 
             <section class="g-sec" id="g-schedules" aria-labelledby="g-schedules-h">
-              <h3 class="section-h" id="g-schedules-h" tabindex="-1">Change the weekly times</h3>
+              <h3 class="wa-heading-l g-h" id="g-schedules-h" tabindex="-1">Change the weekly times</h3>
               <p>Each room follows a week of temperatures. Today's plan shows today for every room, and Schedules, at the bottom of the House page, shows each room's whole week. The badge on each week says where it comes from:</p>
               <dl class="g-terms">
                 <div><dt><wa-badge variant="neutral" appearance="outlined">Household</wa-badge></dt><dd>Built from your household: who lives here, when you're usually up, out and in bed, and how each room is used. You can change these weeks in the app.</dd></div>
@@ -660,18 +670,18 @@
               <p>To change a household room's week, drag the start or end of a warm block, or select Adjust, to keep the room warm or cold for longer on some days. Days with the same routine move together. You see the week as it would be, and nothing changes until you select Save. Remove, or Reset to routine, takes an adjustment away again.</p>
               <p>To change the routine itself, such as when someone gets up, select Change household setup beside People. If there's no household yet, Set up your household, above the rooms, builds one from a few questions.</p>
               <p>A warm block is when the room should be warm. Radiate starts heating early so the room is warm by then, and each valve keeps its own copy of the week in case Radiate stops.</p>
-              <p>For a one-off change, hold a temperature instead: see <a class="help-link" href="#guide/warmer">Make a room warmer for a while</a>. Hot-water times are set elsewhere: see <a class="help-link" href="#guide/hot-water">Hot water</a>.</p>
+              <p>For a one-off change, hold a temperature instead: see <a href="#guide/warmer">Make a room warmer for a while</a>. Hot-water times are set elsewhere: see <a href="#guide/hot-water">Hot water</a>.</p>
             </section>
 
             <section class="g-sec" id="g-hot-water" aria-labelledby="g-hot-water-h">
-              <h3 class="section-h" id="g-hot-water-h" tabindex="-1">Hot water</h3>
+              <h3 class="wa-heading-l g-h" id="g-hot-water-h" tabindex="-1">Hot water</h3>
               <p>The hot-water store is heated in set windows, the same every day, up to four a day. The windows are set in Radiate's house file, so you can't change them in the app. They run in every heating mode, Off included.</p>
               <p>Boost hot water, a switch on the Boiler card, turns the hot water on now for 60 minutes. Switch it off to stop the boost early. While the hot water is on, the line under the header ends "Hot water on."</p>
               <p>The boiler heats the store before the radiators. For about 25 minutes after the hot water comes on, the radiators get little heat, so rooms warm more slowly and learning pauses ("learning paused: hot water"). The thin blue strip on the Boiler card shows when the hot water was on in the last 24 hours.</p>
             </section>
 
             <section class="g-sec" id="g-modes" aria-labelledby="g-modes-h">
-              <h3 class="section-h" id="g-modes-h" tabindex="-1">Heating modes, Eco and Comfort</h3>
+              <h3 class="wa-heading-l g-h" id="g-modes-h" tabindex="-1">Heating modes, Eco and Comfort</h3>
               <p>Heating, near the top of the House page, sets the heating for the whole house:</p>
               <dl class="g-terms g-words">
                 <div><dt>Auto</dt><dd>Rooms follow their schedules and any temperature you hold. This is the usual mode.</dd></div>
@@ -687,7 +697,7 @@
             </section>
 
             <section class="g-sec" id="g-away" aria-labelledby="g-away-h">
-              <h3 class="section-h" id="g-away-h" tabindex="-1">When someone is away</h3>
+              <h3 class="wa-heading-l g-h" id="g-away-h" tabindex="-1">When someone is away</h3>
               <p>Away needs a household, as Radiate has to know whose rooms are whose. Each person then has a card under People.</p>
               <p>Select Set away and pick the day they're back, and a time if you know it. Without a time, they count as back from the start of that day. Back now cancels it. It also shows while Home Assistant says someone is out, and counts them as home until Home Assistant sees them come or go.</p>
               <p>If a person is linked to Home Assistant, Radiate also counts them as away once Home Assistant has reported them out for an hour (the default), and as home when they're back.</p>
@@ -696,7 +706,7 @@
             </section>
 
             <section class="g-sec" id="g-fire" aria-labelledby="g-fire-h">
-              <h3 class="section-h" id="g-fire-h" tabindex="-1">Open fires and range cookers</h3>
+              <h3 class="wa-heading-l g-h" id="g-fire-h" tabindex="-1">Open fires and range cookers</h3>
               <p>A room with an open fire has a Fire lit switch in its details. Switch it on when you light the fire, and off when it's out.</p>
               <p>While the fire is lit, Radiate closes that room's radiator, leaves the room out when deciding whether to fire the boiler, and pauses its learning, so the fire's heat isn't mistaken for the radiator's. It also spots a fire by itself when the room warms quickly with the radiator off.</p>
               <p>Once there has been no sign of the fire for 30 minutes, learning stays paused for another 4 hours while the chimney breast gives off its heat ("learning paused: fire cooling"). If Radiate restarts, the switch is cleared, so switch it on again if the fire is still lit.</p>
@@ -704,7 +714,7 @@
             </section>
 
             <section class="g-sec" id="g-room-model" aria-labelledby="g-room-model-h">
-              <h3 class="section-h" id="g-room-model-h" tabindex="-1">What the room model is</h3>
+              <h3 class="wa-heading-l g-h" id="g-room-model-h" tabindex="-1">What the room model is</h3>
               <p>For each room it controls, Radiate keeps a room model: a few numbers that describe how that room heats up and cools down. It learns them by watching the room's temperature, the outdoor temperature and the boiler, a reading a minute.</p>
               <dl class="g-terms g-wide">
                 <div><dt>Warms up</dt><dd>How many degrees an hour the radiator adds with the boiler on and the valve open. It adds less when most of the house is heating, as the hot water is shared between more radiators.</dd></div>
@@ -719,9 +729,9 @@
             </section>
 
             <section class="g-sec" id="g-learning" aria-labelledby="g-learning-h">
-              <h3 class="section-h" id="g-learning-h" tabindex="-1">What learning is</h3>
+              <h3 class="wa-heading-l g-h" id="g-learning-h" tabindex="-1">What learning is</h3>
               <p>Radiate learns each room: how fast its radiator warms it, how fast it cools, and how long heat takes to reach it. It uses this to start warming in time, and to share the heat so rooms reach their temperatures together.</p>
-              <p>Open "What Radiate has learned" in a room's details to see what it knows about that room. <a class="help-link" href="#guide/room-model">What the room model is</a> explains the numbers. The Learning box on The house now is how sure Radiate is, on average, over the rooms it controls.</p>
+              <p>Open "What Radiate has learned" in a room's details to see what it knows about that room. <a href="#guide/room-model">What the room model is</a> explains the numbers. The Learning box on The house now is how sure Radiate is, on average, over the rooms it controls.</p>
               <p>Learning pauses whenever something other than the radiator is warming or cooling the room. The small print says why:</p>
               <dl class="g-terms g-words">
                 <div><dt>fire, fire cooling</dt><dd>The open fire is lit, and for 4 hours after.</dd></div>
@@ -739,7 +749,7 @@
             </section>
 
             <section class="g-sec" id="g-not-heating" aria-labelledby="g-not-heating-h">
-              <h3 class="section-h" id="g-not-heating-h" tabindex="-1">Why a room isn't heating</h3>
+              <h3 class="wa-heading-l g-h" id="g-not-heating-h" tabindex="-1">Why a room isn't heating</h3>
               <p>Start with the room's badge and the line under its Opening limit bar. The usual reasons:</p>
               <ul class="g-list">
                 <li>It's at its target. Comfortable means within 0.3°.</li>
@@ -757,7 +767,7 @@
             </section>
 
             <section class="g-sec" id="g-devices" aria-labelledby="g-devices-h">
-              <h3 class="section-h" id="g-devices-h" tabindex="-1">Devices</h3>
+              <h3 class="wa-heading-l g-h" id="g-devices-h" tabindex="-1">Devices</h3>
               <p>The Devices page lists every valve, sensor and Zigbee router, and the boiler relay, with problems first. The number beside Devices in the menu is how many need attention.</p>
               <dl class="g-terms">
                 <div><dt><wa-badge variant="success" appearance="filled-outlined">Online</wa-badge></dt><dd>Reporting normally.</dd></div>
@@ -772,14 +782,14 @@
             </section>
 
             <section class="g-sec" id="g-suggestions" aria-labelledby="g-suggestions-h">
-              <h3 class="section-h" id="g-suggestions-h" tabindex="-1">Suggestions</h3>
+              <h3 class="wa-heading-l g-h" id="g-suggestions-h" tabindex="-1">Suggestions</h3>
               <p>Suggestions are advice from what Radiate has learned: a room that loses heat quickly, a radiator that may be too small or is slow to warm, a valve that lets heat through when it's shut, or a weak Zigbee link. Radiate never acts on them itself.</p>
               <p>Each one says what it's based on and how sure Radiate is. Act on this comes first, then Worth considering, then For information.</p>
               <p>A room is judged once it has 48 hours of learning and Radiate is at least 60% sure of it, and rooms are compared once 3 are ready. Until then the Learning list shows how far each room has got. Rooms measured only by their valve, and rooms with a range cooker, aren't judged.</p>
             </section>
 
             <section class="g-sec" id="g-savings" aria-labelledby="g-savings-h">
-              <h3 class="section-h" id="g-savings-h" tabindex="-1">Savings</h3>
+              <h3 class="wa-heading-l g-h" id="g-savings-h" tabindex="-1">Savings</h3>
               <p>The Savings page estimates how much oil Radiate saved, and shows how warm the rooms in use were beside it, so a saving that cost comfort is plain to see.</p>
               <p>Savings are measured against one baseline: a heating timer on from the first person up to the last to bed every day, with each room's valve set to its usual temperature. That is roughly what the house would do with a plain timer and thermostatic valves. Radiate builds it from your household's times, so it needs a household setup.</p>
               <p>Radiate doesn't run the baseline. Each day it measures how warm each room was against the temperature outside, works out how warm the baseline would have kept it, and turns the difference into litres using how much oil this house burns for each degree of warmth. Warmth from an open fire, a range cooker or the sun counts the same on both sides, so it isn't taken as a saving.</p>
@@ -793,7 +803,7 @@
               <p>Every figure says "about" because it is an estimate. Radiate doesn't project a year from a few weeks, and it needs an outdoor sensor and the boiler's nozzle rating to estimate at all.</p>
             </section>
             <section class="g-sec" id="g-raw-data" aria-labelledby="g-raw-data-h">
-              <h3 class="section-h" id="g-raw-data-h" tabindex="-1">Raw data and exporting it</h3>
+              <h3 class="wa-heading-l g-h" id="g-raw-data-h" tabindex="-1">Raw data and exporting it</h3>
               <p>The Raw data page shows every reading Radiate records, once a minute, for as long as the house file keeps its history (14 days unless <code>house.history_days</code> says otherwise). Search for a room or a reading, pick a time, and the chart and table show it. Download CSV or JSON to open it in a spreadsheet or another tool.</p>
               <p>Over a long time each point is an average: every 5 minutes for a day, every hour for a month. The band around the line runs from the lowest to the highest reading within each point. You can choose the step under "One point every"; a very fine step over a long time is made coarser, so the page stays quick.</p>
               <dl class="g-terms g-words">
@@ -808,7 +818,7 @@
             </section>
 
             <section class="g-sec" id="g-settings" aria-labelledby="g-settings-h">
-              <h3 class="section-h" id="g-settings-h" tabindex="-1">Settings</h3>
+              <h3 class="wa-heading-l g-h" id="g-settings-h" tabindex="-1">Settings</h3>
               <p>The Settings page shows every setting in the house file, what each one does and its value now. You can change them there instead of editing the file.</p>
               <p>Radiate never changes the house file itself, as it may be read-only. A change is saved in Radiate's data directory and replaces the house file's value from then on. Each section saves on its own, and a value that wouldn't load is refused with the reason under it.</p>
               <dl class="g-terms g-words">
@@ -822,7 +832,7 @@
             </section>
 
             <section class="g-sec" id="g-security-log" aria-labelledby="g-security-log-h">
-              <h3 class="section-h" id="g-security-log-h" tabindex="-1">The security log</h3>
+              <h3 class="wa-heading-l g-h" id="g-security-log-h" tabindex="-1">The security log</h3>
               <p>Admins see the Security log at the end of the Settings page: every sign-in and sign-out, every refused sign-in or request with the reason, lockouts after too many wrong passwords, users added or changed with <code>radiate users</code>, and who changed the settings, the household, the layout, learning, the heating mode or Eco and Comfort. Each entry says who and from which address, and never holds a password, token or other secret.</p>
               <p>It also records who used the everyday controls: a room held at a temperature, Fire lit, a hot-water boost, and Away or Home. It says what was set, never where anyone is. To leave these out, turn off Log day-to-day controls in the Login section of the Settings page; it applies at once.</p>
               <p>A change to the heating mode, Eco and Comfort, or a setting in the household, such as a room adjustment from the week view, says what it was before and what it became. A change to the people in the household names no one. Settings saved on this page say which ones changed, but not their values, as a value can be a password.</p>
@@ -831,20 +841,20 @@
             </section>
 
             <section class="g-sec" id="g-alerts" aria-labelledby="g-alerts-h">
-              <h3 class="section-h" id="g-alerts-h" tabindex="-1">Alerts</h3>
+              <h3 class="wa-heading-l g-h" id="g-alerts-h" tabindex="-1">Alerts</h3>
               <p>Needs attention, near the top of the House page, lists problems in words, room name first. An alert clears by itself once the problem has gone. Ones you might see:</p>
               <dl class="g-terms g-words g-wide">
                 <div><dt>No heat: check oil and boiler lockout</dt><dd>The boiler has been asked for heat for 30 minutes and no radiator has warmed. Check the oil and the boiler's lockout. Radiate keeps asking in case the boiler recovers.</dd></div>
                 <div><dt>Lounge radiator not warming: check the valve</dt><dd>That radiator stayed cold for 3 burns while others warmed. The valve may be stuck.</dd></div>
                 <div><dt>Lounge: TRV not reachable</dt><dd>The valve isn't answering. See Devices.</dd></div>
                 <div><dt>Boiler short-cycling</dt><dd>The boiler started more often than it should, so Radiate makes it rest longer for a day.</dd></div>
-                <div><dt>No TRVs reachable: safe mode</dt><dd>See <a class="help-link" href="#guide/problems">When something goes wrong</a>.</dd></div>
+                <div><dt>No TRVs reachable: safe mode</dt><dd>See <a href="#guide/problems">When something goes wrong</a>.</dd></div>
               </dl>
               <p>Battery, signal and offline devices are alerts too, with a See devices link under them.</p>
             </section>
 
             <section class="g-sec" id="g-problems" aria-labelledby="g-problems-h">
-              <h3 class="section-h" id="g-problems-h" tabindex="-1">When something goes wrong</h3>
+              <h3 class="wa-heading-l g-h" id="g-problems-h" tabindex="-1">When something goes wrong</h3>
               <p>The house keeps its heating if Radiate stops, or the network it uses goes down.</p>
               <p>The valves carry on. Each keeps its opening limit and its own copy of the room's week, and runs its own thermostat. After about 2 hours without Radiate, a valve goes back to its own temperature sensor, which sits by the radiator, so rooms may not hold their temperature as closely.</p>
               <p>Radiate checks in with the boiler relay every minute. With the watchdog script installed on the relay, after 10 minutes without word from Radiate the relay runs the heating on its own fallback times, which start an hour before your rooms' warm periods, with its own minimum burn and rest. The hot water keeps its usual windows.</p>
@@ -855,7 +865,7 @@
             </section>
 
             <section class="g-sec" id="g-home-assistant" aria-labelledby="g-home-assistant-h">
-              <h3 class="section-h" id="g-home-assistant-h" tabindex="-1">Home Assistant</h3>
+              <h3 class="wa-heading-l g-h" id="g-home-assistant-h" tabindex="-1">Home Assistant</h3>
               <p>With the Radiate integration in Home Assistant, the same controls are there: a thermostat for each room, the heating mode, Eco or Comfort, hot-water boost, the fire switch and away for each person.</p>
               <p>Changing a room's target in Home Assistant holds it, the same as minus and plus here, and this page shows the hold. Home Assistant can also hold a room for a set time, with Radiate's set override action and a duration.</p>
               <p>Radiate doesn't need Home Assistant to run the heating. If Home Assistant stops, the heating carries on.</p>
@@ -865,65 +875,71 @@
       </section>
 
       <template id="suggestion-tpl">
-        <article class="card suggestion">
-          <header>
-            <h3 class="name"></h3>
-            <span class="badge"></span>
-          </header>
-          <p class="sg-evidence"></p>
-          <div class="sg-do">
-            <h4>What to do</h4>
-            <p class="sg-action"></p>
+        <wa-card class="suggestion">
+          <div slot="header" class="card-head">
+            <h3 class="name wa-heading-s"></h3>
+            <wa-badge class="badge"></wa-badge>
           </div>
-          <p class="sg-basis"></p>
-        </article>
+          <div class="wa-stack wa-gap-s">
+            <p class="sg-evidence"></p>
+            <div class="sg-do">
+              <h4>What to do</h4>
+              <p class="sg-action"></p>
+            </div>
+            <p class="sg-basis"></p>
+          </div>
+        </wa-card>
       </template>
 
       <template id="learning-tpl">
         <li class="learning-row">
           <div class="lr-head">
             <span class="lr-name"></span>
-            <span class="meter lr-meter" aria-hidden="true"><span class="meter-fill"></span></span>
-            <span class="badge"></span>
+            <wa-progress-bar class="lr-meter" value="0"></wa-progress-bar>
+            <wa-badge class="badge"></wa-badge>
           </div>
           <p class="lr-note"></p>
         </li>
       </template>
 
       <template id="device-tpl">
-        <article class="card device" tabindex="-1">
-          <header>
-            <h4 class="name"></h4>
-            <span class="badge"></span>
-          </header>
-          <ul class="device-flags"></ul>
-          <dl class="device-stats">
-            <div class="ds-battery"><dt>Battery</dt><dd><span class="ds-val"></span><span class="meter" aria-hidden="true"><span class="meter-fill"></span></span></dd></div>
-            <div class="ds-signal"><dt>Signal</dt><dd><span class="sig" aria-hidden="true"><i></i><i></i><i></i></span><span class="ds-val"></span><span class="ds-sub"></span></dd></div>
-            <div class="ds-seen"><dt>Last seen</dt><dd class="ds-val"></dd></div>
-          </dl>
-          <p class="device-reading"></p>
-          <footer class="meta"></footer>
-        </article>
+        <wa-card class="device" tabindex="-1">
+          <div slot="header" class="card-head">
+            <h3 class="name wa-heading-s"></h3>
+            <wa-badge class="badge"></wa-badge>
+          </div>
+          <div class="wa-stack wa-gap-s">
+            <ul class="device-flags"></ul>
+            <dl class="device-stats">
+              <div class="ds-battery"><dt>Battery</dt><dd><span class="ds-val"></span><wa-progress-bar class="meter" value="0" label="Battery"></wa-progress-bar></dd></div>
+              <div class="ds-signal"><dt>Signal</dt><dd><span class="sig" aria-hidden="true"><i></i><i></i><i></i></span><span class="ds-val"></span><span class="ds-sub"></span></dd></div>
+              <div class="ds-seen"><dt>Last seen</dt><dd class="ds-val"></dd></div>
+            </dl>
+            <p class="device-reading"></p>
+          </div>
+          <footer slot="footer" class="meta"></footer>
+        </wa-card>
       </template>
 
       <section class="setup" id="setup" aria-labelledby="setup-h" hidden>
         <div class="setup-head">
-          <h2 id="setup-h" tabindex="-1">Set up your household</h2>
-          <button type="button" class="link" id="setup-close">Close</button>
+          <h1 class="wa-heading-xl" id="setup-h" tabindex="-1">Set up your household</h1>
+          <wa-button appearance="outlined" size="s" id="setup-close"><wa-icon slot="start" name="xmark"></wa-icon>Close</wa-button>
         </div>
         <ol class="setup-steps" id="setup-steps" aria-label="Steps"></ol>
-        <div class="setup-source" id="setup-source" hidden></div>
-        <p class="setup-resume" id="setup-resume" hidden>Picking up where you left off. <button type="button" class="link" id="setup-restart">Start again</button></p>
-        <form class="card setup-form" id="setup-form" novalidate>
-          <div class="setup-summary" id="setup-summary" role="alert" tabindex="-1" hidden></div>
-          <div class="setup-body" id="setup-body"></div>
-          <div class="setup-nav">
-            <button type="button" class="btn" id="setup-back">Back</button>
-            <p class="setup-progress" id="setup-progress" aria-live="polite"></p>
-            <button type="submit" class="btn btn-primary" id="setup-next">Next</button>
-          </div>
-        </form>
+        <wa-callout class="radiate-cool setup-source" size="s" id="setup-source" hidden></wa-callout>
+        <wa-callout class="radiate-cool setup-resume" size="s" id="setup-resume" hidden><p>Picking up where you left off. <wa-button appearance="plain" size="s" id="setup-restart">Start again</wa-button></p></wa-callout>
+        <wa-card class="setup-card">
+          <form class="setup-form" id="setup-form" novalidate>
+            <wa-callout variant="warning" class="setup-summary" id="setup-summary" role="alert" tabindex="-1" hidden></wa-callout>
+            <div class="setup-body" id="setup-body"></div>
+            <div class="setup-nav">
+              <wa-button appearance="outlined" id="setup-back"><wa-icon slot="start" name="arrow-left"></wa-icon>Back</wa-button>
+              <p class="setup-progress" id="setup-progress" aria-live="polite"></p>
+              <wa-button type="submit" variant="brand" id="setup-next">Next</wa-button>
+            </div>
+          </form>
+        </wa-card>
       </section>
     </main>
 

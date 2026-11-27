@@ -145,8 +145,26 @@ function current(f) {
   return f.source === "default" ? null : f.value;
 }
 
+// The view's parts as Web Awesome components: a "btn" button is an outlined
+// <wa-button> ("btn-primary" the brand one), a "link" button a plain small one, a
+// "card" a <wa-card> and a "badge" a <wa-badge> painted from its data-kind.
+const BADGE = { set: "cool", restart: "warning" };
+function upgrade(tag, cls = "") {
+  const c = ` ${cls} `;
+  if (tag === "button" && /\s(btn|link)\s/.test(c)) {
+    const b = document.createElement("wa-button");
+    if (c.includes(" btn-primary ")) b.setAttribute("variant", "brand");
+    else if (c.includes(" link ")) { b.setAttribute("appearance", "plain"); b.setAttribute("size", "s"); }
+    else b.setAttribute("appearance", "outlined");
+    return b;
+  }
+  if (c.includes(" card ") && tag !== "details") return document.createElement("wa-card");
+  if (c.includes(" badge ")) return document.createElement("wa-badge");
+  return document.createElement(tag);
+}
+
 function el(tag, props = {}, ...kids) {
-  const node = document.createElement(tag);
+  const node = upgrade(tag, props.class);
   for (const [k, v] of Object.entries(props)) {
     if (v == null || v === false) continue;
     if (k === "class") node.className = v;
@@ -155,43 +173,40 @@ function el(tag, props = {}, ...kids) {
     else node.setAttribute(k, v === true ? "" : v);
   }
   for (const kid of kids) if (kid) node.append(kid);
+  if (node.localName === "wa-badge") {
+    const v = BADGE[props["data-kind"]] ?? "neutral";
+    if (v === "cool") node.classList.add("radiate-cool");
+    else node.setAttribute("variant", v);
+    node.setAttribute("appearance", "filled-outlined");
+  }
   return node;
 }
 
-// A segmented control of radio buttons, as for the heating mode.
+// A radio group of button radios, as for the heating mode. Values can be any JSON
+// value (true, false, null), so each radio carries its index.
 function segmented(label, options, value, onChange) {
-  const group = el("div", { class: "seg", role: "radiogroup", "aria-label": label });
+  const group = document.createElement("wa-radio-group");
+  group.setAttribute("label", label);
+  group.setAttribute("orientation", "horizontal");
+  group.setAttribute("size", "s");
+  group.classList.add("label-hidden");
   let chosen = value;
-  const buttons = options.map(([v, text]) => {
-    const b = el("button", { type: "button", role: "radio", text });
-    b.dataset.value = JSON.stringify(v);
-    b.addEventListener("click", () => {
-      chosen = v;
-      paint();
-      onChange();
-    });
-    b.addEventListener("keydown", (e) => {
-      const i = buttons.indexOf(b);
-      const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
-      if (!step) return;
-      e.preventDefault();
-      const next = buttons[(i + step + buttons.length) % buttons.length];
-      next.click();
-      next.focus();
-    });
-    group.append(b);
-    return b;
+  options.forEach(([, text], i) => {
+    const r = document.createElement("wa-radio");
+    r.setAttribute("appearance", "button");
+    r.value = String(i);
+    r.textContent = text;
+    group.append(r);
   });
-  const paint = () => {
-    for (const b of buttons) {
-      const on = b.dataset.value === JSON.stringify(chosen);
-      b.setAttribute("aria-checked", String(on));
-      b.tabIndex = on ? 0 : -1;
-    }
-    if (!buttons.some((b) => b.tabIndex === 0)) buttons[0].tabIndex = 0;
-  };
-  paint();
-  return { node: group, get: () => chosen, focus: () => (buttons.find((b) => b.tabIndex === 0) ?? buttons[0]).focus() };
+  const index = options.findIndex(([v]) => JSON.stringify(v) === JSON.stringify(chosen));
+  group.value = index < 0 ? "" : String(index);
+  group.addEventListener("change", () => {
+    const i = Number(group.value);
+    if (!Number.isInteger(i) || !options[i]) return;
+    chosen = options[i][0];
+    onChange();
+  });
+  return { node: group, get: () => chosen, focus: () => group.focus() };
 }
 
 function select(id, options, value, onChange, describedBy) {

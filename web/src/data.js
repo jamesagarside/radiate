@@ -11,6 +11,16 @@
 // point under it sit in a line under the chart, for touch as much as for a mouse.
 
 const $ = (id) => document.getElementById(id);
+
+// A state word to a Web Awesome variant, with Radiate's cool blue (class radiate-cool)
+// for calm states. Paints a <wa-badge> or a <wa-callout>.
+const VARIANTS = { ok: "success", attention: "warning", warn: "warning", waiting: "cool", cool: "cool" };
+function paint(el, kind) {
+  const v = VARIANTS[kind] ?? "neutral";
+  el.classList.toggle("radiate-cool", v === "cool");
+  if (v === "cool") el.removeAttribute("variant");
+  else el.setAttribute("variant", v);
+}
 const NONE = "–"; // the one placeholder for a missing value (design standards)
 const MINUS = "−"; // a real minus sign, not a dash
 const OPEN_MS = 60000;
@@ -423,7 +433,7 @@ export function createData({ transport, isAuthError, onAuth }) {
   function note(text, kind = "") {
     const el = $("data-note");
     el.hidden = !text;
-    el.dataset.kind = kind;
+    paint(el, kind);
     setText("data-note", text);
   }
 
@@ -468,7 +478,9 @@ export function createData({ transport, isAuthError, onAuth }) {
   }
 
   function showRange() {
-    for (const b of document.querySelectorAll("#data-range [data-range]")) b.setAttribute("aria-checked", String(b.dataset.range === q.range));
+    const group = $("data-range");
+    const value = q.range === "custom" ? "" : q.range;
+    if (group.value !== value) group.value = value;
   }
 
   function fillTimes() {
@@ -630,7 +642,8 @@ export function createData({ transport, isAuthError, onAuth }) {
   function renderExport() {
     const ex = exportView(cat?.export ?? null, Date.now() / 1000, cat?.timezone ?? "UTC");
     const badge = $("data-export-badge");
-    badge.dataset.kind = ex.kind;
+    paint(badge, ex.kind);
+    badge.setAttribute("appearance", ["ok", "attention", "waiting"].includes(ex.kind) ? "filled-outlined" : "outlined");
     setText("data-export-badge", ex.badge);
     setText("data-export-line", ex.line);
     $("data-export").dataset.kind = ex.kind;
@@ -766,15 +779,14 @@ export function createData({ transport, isAuthError, onAuth }) {
       rerun();
     });
     $("data-step").addEventListener("change", (e) => { q.step = e.target.value; rerun(); });
-    for (const b of document.querySelectorAll("#data-range [data-range]")) {
-      b.addEventListener("click", () => {
-        if (q.range === b.dataset.range) return;
-        q.range = b.dataset.range;
-        showRange();
-        fillTimes();
-        rerun();
-      });
-    }
+    $("data-range").addEventListener("change", (e) => {
+      const range = e.target.value;
+      if (!range || q.range === range) return;
+      q.range = range;
+      showRange();
+      fillTimes();
+      rerun();
+    });
     for (const id of ["data-from", "data-to"]) {
       $(id).addEventListener("change", () => {
         q.range = "custom";
@@ -830,11 +842,8 @@ export function createData({ transport, isAuthError, onAuth }) {
       }).observe(box);
     }
     const tableBtn = $("data-table-toggle");
-    tableBtn.addEventListener("click", () => {
-      const on = tableBtn.getAttribute("aria-pressed") !== "true";
-      tableBtn.setAttribute("aria-pressed", String(on));
-      tableBtn.textContent = on ? "Hide table" : "Show as table";
-      $("data-table-wrap").hidden = !on;
+    tableBtn.addEventListener("change", () => {
+      $("data-table-wrap").hidden = !tableBtn.checked;
     });
     $("data-csv").addEventListener("click", () => download("csv"));
     $("data-json").addEventListener("click", () => download("json"));

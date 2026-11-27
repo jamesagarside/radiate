@@ -239,9 +239,31 @@ export const ADJUST_DAYS = [
 
 // --- DOM ---------------------------------------------------------------------------
 
+// The parts as Web Awesome components: a "card" is a <wa-card> and a "badge" a neutral
+// <wa-badge>. Buttons stay native (see nativeLook). Classes stay, so the code that
+// finds them by class still does.
+function upgrade(tag, cls = "") {
+  const c = ` ${cls} `;
+  if (tag === "button") return document.createElement("button");
+  if (c.includes(" card ")) return document.createElement("wa-card");
+  if (c.includes(" badge ")) {
+    const b = document.createElement("wa-badge");
+    b.setAttribute("variant", "neutral");
+    b.setAttribute("appearance", "outlined");
+    return b;
+  }
+  return document.createElement(tag);
+}
+
+// A button that needs its own ARIA (a label naming the room, aria-expanded) stays a
+// native <button>: <wa-button> doesn't pass those to its inner button. Web Awesome's
+// native styles draw it as the same outlined, brand or plain button.
+const nativeLook = (cls) =>
+  ` ${cls} `.includes(" btn-primary ") ? "wa-brand wa-size-s" : ` ${cls} `.includes(" link ") ? "wa-plain wa-size-s" : "wa-outlined wa-size-s";
+
 const el = (tag, cls, text) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
+  const n = upgrade(tag, cls);
+  if (cls) n.className = tag === "button" && /\b(btn|link)\b/.test(cls) ? `${cls} ${nativeLook(cls)}` : cls;
   if (text != null) n.textContent = text;
   return n;
 };

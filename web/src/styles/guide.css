@@ -8,23 +8,23 @@ body[data-auth="needed"] .guide-view { display: none; }
 .guide-body { display: grid; grid-template-columns: 250px minmax(0, 40rem); gap: 20px 36px; align-items: start; }
 
 /* Contents: a plate that stays in view on wide screens, under the sticky header. */
-.guide-toc { padding: 12px 16px; position: sticky; top: 7.5rem; max-height: calc(100vh - 9rem); overflow: auto; }
+.guide-toc { position: sticky; top: 7.5rem; max-height: calc(100vh - 9rem); overflow: auto; }
 .guide-toc ul { list-style: none; margin: 0; padding: 0; display: grid; }
-.guide-toc li + li { border-top: 1px solid var(--line); }
+.guide-toc li + li { border-top: 1px solid var(--wa-color-surface-border); }
 .guide-toc a {
-  display: block; padding: 6px 0; font-size: 0.9rem; color: var(--text); text-decoration: none;
+  display: block; padding: 6px 0; font-size: 0.9rem; color: var(--wa-color-text-normal); text-decoration: none;
   transition: color 150ms ease;
 }
 
 .guide-text { display: grid; gap: 28px; min-width: 0; }
 .g-sec { display: grid; gap: 10px; justify-items: start; }
-.g-sec .section-h { margin: 0 0 2px; justify-self: stretch; scroll-margin-top: 8rem; }
-.g-sec .section-h:focus { outline: none; }
-.g-sec .section-h:focus-visible { outline: 2px solid var(--cool); outline-offset: 2px; }
+.g-sec .g-h { margin: 0 0 2px; justify-self: stretch; scroll-margin-top: 8rem; }
+.g-sec .g-h:focus { outline: none; }
+.g-sec .g-h:focus-visible { outline: 2px solid var(--radiate-cool-on-quiet); outline-offset: 2px; }
 
 /* A term and what it means: the badge or word as it appears in the app, then the words. */
-.g-terms { margin: 0; display: grid; gap: 0; justify-self: stretch; border-top: 1px solid var(--line); }
-.g-terms > div { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 4px 14px; padding: 7px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.g-terms { margin: 0; display: grid; gap: 0; justify-self: stretch; border-top: 1px solid var(--wa-color-surface-border); }
+.g-terms > div { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 4px 14px; padding: 7px 0; border-bottom: 1px solid var(--wa-color-surface-border); align-items: baseline; }
 .g-terms dt { min-width: 0; }
 .g-terms dd { margin: 0; font-size: 0.92rem; }
 .g-terms .badge, .g-terms .chip { white-space: normal; display: inline-block; }
@@ -34,13 +34,13 @@ body[data-auth="needed"] .guide-view { display: none; }
 .g-list { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
 
 /* Pictures: small plates, read-only, never focusable. The words beside them carry the meaning. */
-.g-fig { padding: 12px 16px; background: var(--surface); pointer-events: none; user-select: none; }
+.g-fig { padding: 12px 16px; background: var(--wa-color-surface-default); pointer-events: none; user-select: none; }
 .g-scale { display: grid; gap: 4px; width: min(100%, 360px); }
 .g-ramp {
   display: block; height: 14px;
   background: linear-gradient(90deg, var(--t12) 0%, var(--t15) 30%, var(--t17) 50%, var(--t19) 70%, var(--t22) 100%);
 }
-.g-ticks { position: relative; height: 1.2em; font-family: var(--readout); font-weight: 700; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.g-ticks { position: relative; height: 1.2em; font-family: var(--wa-font-family-body); font-weight: 700; font-size: 0.8rem; color: var(--wa-color-text-quiet); font-variant-numeric: tabular-nums; }
 .g-ticks span { position: absolute; top: 0; transform: translateX(-50%); }
 .g-ticks span:nth-child(1) { left: 0; transform: none; }
 .g-ticks span:nth-child(2) { left: 30%; }
@@ -49,7 +49,7 @@ body[data-auth="needed"] .guide-view { display: none; }
 .g-ticks span:nth-child(5) { left: 100%; transform: translateX(-100%); }
 
 /* A model block at 19°: ink on the amber top in light mode, the dark ground in dark mode. */
-.g-model { --g-ink: var(--text); }
+.g-model { --g-ink: var(--wa-color-text-normal); }
 .g-model svg { display: block; max-width: 100%; height: auto; overflow: visible; }
 .g-top, .g-side-r, .g-side-f { fill: var(--t19); }
 .g-side-r { filter: brightness(0.62); }
@@ -61,11 +61,11 @@ body[data-auth="needed"] .guide-view { display: none; }
 .g-hold { width: min(100%, 280px); }
 
 /* Help lines: one muted sentence and a link to the guide section that explains more. */
-.help-line { margin: -4px 0 12px; font-size: 0.84rem; color: var(--muted); max-width: 90ch; }
+.help-line { margin: -4px 0 12px; font-size: 0.84rem; color: var(--wa-color-text-quiet); max-width: 90ch; }
 .devices-head .help-line { margin: 0; }
 .help-link {
   display: inline-block;
-  transition: transform 160ms var(--ease-out), color 150ms ease;
+  transition: transform 160ms var(--radiate-ease-out), color 150ms ease;
 }
 .help-link:active { transform: scale(0.97); }
 .hm-help { margin: 0; }
@@ -73,13 +73,13 @@ body[data-auth="needed"] .guide-view { display: none; }
 /* First visit on the House view: a flat band with a cool rule, like the other notes. */
 .guide-note {
   display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 20px;
-  padding: 10px 16px; background: var(--surface); border-left: 4px solid var(--cool); font-size: 0.9rem;
+  padding: 10px 16px; background: var(--wa-color-surface-default); border-left: 4px solid var(--radiate-cool-on-quiet); font-size: 0.9rem;
 }
 .guide-note p { flex: 1 1 32ch; max-width: 80ch; }
 .guide-note-actions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
 
 @media (hover: hover) and (pointer: fine) {
-  .guide-toc a:hover { color: var(--cool); }
+  .guide-toc a:hover { color: var(--radiate-cool-on-quiet); }
 }
 @media (pointer: coarse) {
   .guide-toc a { padding-block: 11px; }
@@ -89,14 +89,14 @@ body[data-auth="needed"] .guide-view { display: none; }
   .help-link { transition: color 150ms ease; }
   .help-link:active { transform: none; }
 }
-.wa-dark .g-model { --g-ink: var(--bg); }
+.wa-dark .g-model { --g-ink: var(--wa-color-surface-lowered); }
 
 @media (max-width: 980px) {
   .guide-body { grid-template-columns: minmax(0, 1fr); }
   .guide-toc { position: static; max-height: none; }
   .guide-toc ul { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); column-gap: 20px; }
   .guide-toc li + li { border-top: 0; }
-  .guide-toc li { border-bottom: 1px solid var(--line); }
+  .guide-toc li { border-bottom: 1px solid var(--wa-color-surface-border); }
 }
 @media (max-width: 560px) {
   .g-terms > div, .g-wide > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }

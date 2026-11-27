@@ -4,6 +4,17 @@
 // Cards are created once and updated in place.
 
 const $ = (id) => document.getElementById(id);
+
+// A state word to a Web Awesome variant, with Radiate's cool blue (class radiate-cool)
+// for calm states. Paints a <wa-badge>: quiet outline for neutral, filled otherwise.
+const VARIANTS = { act: "warning", ok: "success" };
+function paint(el, kind) {
+  const v = VARIANTS[kind] ?? "neutral";
+  el.classList.toggle("radiate-cool", v === "cool");
+  if (v === "cool") el.removeAttribute("variant");
+  else el.setAttribute("variant", v);
+  el.setAttribute("appearance", v === "neutral" ? "outlined" : "filled-outlined");
+}
 const OPEN_MS = 30000; // refresh while the view is open
 const CLOSED_MS = 300000; // and now and then for the tab's count
 
@@ -76,7 +87,7 @@ export function createSuggestions({ transport, isAuthError, onAuth, onCount }) {
     node.querySelector(".name").textContent = x.title;
     const b = node.querySelector(".badge");
     b.textContent = label;
-    b.dataset.kind = kind;
+    paint(b, kind);
     node.querySelector(".sg-evidence").textContent = x.evidence;
     node.querySelector(".sg-action").textContent = x.action;
     node.querySelector(".sg-basis").textContent = confidenceText(x);
@@ -93,13 +104,13 @@ export function createSuggestions({ transport, isAuthError, onAuth, onCount }) {
     const [label, kind] = STATUS[r.status] ?? [r.status, ""];
     const b = node.querySelector(".badge");
     b.textContent = label;
-    b.dataset.kind = kind;
+    paint(b, kind);
     node.querySelector(".lr-note").textContent = r.note;
     // Progress towards the learning needed: only while a room is still learning.
-    const meter = node.querySelector(".meter");
+    const meter = node.querySelector(".lr-meter");
     meter.hidden = r.status !== "learning";
-    const share = Math.max(0, Math.min(1, r.hours / Math.max(1, minHours)));
-    meter.firstElementChild.style.transform = `scaleX(${share})`;
+    meter.value = Math.round(100 * Math.max(0, Math.min(1, r.hours / Math.max(1, minHours))));
+    meter.label = `${r.room_name}: ${Math.round(r.hours)} of ${Math.round(minHours)} h of learning`;
     return node;
   }
 
@@ -132,6 +143,9 @@ export function createSuggestions({ transport, isAuthError, onAuth, onCount }) {
     const learningOnly = v.summary.rooms_learning > 0 && !v.summary.rooms_ready;
     empty.hidden = v.suggestions.length > 0 && !learningOnly;
     empty.dataset.state = learningOnly ? "learning" : "clear";
+    empty.classList.toggle("radiate-cool", learningOnly);
+    if (learningOnly) empty.removeAttribute("variant");
+    else empty.setAttribute("variant", "success");
     $("suggestions-empty-h").textContent = learningOnly ? "Still learning" : "Nothing to suggest";
     $("suggestions-empty-text").textContent = emptyText(v);
 

@@ -29,7 +29,7 @@ import "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
 import "@awesome.me/webawesome/dist/components/divider/divider.js";
 import "@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js";
 import "@awesome.me/webawesome/dist/components/scroller/scroller.js";
-import "./styles/legacy.css";
+import "./styles/views.css";
 import "./styles/house.css";
 import "./styles/guide.css";
 import "./styles/savings.css";
