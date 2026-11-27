@@ -53,6 +53,7 @@ import { createSettings } from "./settings.js";
 import { failText, pendingValue, sendChange } from "./pending.js";
 import { learnedRows, rawText, stillLearning } from "./learned.js";
 import { createSecurity } from "./security.js";
+import { createHomeAssistant } from "./homeassistant.js";
 
 const api = (p) => new URL(`api/v1/${p}`, document.baseURI).toString();
 const $ = (id) => document.getElementById(id);
@@ -1722,6 +1723,14 @@ const security = createSecurity({
   onAuth: () => askForToken(),
 });
 
+// Home Assistant (homeassistant.js): the dashboard to copy into Home Assistant, a
+// section of the Settings view before the security log. Every role may read it.
+const homeAssistant = createHomeAssistant({
+  transport,
+  isAuthError: (err) => err instanceof AuthError,
+  onAuth: () => askForToken(),
+});
+
 // Guide view (guide.js): how to read and work Radiate, at #guide, with each section
 // at #guide/<name>. Static text, so it is always offered.
 const guide = createGuide({ root: $("guide") });
@@ -1741,11 +1750,14 @@ const settings = createSettings({
     openSetup(e);
   },
   onShowSchedules: () => { location.hash = "#schedules"; },
-  moreSections: () => (security.offered ? [{ id: "security-log", title: "Security log" }] : []),
+  moreSections: () => [
+    ...(homeAssistant.offered ? [{ id: "home-assistant", title: "Home Assistant" }] : []),
+    ...(security.offered ? [{ id: "security-log", title: "Security log" }] : []),
+  ],
 });
 const settingsView = {
-  show() { settings.show(); security.show(); },
-  hide() { settings.hide(); security.hide(); },
+  show() { settings.show(); homeAssistant.show(); security.show(); },
+  hide() { settings.hide(); homeAssistant.hide(); security.hide(); },
 };
 let settingsOffered = null;
 
@@ -1825,6 +1837,7 @@ async function offerViews() {
     settingsOffered === true ? true : settings.available(),
     dataOffered === true ? true : rawData.available(),
     security.available(),
+    homeAssistant.offered ? true : homeAssistant.available(),
   ]);
   devicesOffered = d;
   suggestionsOffered = s;
