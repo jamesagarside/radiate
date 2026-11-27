@@ -789,8 +789,11 @@ function heroState(s) {
   if (s.boiler.state === "firing") return ["heat", calling ? `Heating ${plural(calling, "room", "rooms")}` : "Burner on"];
   if (s.boiler.state === "lead") return ["heat", "Opening valves"];
   if (s.quiet?.active) return ["quiet", `Quiet hours until ${s.quiet.until}`];
-  if (calling) return ["wait", `${plural(calling, "room wants", "rooms want")} heat`];
   if (s.boiler.state === "rest") return ["ok", "Burner resting"];
+  // Idle: a room waits only when Eco pools it with others; a room that has just
+  // started calling is picked up on the next tick, as the status line says.
+  const waiting = active.filter(pooled).length;
+  if (waiting) return ["wait", `${plural(waiting, "room is", "rooms are")} waiting for a burn`];
   return ["ok", "Rooms are comfortable"];
 }
 
