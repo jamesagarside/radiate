@@ -34,6 +34,10 @@
 }
 
 .muted { color: var(--muted); }
+/* These views set their own spacing with grid gaps, so headings and paragraphs carry
+   no margins of their own (Web Awesome's native styles add them). */
+:is(.devices-view, .suggestions-view, .savings-view, .settings-view, .data-view, .guide-view, .setup, #week) :is(h2, h3, h4, p) { margin: 0; }
+.meta { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 [hidden] { display: none !important; }
 
 /* Segmented control: a framed row of options, the chosen one filled, like a Web
