@@ -20,6 +20,30 @@ jobs:
       - run: uv run --no-sync ruff format --check src tests scripts
       - run: uv run --no-sync pytest -q
 
+  web:
+    # The web UI is built from web/ with Vite into src/radiate/web, which is committed so
+    # pip installs and the Home Assistant App need no Node. Rebuild it here and fail if
+    # the committed build is out of date.
+    name: Web UI build is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: Check the committed build matches
+        run: |
+          git add --intent-to-add --all src/radiate/web
+          git diff --exit-code --stat -- src/radiate/web || {
+            echo "::error::src/radiate/web is out of date. Run 'npm ci && npm run build' in web/ and commit the result."
+            exit 1
+          }
 
   saml:
     # SAML login is the optional radiate[saml] extra (ADR-0006). The core job skips its

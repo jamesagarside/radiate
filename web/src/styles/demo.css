@@ -1,0 +1,18 @@
+/* The online demo only (<html data-transport="demo">, src/demo.js): the loading card
+   and the speed control in the demo banner. Opacity only, under 300 ms. */
+
+body[data-demo="loading"] #house { display: none; }
+body[data-demo="ready"] #house { transition: opacity 220ms var(--radiate-ease-out); }
+@starting-style { body[data-demo="ready"] #house { opacity: 0; } }
+
+.demo-loading { max-width: 36rem; }
+.demo-loading p { margin: 0; }
+.demo-stage { font-variant-numeric: tabular-nums; }
+
+/* Banner: what the demo is on the left, the speed on the right; wraps on a phone. */
+.demo-banner { display: flex; align-items: center; gap: var(--wa-space-xs) var(--wa-space-m); flex-wrap: wrap; }
+.demo-copy { flex: 1 1 16rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-demo="ready"] #house { transition: opacity 150ms ease; }
+}

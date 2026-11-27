@@ -289,3 +289,12 @@ async def test_unreachable_shelly_has_no_burner_reading():
         b.heating_burner = True
         await b.refresh()
         assert not b.reachable and b.heating_burner is None and b.store_burner is None
+
+
+async def test_password_problem_is_named(shelly):
+    cfg = ShellyConfig(host=shelly.host)
+    for password, problem in ((None, "missing"), ("nope", "rejected"), ("pw", None)):
+        b = ShellyBoiler(cfg, ShellyRpc(shelly.host, password, shelly.session), dry_run=False)
+        await b.refresh()
+        assert b.auth_problem == problem
+        assert b.reachable is (problem is None)

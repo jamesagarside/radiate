@@ -35,9 +35,13 @@ radiate = "radiate.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/radiate"]
 
+# The web UI is built from web/ (Vite) into src/radiate/web, which is committed, so the
+# wheel ships it as part of the package and needs no Node to build.
 [tool.hatch.build.targets.wheel.force-include]
-"web" = "radiate/web"
 "shelly" = "radiate/shelly"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["web/node_modules"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/core", "tests/config", "tests/drivers", "tests/sim", "tests/server"]

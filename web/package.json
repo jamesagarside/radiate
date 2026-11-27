@@ -1,0 +1,20 @@
+{
+  "name": "radiate-web",
+  "private": true,
+  "type": "module",
+  "description": "Radiate's web UI. Vite builds it into src/radiate/web, which is committed.",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@awesome.me/webawesome": "3.14.0",
+    "@fontsource/quicksand": "5.3.0",
+    "lit": "3.3.3"
+  },
+  "devDependencies": {
+    "@fortawesome/fontawesome-free": "7.3.1",
+    "vite": "6.4.5"
+  }
+}

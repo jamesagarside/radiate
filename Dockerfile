@@ -5,7 +5,6 @@ ARG RADIATE_EXTRAS=server
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
-COPY web ./web
 COPY shelly ./shelly
 RUN pip install --no-cache-dir ".[${RADIATE_EXTRAS}]" && rm -rf /src
 EXPOSE 8099

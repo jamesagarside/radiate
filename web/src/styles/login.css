@@ -1,0 +1,7 @@
+/* The sign-in page (login.html): one card, centred in a narrow column. */
+.login-page { min-height: 100vh; min-height: 100dvh; }
+.login { max-width: 28rem; margin: 0 auto; padding: var(--wa-space-3xl) var(--wa-space-m) var(--wa-space-xl); }
+.login p { margin: 0; }
+.login pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--wa-font-size-xs); }
+.login .brand wa-icon { color: var(--wa-color-brand-fill-loud); font-size: var(--wa-font-size-xl); }
+.login wa-input[aria-invalid="true"]::part(input-wrapper) { border-color: var(--wa-color-warning-border-loud); }
