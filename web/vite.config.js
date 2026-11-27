@@ -105,7 +105,7 @@ export default defineConfig({
     },
   },
   server: {
-    // `npm run dev` against a Radiate server on port 8099.
-    proxy: { "/api": { target: "http://127.0.0.1:8099", ws: true } },
+    // `npm run dev` against a Radiate server on port 8099, or RADIATE_API.
+    proxy: { "/api": { target: process.env.RADIATE_API ?? "http://127.0.0.1:8099", ws: true } },
   },
 });

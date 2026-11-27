@@ -180,7 +180,7 @@ wa-callout p { margin: 0; }
 .hero-controls #demand { max-width: 24rem; }
 .hero-boost { padding-block-start: 1.6rem; }
 .hero-boost { display: flex; align-items: center; gap: var(--wa-space-xs); }
-.controls-foot { display: grid; gap: var(--wa-space-2xs); flex-basis: 100%; }
+.controls-foot { display: grid; gap: var(--wa-space-2xs); flex-basis: 100%; justify-items: start; }
 .controls-foot:not(:has(> :not([hidden]))) { display: none; }
 #demand-note[data-error="true"] { color: var(--wa-color-warning-on-quiet); }
 wa-radio-group::part(form-control-input) { flex-wrap: nowrap; }

@@ -76,6 +76,8 @@ const SLAB = 0.34; // height of a room block, metres in model units
 const liftFor = (extent) => Math.max(3.2, extent * SIN * 0.8);
 const P = (x, y, z) => [(x - y) * COS * S, (x + y) * SIN * S - z * S];
 const pts = (a) => a.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
+// A name cut to `n` characters with an ellipsis, so it fits its block.
+const fit = (name, n) => (name.length <= n ? name : `${name.slice(0, Math.max(1, n - 1)).trimEnd()}…`);
 
 function isoMarkup(layout, rooms, { selected, interactive }) {
   let out = "";
@@ -124,7 +126,7 @@ function isoMarkup(layout, rooms, { selected, interactive }) {
         <polygon points="${pts(R)}" fill="${rgb(c, 0.62)}"/><polygon points="${pts(F)}" fill="${rgb(c, 0.8)}"/>
         <polygon class="hm-top" points="${pts(T)}" fill="${rgb(c)}"/>${rad}
         <text class="hm-t" x="${mid[0]}" y="${mid[1]}" text-anchor="middle" fill="${ink}">${fmt(r.temperature)}</text>
-        ${w >= 1.4 ? `<text class="hm-n" x="${mid[0]}" y="${mid[1] + 13}" text-anchor="middle" fill="${ink}">${esc(r.name)}</text>` : ""}</g>`;
+        ${w >= 1.4 ? `<text class="hm-n" x="${mid[0]}" y="${mid[1] + 13}" text-anchor="middle" fill="${ink}">${esc(fit(r.name, Math.floor(w * 5.5)))}</text>` : ""}</g>`;
     });
   });
   return under + out;

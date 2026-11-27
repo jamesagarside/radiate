@@ -80,6 +80,14 @@ def test_the_ui_loads_nothing_from_the_internet():
     assert "static/icons/" in scripts
 
 
+def test_dev_fixtures_are_not_shipped():
+    """?fixture= (web/src/dev-fixtures.js) is for `npm run dev` only."""
+    scripts = "".join(p.read_text() for p in (WEB / "assets").glob("*.js"))
+    assert "applyFixture" not in scripts
+    assert "dev-fixtures" not in scripts
+    assert not (WEB / "assets" / "dev-fixtures.js").exists()
+
+
 def test_the_committed_build_matches_the_sources():
     """Every icon the sources name was built, so a missing rebuild shows up here too.
     CI rebuilds web/ and fails on any difference (.github/workflows/ci.yml)."""

@@ -29,6 +29,7 @@ import "@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js";
 import "@awesome.me/webawesome/dist/components/divider/divider.js";
 import "@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js";
 import "@awesome.me/webawesome/dist/components/scroller/scroller.js";
+import "@awesome.me/webawesome/dist/components/spinner/spinner.js";
 import "./styles/views.css";
 import "./styles/house.css";
 import "./styles/guide.css";
@@ -185,6 +186,25 @@ function httpTransport() {
 const transport = document.documentElement.dataset.transport === "demo"
   ? (await import("./demo.js")).createDemoTransport()
   : httpTransport();
+
+// Development only (`npm run dev`): ?fixture=<name> lays a state the demo can't
+// produce over the server's (src/dev-fixtures.js). import.meta.env.DEV is false in
+// the build, so Vite drops this and the module.
+let fixture = null;
+if (import.meta.env.DEV) {
+  const name = new URLSearchParams(location.search).get("fixture");
+  if (name) {
+    const fx = await import("./dev-fixtures.js");
+    fixture = { name, ...fx };
+    const state = transport.state;
+    transport.state = async () => fx.applyFixture(name, await state());
+    const subscribe = transport.subscribe;
+    transport.subscribe = (onState, onLink) => {
+      if (fx.OFFLINE.has(name)) { setTimeout(markOffline, 1500); return; }
+      subscribe((s) => onState(fx.applyFixture(name, s)), onLink);
+    };
+  }
+}
 
 async function post(path, body) {
   try {
@@ -646,6 +666,22 @@ function roomDetail(r, { inDrawer }) {
     facts.push(["Learning", (words[0].toUpperCase() + words.slice(1)).replace(/^Learning paused: /, "Paused: ")]);
   }
   const hint = c.error ? "" : held ? holdText(r.override) : changing ? "Sending…" : "From the schedule";
+  // On a phone the details are a bottom sheet, and the room's quick control comes
+  // first, under its name; beside the model it follows what the room is doing.
+  const setpoint = canSet ? html`
+    <div class="setpoint" data-held=${String(held || changing)}>
+      <div class="setpoint-row">
+        <div class="wa-stack wa-gap-3xs">
+          <span class="setpoint-label">Setpoint</span>
+          <span class="setpoint-hint" aria-live="polite">${c.error ? html`<span class="error-line" role="alert">${c.error}</span>` : hint}</span>
+        </div>
+        ${stepper(r, shown, locked)}
+      </div>
+      <div class="wa-cluster wa-gap-xs">
+        ${held && !locked ? html`<wa-button size="s" appearance="outlined" @click=${() => resumeSchedule(r.id)}><wa-icon slot="start" name="rotate-left"></wa-icon>Resume schedule</wa-button>` : nothing}
+        ${why ? html`<wa-tag size="s" class="lock-tag">${why}</wa-tag>` : nothing}
+      </div>
+    </div>` : nothing;
   return html`
     <div class="room-detail" data-room=${r.id}>
       <div class="room-detail-head">
@@ -659,6 +695,7 @@ function roomDetail(r, { inDrawer }) {
         ${inDrawer ? nothing : html`<wa-button appearance="plain" size="s" class="panel-close" @click=${closeRoom}><wa-icon name="xmark" label="Close ${r.name}"></wa-icon></wa-button>`}
       </div>
 
+      ${inDrawer ? setpoint : nothing}
       ${reason ? html`<p class="reason">${reason}</p>` : nothing}
 
       <div class="readouts">
@@ -671,20 +708,7 @@ function roomDetail(r, { inDrawer }) {
       ${needs.length ? html`<wa-callout variant="warning" size="s"><wa-icon slot="icon" name="triangle-exclamation"></wa-icon>${needs.map((t) => t[0].toUpperCase() + t.slice(1)).join(". ")}.</wa-callout>` : nothing}
       ${stuck ? html`<wa-callout variant="warning" size="s"><wa-icon slot="icon" name="triangle-exclamation"></wa-icon>${stuck}</wa-callout>` : nothing}
 
-      ${canSet ? html`
-        <div class="setpoint" data-held=${String(held || changing)}>
-          <div class="setpoint-row">
-            <div class="wa-stack wa-gap-3xs">
-              <span class="setpoint-label">Setpoint</span>
-              <span class="setpoint-hint" aria-live="polite">${c.error ? html`<span class="error-line" role="alert">${c.error}</span>` : hint}</span>
-            </div>
-            ${stepper(r, shown, locked)}
-          </div>
-          <div class="wa-cluster wa-gap-xs">
-            ${held && !locked ? html`<wa-button size="s" appearance="outlined" @click=${() => resumeSchedule(r.id)}><wa-icon slot="start" name="rotate-left"></wa-icon>Resume schedule</wa-button>` : nothing}
-            ${why ? html`<wa-tag size="s" class="lock-tag">${why}</wa-tag>` : nothing}
-          </div>
-        </div>` : nothing}
+      ${inDrawer ? nothing : setpoint}
 
       ${hasFire ? html`
         <div class="wa-stack wa-gap-2xs">
@@ -712,8 +736,10 @@ function roomDetail(r, { inDrawer }) {
     </div>`;
 }
 
+let roomsDrawn = false;
 function renderRooms() {
   if (!last) return;
+  if (!roomsDrawn) { $("rooms").textContent = ""; roomsDrawn = true; }
   draw(roomsList(last.rooms), $("rooms"));
 }
 
@@ -781,7 +807,16 @@ function renderHero(s, status) {
   const [key, title] = document.body.dataset.link === "stale" ? ["stale", "Showing old data"] : heroState(s);
   const h = HERO[key];
   const hero = $("hero");
-  if (hero.dataset.tone !== h.tone) hero.dataset.tone = h.tone;
+  if (hero.dataset.tone !== h.tone) {
+    const had = hero.dataset.tone;
+    hero.dataset.tone = h.tone;
+    if (had && !reducedMotion.matches) {
+      hero.querySelector(".hero-icon").animate(
+        [{ transform: "scale(0.85)", opacity: 0.4 }, { transform: "scale(1)", opacity: 1 }],
+        { duration: 240, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+      );
+    }
+  }
   $("hero-icon").name = h.icon;
   $("hero-title").textContent = title;
   $("hero-why").textContent = status;
@@ -939,6 +974,7 @@ async function saveAway(e, p) {
   }
   u.saving = false;
   for (const el of form.querySelectorAll("wa-input")) el.value = "";
+  toast(`${p.name} is away until ${when(until.length > 10 ? until : `${until}T00:00`, last?.away?.today)}.`);
   closeAway(p);
   refresh();
 }
@@ -961,6 +997,7 @@ async function backNow(p) {
       u.clearError = failText(err2);
     }
   }
+  if (!u.clearError) toast(`${p.name} is home.`);
   u.clearing = false;
   renderPeople(last?.away);
   await refresh();
@@ -1148,6 +1185,7 @@ const CHIP = {
 
 function render(s) {
   last = s;
+  if (document.body.dataset.link === "stale") toast("Connected to Radiate again.");
   delete document.body.dataset.link;
   const b = s.boiler;
   const firing = b.state === "firing";
@@ -1858,6 +1896,7 @@ $("account").addEventListener("wa-select", async (e) => {
 async function start() {
   offerViews();
   if (!(await checkLogin())) return;
+  if (fixture?.ROLE[fixture.name]) showAccount({ user: "sam", role: fixture.ROLE[fixture.name], method: "local", csrf: "" });
   try {
     house = await transport.house();
     renderSetupEntry();
