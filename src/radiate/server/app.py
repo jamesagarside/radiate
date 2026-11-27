@@ -465,6 +465,14 @@ async def export(request: web.Request) -> web.Response:
     return web.json_response(export_view(_rt(request)))
 
 
+async def ha_dashboard(request: web.Request) -> web.Response:
+    """The Home Assistant dashboard for the house, as YAML in JSON (`radiate.server.ha`)."""
+    try:
+        return web.json_response(bridge.ha_dashboard(_rt(request), dict(request.query)))
+    except bridge.RequestError as err:
+        raise _http_error(err) from err
+
+
 async def _household(request: web.Request, method: str, with_body: bool) -> web.Response:
     """The household setup (`bridge.household`). Errors with field paths go as JSON."""
     rt = _rt(request)
@@ -757,6 +765,7 @@ def create_app(
             web.get("/api/v1/data", data),
             web.get("/api/v1/data/series", data_series),
             web.get("/api/v1/export", export),
+            web.get("/api/v1/ha/dashboard", ha_dashboard),
             web.get("/api/v1/household", household),
             web.post("/api/v1/household/preview", household_preview),
             web.put("/api/v1/household", household_save),

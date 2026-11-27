@@ -114,6 +114,21 @@ body[data-auth="needed"] .settings-view { display: none; }
 .sl-table tr[data-kind="warn"] th { box-shadow: inset 4px 0 0 var(--wa-color-warning-on-quiet); padding-left: 8px; }
 
 
+/* Home Assistant: the dashboard to copy, its two options, the steps to add it, and a
+   preview of the YAML that scrolls inside its own box. Fields are the Raw data view's. */
+.ha-plate { padding: 14px 18px 16px; display: grid; gap: 14px; }
+.ha-options { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 24px; }
+.ha-options .rd-field { min-width: 180px; }
+.ha-options wa-switch { max-width: 44ch; }
+.ha-steps { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; max-width: 70ch; }
+.ha-preview {
+  margin: 0; max-height: 24rem; overflow: auto; padding: 10px 12px;
+  font-size: 0.8rem; line-height: 1.45; tab-size: 2;
+  background: var(--wa-color-surface-lowered); border-radius: var(--wa-border-radius-s);
+}
+.ha-preview:focus-visible { outline: var(--wa-focus-ring); outline-offset: 2px; }
+
+
 @media (pointer: coarse) {
   .st-control input, .st-control select { min-height: 44px; }
   .st-room > summary { min-height: 44px; }
@@ -133,6 +148,6 @@ body[data-auth="needed"] .settings-view { display: none; }
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "head" "help" "control" "file" "error";
   }
-  .st-plate, .st-room, .sl-plate { padding-inline: 14px; }
+  .st-plate, .st-room, .sl-plate, .ha-plate { padding-inline: 14px; }
   .st-field[data-source="app"] { padding-left: 10px; margin-left: -10px; }
 }

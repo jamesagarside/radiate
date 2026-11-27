@@ -52,6 +52,7 @@ PERMISSIONS: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/settings"): VIEWER,
     ("GET", "/api/v1/layout"): VIEWER,
     ("GET", "/api/v1/devices"): VIEWER,
+    ("GET", "/api/v1/ha/dashboard"): VIEWER,  # device names, as GET devices shows
     # Every house-file setting, with device addresses, broker and provider details:
     # only the people who may change them read them.
     ("GET", "/api/v1/settings/config"): ADMIN,

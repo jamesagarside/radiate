@@ -24,6 +24,7 @@ from radiate.core.types import RoomConfig, RoomRole
 from radiate.drivers.devices import ScanRefused
 
 from .data import QueryError, data_view, export_view, series_view
+from .ha import DashboardQueryError, dashboard_view
 from .layout import LayoutError
 from .runtime import Runtime
 from .savings import savings_view
@@ -409,6 +410,16 @@ def set_layout(rt: Runtime, body: Any) -> dict:
         raise RequestError(400, str(err)) from err
 
 
+def ha_dashboard(rt: Runtime, query: dict) -> dict:
+    """The Home Assistant dashboard for the house (`radiate.server.ha`)."""
+    try:
+        return dashboard_view(rt, query)
+    except DashboardQueryError as err:
+        raise RequestError(400, str(err)) from err
+    except LookupError as err:
+        raise RequestError(404, str(err)) from err
+
+
 def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
     """Answer one API call. `path` is relative to `api/v1/`, for example `rooms/x/fire`,
     and may end in a query string (`data?metric=room.temperature`)."""
@@ -454,6 +465,8 @@ def handle(rt: Runtime, method: str, path: str, body: Any = None) -> dict:
             return series_view(rt, export_view(rt)["otlp"])
         if parts == ["export"]:
             return export_view(rt)
+        if parts == ["ha", "dashboard"]:
+            return ha_dashboard(rt, query)
     elif method == "POST":
         if parts == ["devices", "scan"]:
             return scan_network(rt, body)
