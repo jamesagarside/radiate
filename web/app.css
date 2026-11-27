@@ -260,6 +260,7 @@ main { max-width: 1340px; margin: 0 auto; padding: 16px; display: grid; gap: 20p
 .chip[data-state="firing"] { background: var(--heat-soft); color: var(--ember); }
 .chip[data-state="lead"] { background: var(--warn-soft); color: var(--warn); }
 .chip[data-state="rest"] { background: var(--cool-soft); color: var(--cool); }
+.chip[data-state="lost"] { background: var(--warn-soft); color: var(--warn); }
 
 .guard { height: 4px; border-radius: 0; background: var(--surface-2); overflow: hidden; }
 .guard-fill {
