@@ -255,9 +255,12 @@ Devices, Suggestions, Savings, Settings with the security log, Raw data, the wee
 
 - Design for 360 px wide first. The page never scrolls sideways.
 - Below 920 px `wa-page` switches to its mobile view: the navigation moves into a drawer opened by the menu button, and the header holds the menu button, the brand and the outdoor temperature.
-- The selected room's aside shows only at 75rem and wider; narrower, the room opens in a drawer, from the bottom under 40rem.
-- Under 68rem the house model and the house now stack. Under 40rem the Heating and Demand groups stack and their radios share the width, and Rooms becomes a list of buttons.
+- Under 75rem the house model and the house now stack, and a selected room opens in a drawer. Under 40rem the Heating and Demand groups take the full width, Rooms becomes a list of buttons, and the drawer is a bottom sheet with the setpoint first.
 - Under 32rem the names in today's plan narrow to 5.25rem and the rooms-calling readout sits above its sentence.
 - The People cards and the week cards drop to one column; long names and reasons wrap and never push the layout wider.
 - In the legacy views: suggestion and device cards drop to one column; the savings chart fills its card and its table scrolls inside its own box; the Guide's contents sit above the text below 980 px, in as many 240 px columns as fit, and the Settings contents use 150 px columns; Settings rows stack their control under the help below 640 px; the setup wizard is at most 820 px wide and under 560 px the step line moves above Back and Next.
 - Touch targets are at least 44 px on touch screens (see Accessibility).
+
+## Checking rare states
+
+The online demo can't show every state. Under `npm run dev`, add `?fixture=<name>` (`web/src/dev-fixtures.js`): `relay-lost`, `safe-mode`, `dry-run`, `quiet`, `frost`, `not-linked`, `viewer`, `offline` and `worst` (fifteen rooms with long names and missing readings). Check a change in each that it touches, in light and dark and at 390 px. The build leaves the fixtures out, and a test checks.

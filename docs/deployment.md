@@ -596,5 +596,7 @@ To work on the UI with live reloading, run a Radiate server on port 8099 and the
 cd web && npm run dev
 ```
 
+Set `RADIATE_API` to point the dev server at another Radiate, for example `RADIATE_API=http://127.0.0.1:8170 npm run dev`. Add `?fixture=<name>` to the dev server's address to see states the demo can't produce: `relay-lost`, `safe-mode`, `dry-run`, `quiet`, `frost`, `not-linked`, `viewer`, `offline` and `worst` (fifteen rooms, long names, missing readings). They're in `web/src/dev-fixtures.js` and never reach the build.
+
 Everything the page loads is served with it. The Quicksand font comes from Fontsource (SIL Open Font License 1.1) and the icons are Font Awesome Free (icons CC BY 4.0), copied at build time into `src/radiate/web/icons`, only those the UI names. The UI never loads anything from the internet; only the online demo's worker loads Pyodide from jsDelivr.
 
