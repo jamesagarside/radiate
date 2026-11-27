@@ -1476,7 +1476,7 @@ let savingsOffered = null;
 async function renderSavingsSetup() {
   const offered = savingsWhy === "no household" && setupOffered ? await setupOffered : false;
   $("savings-setup-row").hidden = !offered;
-  lockLegacy([$("savings-setup")], $("savings-setup-lock"), "admin");
+  lock([$("savings-setup")], $("savings-setup-lock"), "admin");
 }
 // The setup replaces the House view, so go there first; Back then returns to it.
 $("savings-setup").addEventListener("click", (e) => {
@@ -1484,13 +1484,6 @@ $("savings-setup").addEventListener("click", (e) => {
   route(false);
   openSetup(e);
 });
-
-// Native buttons in the views not yet on Web Awesome components.
-function lockLegacy(controls, tag, needed) {
-  const locked = lock(controls, tag, needed);
-  for (const c of controls) if (c) c.disabled = locked;
-  return locked;
-}
 
 // Raw data view (data.js): every recorded series, to search, chart and download, with
 // the OpenTelemetry export's health, at #data. Its link shows once the server answers
