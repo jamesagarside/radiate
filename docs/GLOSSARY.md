@@ -407,6 +407,10 @@ Code: `LiveDriver.sensor_memory`, `LiveDriver.restore_sensor_memory`, `Device.re
 The learning gate that pauses a `normal` room while its own sensor is stale and its temperature comes from the TRV reading plus the TRV bias, and for the 15-minute slope window after the sensor is back. The TRV reads its radiator as much as the room. Set `learning.learn_on_trv_fallback: true` to learn from the TRV reading instead.
 Code: gate `sensor_stale`, `RoomState.fallback_until`, `LearningConfig.learn_on_trv_fallback`.
 
+**TRV fallback**:
+The temperature a `normal` room takes when its own sensor is stale, implausible or not heard 20 minutes after start: its TRV's reading plus the TRV bias. Not trusted for demand: the room holds the damp floor only (or its target if lower), override or not, with no optimum start or burn extension, and is a heat sink only when no other room can be. An internal-sensor room has no fallback: its TRV is its sensor.
+Code: `_effective_temperature`, `_source`, `_on_trv_fallback` in `radiate.core.decide`, `RoomState.source` (`trv`), reasons `demand.sensor_stale` and `boiler.fallback_sink`.
+
 **Disturbance**:
 A detected event that heats or cools a room for reasons other than its radiator. Each one closes a learning gate while it lasts.
 Code: `DisturbanceState`, `radiate.core.disturbance`.
@@ -473,7 +477,7 @@ The temperature a room's schedule, or an override, asks for now.
 Symbol `T_set`, °C. Code: `RoomInput.setpoint`.
 
 **Target**:
-The temperature Radiate is heating a room towards this tick: the setpoint, the next setpoint while preheating, the frost threshold in `off` and `frost` modes, or the damp floor during quiet hours.
+The temperature Radiate is heating a room towards this tick: the setpoint, the next setpoint while preheating, the frost threshold in `off` and `frost` modes, or the damp floor during quiet hours and on the TRV fallback.
 Code: `RoomState.target`, API `rooms[].target`.
 
 **Override**:

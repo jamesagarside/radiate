@@ -234,6 +234,10 @@ class Result:
     below_floor_min: float = 0.0
     # Simulated times of the measured relay starts, in seconds.
     relay_starts_at: list[float] = field(default_factory=list)
+    # Measured control minutes each room was calling for heat, and the lowest true
+    # temperature of each room, by room id.
+    calling_min: dict[str, int] = field(default_factory=dict)
+    room_min_c: dict[str, float] = field(default_factory=dict)
 
     @property
     def oil_litres(self) -> float:
@@ -335,6 +339,8 @@ def run(
     room_use: bool = False,
     outdoor_by_day: Sequence[float] | None = None,
     metering: bool = True,
+    dead_sensors: dict[str, float] | None = None,
+    stuck_trvs: dict[str, float] | None = None,
 ) -> Result:
     """One closed-loop run.
 
@@ -353,6 +359,11 @@ def run(
     day's outdoor mean in place of `outdoor_mean`. `metering`: Radiate sees the burner
     firing, as from the reference install's Shelly power reading; False for a relay
     without it. The defaults give the original runs, with metering.
+
+    `dead_sensors`: room id to the time its room sensor stops reporting; its last
+    reading stays, ageing. `stuck_trvs`: room id to the time its TRV's reported reading
+    stops changing, as a TRVZB still reporting the last external temperature it was
+    sent. Together they replay a room sensor going quiet on the reference install.
     """
     d = disturbances or Disturbances()
     cfg = cfg or house_config()
@@ -386,6 +397,7 @@ def run(
     saved: tuple[dict, float] | None = None  # engine state saved when Radiate went down
     handover = False
     reports = {rid: (house.rooms[rid].reported_t, 0.0) for rid in house.rooms}
+    stuck: dict[str, float | None] = {}  # TRV readings held by `stuck_trvs`
     dist_state: dict = {}
 
     relay_prev = False
@@ -415,6 +427,8 @@ def run(
             house.boiler.output_w = 0.0  # tank empty: the burner runs but makes no heat
 
         for rid, room in house.rooms.items():
+            if dead_sensors and rid in dead_sensors and house.now >= dead_sensors[rid]:
+                continue
             val, at = reports[rid]
             if room.reported_t != val or house.now - at >= REPORT_HEARTBEAT_S:
                 reports[rid] = (room.reported_t, house.now)
@@ -435,6 +449,10 @@ def run(
             )
             if controller == "radiate" and alive:
                 snap = _snapshot(house, reports, minute, optimum_start, plan, room_use, metering)
+                for rid, at in (stuck_trvs or {}).items():
+                    if house.now >= at:
+                        held = stuck.setdefault(rid, snap.rooms[rid].trv_temperature)
+                        snap.rooms[rid].trv_temperature = held
                 apply_quiet(cfg, snap)
                 if zigbee_down:
                     for inp in snap.rooms.values():
@@ -451,6 +469,10 @@ def run(
                 res.last_actions = actions
                 if st.rooms["lounge"].dist.fire and house.now >= measure_from:
                     res.fire_flagged_minutes += 1
+                if house.now >= measure_from:
+                    for rid, rs in st.rooms.items():
+                        if rs.calling:
+                            res.calling_min[rid] = res.calling_min.get(rid, 0) + 1
                 if actions.day_summary is not None:
                     res.day_summaries.append(actions.day_summary)
                 for code in {a.code for a in actions.alerts}:
@@ -487,6 +509,8 @@ def run(
             relay_changed_at = house.now
 
         if house.now >= measure_from:
+            for rid, room in house.rooms.items():
+                res.room_min_c[rid] = min(res.room_min_c.get(rid, math.inf), room.t)
             if plan is None:
                 _measure(house, res, minute, period_tracking, day, d)
             _measure_use(house, res, plan, weekday, minute, comfort=plan is not None)

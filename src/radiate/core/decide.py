@@ -296,6 +296,13 @@ def _source(cfg: RoomConfig, inp: RoomInput) -> str:
     return "trv"
 
 
+def _on_trv_fallback(rc: RoomConfig, rs: RoomState) -> bool:
+    """A `normal` room whose temperature comes from its TRV this tick: its room sensor
+    is stale, implausible or not heard since start (spec 7). Not trusted to call for
+    heat above the damp floor."""
+    return rc.role is RoomRole.NORMAL and rs.source == "trv" and rs.temperature is not None
+
+
 def _radiator_warm_k(cfg: RoomConfig, inp: RoomInput) -> float | None:
     """The TRV's reading above the room sensor's, when both are fresh: how warm the
     radiator beside the TRV is. None in an internal-sensor room."""
@@ -531,11 +538,18 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             # sensor readings only again.
             rs.fallback_until = now + SLOPE_WINDOW_S
         target = _target(cfg, snap, inp)
+        # No trusted room reading (spec 7): the TRV beside the radiator stands in, but
+        # its reading can sit still for hours (on the reference install it held a room
+        # "below target" with its valve open all evening). It may hold the room at the
+        # damp floor, never heat it to its setpoint or preheat it, override or not.
+        fallback = _on_trv_fallback(rc, rs)
+        if fallback:
+            target = min(target, bcfg.damp_floor_c)
         rs.preheating = False
         rs.deadline_s = None
         quiet = snap.mode is Mode.AUTO and _quiet(snap, inp)
         rs.quiet = _quiet(snap, inp)  # in any mode: no heat sink, valve held
-        if quiet and temp is not None and not rs.dist.fire:
+        if quiet and temp is not None and not rs.dist.fire and not fallback:
             # Quiet hours (spec 5.10): would this room be heating now without them?
             # Optimum start waits for their end, so it never starts during them.
             gap = inp.setpoint - temp
@@ -545,7 +559,13 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                 or _preheat_due(cfg, rs, inp, temp, out, eco)
             ):
                 quiet_held.add(rc.id)
-        if snap.mode is Mode.AUTO and not quiet and temp is not None and not rs.dist.fire:
+        if (
+            snap.mode is Mode.AUTO
+            and not quiet
+            and temp is not None
+            and not rs.dist.fire
+            and not fallback
+        ):
             start = _preheat_due(cfg, rs, inp, temp, out, eco)
             if start:
                 target = inp.next_setpoint
@@ -779,6 +799,8 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
             rs.calling = False
             rs.topup = rs.extend = False
         else:
+            if fallback:
+                rs.topup = rs.extend = False  # a heat sink only as the last resort
             gap = target - temp
             if not rs.calling and gap > hyst:
                 rs.calling = True
@@ -1102,6 +1124,21 @@ def decide(cfg: HouseConfig, snap: Snapshot, st: EngineState) -> Actions:
                     values={"until_min": float(until), "floor_c": floor},
                 )
             )
+        if _on_trv_fallback(rc, rs):
+            # Last, so it is the room's reason in the API: why it heats no further.
+            why = (
+                "room sensor reading not trusted"
+                if rc.id in implausible
+                else "no reading from its room sensor"
+            )
+            reasons.append(
+                Reason(
+                    "demand.sensor_stale",
+                    f"{rc.name}: {why}, heating only below {rs.target:.0f} °C",
+                    rc.id,
+                    values={"floor_c": rs.target},
+                )
+            )
 
     # --- 7: hot-water store --------------------------------------------------------------
     store = snap.store_boost or any(a <= snap.minute_of_day < b for a, b in cfg.store.windows)
@@ -1373,10 +1410,13 @@ def _topup_candidates(
     by_use: bool = False,
     quiet: bool = False,
     prefer: tuple[str, ...] = (),
+    fallback: bool = False,
 ) -> list[RoomConfig]:
     """Rooms that may be topped up or opened as a heat sink. A room in quiet hours is
     left out (spec 5.10); with `quiet`, only rooms in quiet hours are given, those with
-    a quiet window of their own last. Rooms in `prefer` come first, in its order."""
+    a quiet window of their own last. A room on its TRV fallback is left out (spec 7);
+    with `fallback`, only those rooms are given, quiet or not. Rooms in `prefer` come
+    first, in its order."""
     out = []
     for rc in cfg.rooms:
         if not rc.controllable:
@@ -1389,7 +1429,8 @@ def _topup_candidates(
             or rs.dist.fire
             or rs.temperature is None
             or not inp.trv_available
-            or rs.quiet is not quiet
+            or _on_trv_fallback(rc, rs) is not fallback
+            or (not fallback and rs.quiet is not quiet)
         ):
             continue
         out.append(rc)
@@ -1447,6 +1488,22 @@ def _ensure_sink(
             Reason(
                 "boiler.quiet_sink",
                 f"{rc.name}: opened in quiet hours as the last heat sink for the burner",
+                rc.id,
+            )
+        )
+        if sink() >= cfg.sink_min:
+            return
+    # A room without a trusted reading (spec 7) is never a heat sink for its own sake,
+    # only when nothing else is left, for the same reason.
+    for rc in _topup_candidates(cfg, snap, st, by_use=eco, prefer=prefer, fallback=True):
+        rs = st.rooms[rc.id]
+        rs.topup = True
+        rs.topup_base = rs.temperature
+        reasons.append(
+            Reason(
+                "boiler.fallback_sink",
+                f"{rc.name}: opened as the last heat sink for the burner, "
+                "its room sensor not trusted",
                 rc.id,
             )
         )
