@@ -77,6 +77,8 @@ Icons are Font Awesome Free, solid style (icons CC BY 4.0; each SVG keeps its li
 
 An icon that carries meaning has a `label`; a decorative one beside its text has none.
 
+The browser tab icon is the same flame, white on the brand orange (`#bf5712`, Web Awesome's bright orange 50) in a rounded square: `web/favicon.svg`, with `web/apple-touch-icon.png` (180 px) for home screens. Both pages link them; Vite emits them to `static/assets/`.
+
 ## Layout and shape
 
 | Piece | How it is done |
