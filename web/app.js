@@ -794,6 +794,12 @@ function lane(el, intervals, window) {
   }
 }
 
+// The live driver raises `driver.shelly` when it can't reach the boiler relay. Radiate
+// then can neither see nor switch the boiler, so nothing it shows about the burner holds.
+function relayLost(s) {
+  return !s.telemetry?.simulated && (s.alert_details ?? []).some((a) => a.code === "driver.shelly");
+}
+
 function render(s) {
   last = s;
   const b = s.boiler;
@@ -808,8 +814,9 @@ function render(s) {
   renderDemand(s.settings);
 
   const chip = $("boiler-chip");
-  chip.textContent = { idle: "Idle", lead: "Opening valves", firing: "Firing", rest: "Resting" }[b.state];
-  chip.dataset.state = b.state;
+  const lost = relayLost(s);
+  chip.textContent = lost ? "Not reachable" : { idle: "Idle", lead: "Opening valves", firing: "Firing", rest: "Resting" }[b.state];
+  chip.dataset.state = lost ? "lost" : b.state;
   const guard = $("guard");
   let frac = 0;
   if (firing) frac = Math.min(1, b.burn_elapsed_s / minBurn);
@@ -826,6 +833,7 @@ function render(s) {
   $("s-starts").textContent = `${b.starts_last_hour}`;
   $("s-pred").textContent = b.predicted_burn_min ? `${b.predicted_burn_min} min` : "–";
   renderAccounting(s);
+  if (lost) $("s-today-sub").textContent = "Not counted while the relay can't be reached";
   $("s-supply").textContent = b.supply != null ? b.supply.toFixed(2) : "–";
   renderShortCycle(b);
 
@@ -863,6 +871,11 @@ function statusLine(s, minBurn) {
   if (s.telemetry && !s.telemetry.simulated && s.telemetry.boiler_linked === false) {
     if (!calling.length) return "No room needs heat. The boiler switch isn't linked yet.";
     return `${names(calling)} ${calling.length === 1 ? "wants" : "want"} heat. The boiler switch isn't linked yet, so the boiler follows its own timer.`;
+  }
+  // The watchdog script on the Shelly takes over once Radiate's heartbeat stops, so the
+  // boiler may be running on its fallback windows even though Radiate shows no burns.
+  if (relayLost(s)) {
+    return "Radiate can't reach the boiler relay, so it can't see or switch the boiler. If its watchdog is installed, the Shelly runs the heating on its own schedule until Radiate reconnects.";
   }
   const on = `Burner on for ${mins(b.burn_elapsed_s)}`;
   const extend = (list) => `topping up ${names(list)} to save a second burn soon`;
